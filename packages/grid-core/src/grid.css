@@ -1,0 +1,213 @@
+.hgrid {
+  --hgrid-border-color: #d5dbe3;
+  --hgrid-bg: #ffffff;
+  --hgrid-text: #1f2937;
+  --hgrid-header-bg: #f8fafc;
+  --hgrid-header-height: 32px;
+  --hgrid-v-scrollbar-width: 0px;
+  --hgrid-h-scrollbar-height: 0px;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hgrid-border-color);
+  background-color: var(--hgrid-bg);
+  color: var(--hgrid-text);
+  font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.hgrid__header {
+  display: grid;
+  box-sizing: border-box;
+  padding-right: var(--hgrid-v-scrollbar-width);
+  background-color: var(--hgrid-header-bg);
+  border-bottom: 1px solid var(--hgrid-border-color);
+}
+
+.hgrid__header-left,
+.hgrid__header-center,
+.hgrid__header-right,
+.hgrid__body-left,
+.hgrid__body-center,
+.hgrid__body-right {
+  min-width: 0;
+}
+
+.hgrid__header-left,
+.hgrid__header-right,
+.hgrid__body-left,
+.hgrid__body-right {
+  position: relative;
+  overflow: hidden;
+}
+
+.hgrid__header-center {
+  position: relative;
+  height: var(--hgrid-header-height);
+  overflow: hidden;
+}
+
+.hgrid__header-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.hgrid__header-row {
+  display: flex;
+  height: var(--hgrid-header-height);
+}
+
+.hgrid__header-row--center {
+  position: relative;
+}
+
+.hgrid__header-cell {
+  box-sizing: border-box;
+  height: var(--hgrid-header-height);
+  padding: 8px;
+  border-right: 1px solid var(--hgrid-border-color);
+  border-bottom: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-color: var(--hgrid-header-bg);
+}
+
+.hgrid__header-cell--center {
+  position: absolute;
+  top: 0;
+}
+
+.hgrid__body {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hgrid__body-center {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+}
+
+.hgrid__viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: var(--hgrid-h-scrollbar-height);
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.hgrid__body-left,
+.hgrid__body-right {
+  position: absolute;
+  top: 0;
+  bottom: var(--hgrid-h-scrollbar-height);
+  z-index: 2;
+  background-color: var(--hgrid-bg);
+}
+
+.hgrid__body-left {
+  left: 0;
+}
+
+.hgrid__body-right {
+  right: 0;
+}
+
+.hgrid__spacer {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hgrid__v-scroll {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: var(--hgrid-h-scrollbar-height);
+  width: var(--hgrid-v-scrollbar-width);
+  overflow-x: hidden;
+  overflow-y: auto;
+  z-index: 4;
+  background-color: transparent;
+}
+
+.hgrid__v-spacer {
+  width: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hgrid__h-scroll {
+  position: absolute;
+  bottom: 0;
+  height: var(--hgrid-h-scrollbar-height);
+  overflow-x: auto;
+  overflow-y: hidden;
+  z-index: 3;
+  background-color: transparent;
+}
+
+.hgrid__h-spacer {
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hgrid__rows-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.hgrid__rows-viewport--left,
+.hgrid__rows-viewport--right {
+  left: 0;
+}
+
+.hgrid__rows-layer {
+  position: relative;
+}
+
+.hgrid__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  border-bottom: 1px solid var(--hgrid-border-color);
+  box-sizing: border-box;
+  background-color: var(--hgrid-bg);
+}
+
+.hgrid__row:nth-child(even) {
+  background-color: #fcfdff;
+}
+
+.hgrid__cell {
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border-right: 1px solid var(--hgrid-border-color);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hgrid__cell--center {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+
+.hgrid__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

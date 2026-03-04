@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 7 - Scrollbar Policy</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      #grid {
+        width: 760px;
+        margin-top: 12px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        padding: 6px 10px;
+        border: 1px solid #b7c3d4;
+        background: #f8fafc;
+        cursor: pointer;
+      }
+
+      #log {
+        margin-top: 12px;
+        padding: 8px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 7 - Scrollbar Policy</h1>
+    <div class="controls">
+      <button id="policy-always">policy always/always</button>
+      <button id="policy-auto">policy auto/auto</button>
+      <button id="policy-hidden">policy hidden/hidden</button>
+      <button id="scroll-x">scroll x +160</button>
+      <button id="scroll-y">scroll y +600</button>
+      <button id="inspect">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 280, type: 'text' },
+        { id: 'status', header: 'Status', width: 220, type: 'text' },
+        { id: 'region', header: 'Region', width: 240, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 240, type: 'date', pinned: 'right' }
+      ];
+
+      const rowData = Array.from({ length: 1000 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        status: index % 2 === 0 ? 'active' : 'idle',
+        region: ['Seoul', 'Busan', 'Incheon'][index % 3],
+        updatedAt: new Date(Date.now() - index * 60000).toISOString()
+      }));
+
+      const logElement = document.getElementById('log');
+      const writeLog = (message) => {
+        logElement.textContent = message;
+      };
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      const viewport = document.querySelector('.hgrid__viewport');
+      const verticalScroll = document.querySelector('.hgrid__v-scroll') || viewport;
+      const hScroll = document.querySelector('.hgrid__h-scroll');
+
+      const applyPolicy = (vertical, horizontal) => {
+        grid.setOptions({
+          scrollbarPolicy: {
+            vertical,
+            horizontal
+          }
+        });
+        writeLog(`policy set: vertical=${vertical}, horizontal=${horizontal}`);
+      };
+
+      document.getElementById('policy-always').addEventListener('click', () => {
+        applyPolicy('always', 'always');
+      });
+
+      document.getElementById('policy-auto').addEventListener('click', () => {
+        applyPolicy('auto', 'auto');
+      });
+
+      document.getElementById('policy-hidden').addEventListener('click', () => {
+        applyPolicy('hidden', 'hidden');
+      });
+
+      document.getElementById('scroll-x').addEventListener('click', () => {
+        hScroll.scrollLeft += 160;
+        hScroll.dispatchEvent(new Event('scroll'));
+      });
+
+      document.getElementById('scroll-y').addEventListener('click', () => {
+        if (!verticalScroll) {
+          return;
+        }
+        verticalScroll.scrollTop += 600;
+        verticalScroll.dispatchEvent(new Event('scroll'));
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog(
+          JSON.stringify({
+            viewportOverflowY: viewport ? viewport.style.overflowY : null,
+            verticalOverflowY: verticalScroll ? verticalScroll.style.overflowY : null,
+            hScrollOverflowX: hScroll.style.overflowX,
+            hScrollDisplay: hScroll.style.display,
+            hScrollLeft: hScroll.scrollLeft,
+            verticalScrollTop: verticalScroll ? verticalScroll.scrollTop : null,
+            state: grid.getState()
+          })
+        );
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "module": "ESNext",
+    "paths": {
+      "@hgrid/grid-core": ["../grid-core/src"]
+    },
+    "target": "ES2020"
+  },
+  "include": ["src"]
+}

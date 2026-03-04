@@ -1,0 +1,22 @@
+{
+  "name": "hgrid2",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.6.0",
+  "scripts": {
+    "build": "pnpm --filter @hgrid/grid-core build",
+    "typecheck": "pnpm --filter @hgrid/grid-core typecheck",
+    "test": "pnpm --filter @hgrid/grid-core test",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:csp": "node scripts/csp-smoke-test.mjs",
+    "check:naming": "node scripts/check-naming.mjs",
+    "bench": "node scripts/bench.mjs",
+    "ci:phase0": "pnpm typecheck && pnpm build && pnpm test && pnpm test:e2e && pnpm verify:examples && pnpm test:csp && pnpm check:naming && pnpm bench",
+    "new:example": "node scripts/new-example.mjs",
+    "verify:examples": "node scripts/verify-examples.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.51.1",
+    "typescript": "^5.6.3"
+  }
+}

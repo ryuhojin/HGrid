@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'"
+    />
+    <title>CSP Smoke Test</title>
+    <link rel="stylesheet" href="/packages/grid-core/dist/grid.css" />
+    <link rel="stylesheet" href="/tests/fixtures/csp-smoke.css" />
+  </head>
+  <body>
+    <h1>CSP Smoke Test</h1>
+    <p id="status" data-status="init">init</p>
+    <div id="grid"></div>
+
+    <script src="/packages/grid-core/dist/grid.umd.js"></script>
+    <script src="/tests/fixtures/csp-smoke.js"></script>
+  </body>
+</html>

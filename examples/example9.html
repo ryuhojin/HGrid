@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 9 - Vertical Virtualization</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        padding: 6px 10px;
+        border: 1px solid #b7c3d4;
+        background: #f8fafc;
+        cursor: pointer;
+      }
+
+      #grid {
+        width: 760px;
+        margin-top: 12px;
+      }
+
+      #log {
+        margin-top: 12px;
+        padding: 8px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 9 - Vertical Virtualization</h1>
+    <div class="controls">
+      <button id="set-1m">set rowCount 1M</button>
+      <button id="set-10m">set rowCount 10M</button>
+      <button id="set-100m">set rowCount 100M</button>
+      <button id="jump-bottom">jump bottom</button>
+      <button id="inspect">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const ROW_HEIGHT = 28;
+      const OVERSCAN = 8;
+      const VIEWPORT_HEIGHT = 420;
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 240, type: 'text' },
+        { id: 'status', header: 'Status', width: 180, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const gridElement = document.getElementById('grid');
+      const logElement = document.getElementById('log');
+      let currentRowCount = 1_000_000;
+      let grid = null;
+
+      const createLargeProvider = (rowCount) => {
+        return {
+          getRowCount() {
+            return rowCount;
+          },
+          getRowKey(dataIndex) {
+            return dataIndex;
+          },
+          getValue(dataIndex, columnId) {
+            if (columnId === 'id') {
+              return dataIndex + 1;
+            }
+            if (columnId === 'name') {
+              return 'Customer-' + (dataIndex + 1);
+            }
+            if (columnId === 'status') {
+              return dataIndex % 2 === 0 ? 'active' : 'idle';
+            }
+            if (columnId === 'updatedAt') {
+              return '2026-03-04T00:00:00.000Z';
+            }
+            return '';
+          },
+          setValue() {},
+          applyTransactions() {},
+          getRow(dataIndex) {
+            return {
+              id: dataIndex + 1,
+              name: 'Customer-' + (dataIndex + 1),
+              status: dataIndex % 2 === 0 ? 'active' : 'idle',
+              updatedAt: '2026-03-04T00:00:00.000Z'
+            };
+          }
+        };
+      };
+
+      const getVerticalScroll = () => {
+        return document.querySelector('.hgrid__v-scroll') || document.querySelector('.hgrid__viewport');
+      };
+
+      const writeLog = (value) => {
+        logElement.textContent = typeof value === 'string' ? value : JSON.stringify(value);
+      };
+
+      const inspect = () => {
+        const verticalScroll = getVerticalScroll();
+        const firstCenterIdCell = document.querySelector('.hgrid__row--center .hgrid__cell[data-column-id="id"]');
+        const centerRowDom = document.querySelectorAll('.hgrid__row--center').length;
+        const totalRowDom = document.querySelectorAll('.hgrid__row').length;
+        const expectedPoolSize = Math.ceil(VIEWPORT_HEIGHT / ROW_HEIGHT) + OVERSCAN * 2;
+        const state = grid ? grid.getState() : null;
+
+        writeLog({
+          rowCount: currentRowCount,
+          centerRowDom,
+          totalRowDom,
+          expectedPoolSize,
+          firstVisibleId: firstCenterIdCell ? Number(firstCenterIdCell.textContent) : null,
+          scrollTopVirtual: state ? state.scrollTop : null,
+          scrollTopNative: verticalScroll ? verticalScroll.scrollTop : null
+        });
+      };
+
+      const mountGrid = (rowCount) => {
+        currentRowCount = rowCount;
+        if (grid) {
+          grid.destroy();
+        }
+        grid = new HGrid.Grid(gridElement, {
+          columns,
+          dataProvider: createLargeProvider(rowCount),
+          height: VIEWPORT_HEIGHT,
+          rowHeight: ROW_HEIGHT,
+          overscan: OVERSCAN
+        });
+        requestAnimationFrame(() => inspect());
+      };
+
+      document.getElementById('set-1m').addEventListener('click', () => {
+        mountGrid(1_000_000);
+      });
+
+      document.getElementById('set-10m').addEventListener('click', () => {
+        mountGrid(10_000_000);
+      });
+
+      document.getElementById('set-100m').addEventListener('click', () => {
+        mountGrid(100_000_000);
+      });
+
+      document.getElementById('jump-bottom').addEventListener('click', () => {
+        if (!grid) {
+          return;
+        }
+        grid.setState({
+          scrollTop: currentRowCount * ROW_HEIGHT
+        });
+        requestAnimationFrame(() => inspect());
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        inspect();
+      });
+
+      mountGrid(currentRowCount);
+    </script>
+  </body>
+</html>

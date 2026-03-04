@@ -1,0 +1,16 @@
+body {
+  margin: 20px;
+  font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+}
+
+#grid {
+  width: 720px;
+}
+
+#status[data-status="ok"] {
+  color: #0f766e;
+}
+
+#status[data-status="error"] {
+  color: #b91c1c;
+}

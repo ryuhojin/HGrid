@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 11 - Row Cell Pooling</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        padding: 6px 10px;
+        border: 1px solid #b7c3d4;
+        background: #f8fafc;
+        cursor: pointer;
+      }
+
+      #grid {
+        width: 760px;
+        margin-top: 12px;
+      }
+
+      #log {
+        margin-top: 12px;
+        padding: 8px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 11 - Row Cell Pooling</h1>
+    <div class="controls">
+      <button id="inspect">inspect</button>
+      <button id="stress-120">stress x120 frames</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const ROW_COUNT = 1_000_000;
+      const CENTER_COLUMN_COUNT = 240;
+      const ROW_HEIGHT = 28;
+
+      const columns = [{ id: 'rowId', header: 'rowId', width: 100, type: 'number', pinned: 'left' }];
+      for (let index = 0; index < CENTER_COLUMN_COUNT; index += 1) {
+        columns.push({
+          id: 'c' + index,
+          header: 'C' + index,
+          width: 96 + (index % 4) * 16,
+          type: 'text'
+        });
+      }
+      columns.push({ id: 'checksum', header: 'checksum', width: 130, type: 'number', pinned: 'right' });
+
+      const createProvider = () => ({
+        getRowCount() {
+          return ROW_COUNT;
+        },
+        getRowKey(dataIndex) {
+          return dataIndex;
+        },
+        getValue(dataIndex, columnId) {
+          if (columnId === 'rowId') {
+            return dataIndex + 1;
+          }
+          if (columnId === 'checksum') {
+            return (dataIndex * 17) % 100000;
+          }
+          if (columnId.charAt(0) === 'c') {
+            return columnId + '-R' + (dataIndex + 1);
+          }
+          return '';
+        },
+        setValue() {},
+        applyTransactions() {}
+      });
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: createProvider(),
+        rowHeight: ROW_HEIGHT,
+        height: 420,
+        overscan: 8,
+        overscanCols: 3
+      });
+
+      const logElement = document.getElementById('log');
+      const verticalScroll = () => document.querySelector('.hgrid__v-scroll') || document.querySelector('.hgrid__viewport');
+      const horizontalScroll = () => document.querySelector('.hgrid__h-scroll');
+
+      let baseline = null;
+
+      const writeLog = (value) => {
+        logElement.textContent = JSON.stringify(value);
+      };
+
+      const inspect = (label) => {
+        const root = document.querySelector('.hgrid');
+        const vScroll = verticalScroll();
+        const hScroll = horizontalScroll();
+        const firstCenterRow = document.querySelector('.hgrid__row--center');
+        const firstIdCell = document.querySelector('.hgrid__row--left .hgrid__cell[data-column-id="rowId"]');
+        const snapshot = {
+          label,
+          rowCount: ROW_COUNT,
+          totalNodeCount: root ? root.querySelectorAll('*').length : 0,
+          rowNodeCount: document.querySelectorAll('.hgrid__row').length,
+          centerRowNodeCount: document.querySelectorAll('.hgrid__row--center').length,
+          centerCellPool: firstCenterRow ? firstCenterRow.querySelectorAll('.hgrid__cell--center').length : 0,
+          headerCenterPool: document.querySelectorAll('.hgrid__header-cell--center').length,
+          firstVisibleId: firstIdCell ? Number(firstIdCell.textContent) : null,
+          scrollTop: vScroll ? vScroll.scrollTop : null,
+          scrollLeft: hScroll ? hScroll.scrollLeft : null
+        };
+
+        if (!baseline) {
+          baseline = snapshot;
+        }
+
+        snapshot.totalNodeDelta = snapshot.totalNodeCount - baseline.totalNodeCount;
+        snapshot.rowNodeDelta = snapshot.rowNodeCount - baseline.rowNodeCount;
+        snapshot.centerRowNodeDelta = snapshot.centerRowNodeCount - baseline.centerRowNodeCount;
+        snapshot.centerCellPoolDelta = snapshot.centerCellPool - baseline.centerCellPool;
+        snapshot.headerCenterPoolDelta = snapshot.headerCenterPool - baseline.headerCenterPool;
+        writeLog(snapshot);
+      };
+
+      const runStress = (frameCount) => {
+        const vScroll = verticalScroll();
+        const hScroll = horizontalScroll();
+        if (!vScroll || !hScroll) {
+          return;
+        }
+
+        const maxTop = Math.max(0, vScroll.scrollHeight - vScroll.clientHeight);
+        const maxLeft = Math.max(0, hScroll.scrollWidth - hScroll.clientWidth);
+        let frame = 0;
+
+        const step = () => {
+          frame += 1;
+
+          if (maxTop > 0) {
+            vScroll.scrollTop = (frame * 173) % maxTop;
+            vScroll.dispatchEvent(new Event('scroll'));
+          }
+
+          if (maxLeft > 0) {
+            hScroll.scrollLeft = (frame * 137) % maxLeft;
+            hScroll.dispatchEvent(new Event('scroll'));
+          }
+
+          if (frame < frameCount) {
+            requestAnimationFrame(step);
+            return;
+          }
+
+          requestAnimationFrame(() => inspect('stress-complete'));
+        };
+
+        requestAnimationFrame(step);
+      };
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        inspect('inspect');
+      });
+
+      document.getElementById('stress-120').addEventListener('click', () => {
+        runStress(120);
+      });
+
+      requestAnimationFrame(() => inspect('initial'));
+    </script>
+  </body>
+</html>

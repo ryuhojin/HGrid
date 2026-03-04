@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 10 - Horizontal Virtualization</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        padding: 6px 10px;
+        border: 1px solid #b7c3d4;
+        background: #f8fafc;
+        cursor: pointer;
+      }
+
+      #grid {
+        width: 760px;
+        margin-top: 12px;
+      }
+
+      #log {
+        margin-top: 12px;
+        padding: 8px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 10 - Horizontal Virtualization</h1>
+    <div class="controls">
+      <button id="jump-2k">x jump 2,000</button>
+      <button id="jump-8k">x jump 8,000</button>
+      <button id="jump-end">x jump end</button>
+      <button id="inspect">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const centerColumns = Array.from({ length: 400 }, (_, index) => ({
+        id: 'c' + index,
+        header: 'Column ' + index,
+        width: 100 + (index % 3) * 20,
+        type: 'text'
+      }));
+
+      const columns = [
+        { id: 'leftPinned', header: 'Pinned Left', width: 130, type: 'text', pinned: 'left' },
+        ...centerColumns,
+        { id: 'rightPinned', header: 'Pinned Right', width: 140, type: 'text', pinned: 'right' }
+      ];
+
+      const rowData = Array.from({ length: 500 }, (_, rowIndex) => {
+        const row = {
+          leftPinned: 'L-' + (rowIndex + 1),
+          rightPinned: 'R-' + (rowIndex + 1)
+        };
+        for (let colIndex = 0; colIndex < centerColumns.length; colIndex += 1) {
+          row['c' + colIndex] = 'V-' + (rowIndex + 1) + '-' + colIndex;
+        }
+        return row;
+      });
+
+      const logElement = document.getElementById('log');
+      const writeLog = (value) => {
+        logElement.textContent = typeof value === 'string' ? value : JSON.stringify(value);
+      };
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 8,
+        overscanCols: 3
+      });
+
+      const horizontalScroll = document.querySelector('.hgrid__h-scroll');
+
+      const inspect = () => {
+        const firstCenterCell = Array.from(document.querySelectorAll('.hgrid__row--center .hgrid__cell--center')).find(
+          (cell) => cell.style.display !== 'none'
+        );
+        const firstCenterRow = document.querySelector('.hgrid__row--center');
+        const centerCellPool = firstCenterRow ? firstCenterRow.querySelectorAll('.hgrid__cell--center').length : 0;
+        const headerCenterPool = document.querySelectorAll('.hgrid__header-cell--center').length;
+        writeLog({
+          centerColumnCount: centerColumns.length,
+          centerCellPool,
+          headerCenterPool,
+          firstVisibleColumnId: firstCenterCell ? firstCenterCell.getAttribute('data-column-id') : null,
+          scrollLeft: horizontalScroll ? horizontalScroll.scrollLeft : null,
+          scrollMax: horizontalScroll ? horizontalScroll.scrollWidth - horizontalScroll.clientWidth : null
+        });
+      };
+
+      document.getElementById('jump-2k').addEventListener('click', () => {
+        if (!horizontalScroll) {
+          return;
+        }
+        horizontalScroll.scrollLeft = 2000;
+        horizontalScroll.dispatchEvent(new Event('scroll'));
+        requestAnimationFrame(() => inspect());
+      });
+
+      document.getElementById('jump-8k').addEventListener('click', () => {
+        if (!horizontalScroll) {
+          return;
+        }
+        horizontalScroll.scrollLeft = 8000;
+        horizontalScroll.dispatchEvent(new Event('scroll'));
+        requestAnimationFrame(() => inspect());
+      });
+
+      document.getElementById('jump-end').addEventListener('click', () => {
+        if (!horizontalScroll) {
+          return;
+        }
+        horizontalScroll.scrollLeft = horizontalScroll.scrollWidth;
+        horizontalScroll.dispatchEvent(new Event('scroll'));
+        requestAnimationFrame(() => inspect());
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        inspect();
+      });
+
+      inspect();
+    </script>
+  </body>
+</html>

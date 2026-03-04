@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 4 - Data Provider</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      #grid {
+        width: 760px;
+        margin-top: 12px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        padding: 6px 10px;
+        border: 1px solid #b7c3d4;
+        background: #f8fafc;
+        cursor: pointer;
+      }
+
+      #log {
+        margin-top: 12px;
+        padding: 8px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 4 - Data Provider</h1>
+    <div class="controls">
+      <button id="swap-provider">swap dataProvider</button>
+      <button id="apply-tx">applyTransactions</button>
+      <button id="update-cell">setValue</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const primaryProvider = new HGrid.LocalDataProvider(
+        Array.from({ length: 800 }, (_, index) => ({
+          id: index + 1,
+          name: 'Local-' + (index + 1),
+          status: index % 2 === 0 ? 'active' : 'idle',
+          updatedAt: new Date(Date.now() - index * 60000).toISOString()
+        }))
+      );
+
+      const fallbackProvider = new HGrid.LocalDataProvider(
+        Array.from({ length: 800 }, (_, index) => ({
+          id: index + 10001,
+          name: 'Backup-' + (index + 1),
+          status: index % 2 === 0 ? 'queued' : 'sleep',
+          updatedAt: new Date(Date.now() - index * 90000).toISOString()
+        }))
+      );
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 240, type: 'text' },
+        { id: 'status', header: 'Status', width: 180, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const logElement = document.getElementById('log');
+      const writeLog = (message) => {
+        logElement.textContent = message;
+      };
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: primaryProvider,
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      let isPrimary = true;
+
+      document.getElementById('swap-provider').addEventListener('click', () => {
+        isPrimary = !isPrimary;
+        grid.setOptions({
+          dataProvider: isPrimary ? primaryProvider : fallbackProvider
+        });
+        writeLog(`setOptions({ dataProvider: ${isPrimary ? 'primary' : 'fallback'} })`);
+      });
+
+      document.getElementById('apply-tx').addEventListener('click', () => {
+        primaryProvider.applyTransactions([
+          { type: 'add', rows: [{ id: 90001, name: 'Tx-Added', status: 'new', updatedAt: new Date().toISOString() }], index: 0 },
+          { type: 'updateCell', index: 1, columnId: 'status', value: 'patched' }
+        ]);
+        grid.setOptions({ dataProvider: primaryProvider });
+        writeLog('primaryProvider.applyTransactions() applied');
+      });
+
+      document.getElementById('update-cell').addEventListener('click', () => {
+        primaryProvider.setValue(0, 'name', 'Mutated-Name');
+        grid.setOptions({ dataProvider: primaryProvider });
+        writeLog('primaryProvider.setValue(0, name, Mutated-Name) applied');
+      });
+
+      grid.on('cellClick', (event) => {
+        writeLog(`cellClick row=${event.rowIndex} col=${event.columnId} value=${String(event.value)}`);
+      });
+    </script>
+  </body>
+</html>

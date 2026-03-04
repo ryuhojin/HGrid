@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES5",
+    "module": "ESNext",
+    "lib": ["DOM", "ES2015"],
+    "declaration": false,
+    "declarationMap": false,
+    "rootDir": ".",
+    "types": ["vitest/globals"]
+  },
+  "include": ["src", "test"]
+}

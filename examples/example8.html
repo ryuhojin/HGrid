@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 8 - Scroll Orchestration</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      #grid-shell {
+        width: 860px;
+      }
+
+      #grid {
+        width: 100%;
+        margin-top: 12px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        padding: 6px 10px;
+        border: 1px solid #b7c3d4;
+        background: #f8fafc;
+        cursor: pointer;
+      }
+
+      #log {
+        margin-top: 12px;
+        padding: 8px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 8 - Scroll Orchestration</h1>
+    <div class="controls">
+      <button id="stress-wheel">stress wheel (pinned+center)</button>
+      <button id="pin-both">pin both</button>
+      <button id="pin-swap">pin swap</button>
+      <button id="pin-clear">pin clear</button>
+      <button id="resize-narrow">resize 640</button>
+      <button id="resize-wide">resize 920</button>
+      <button id="inspect">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid-shell">
+      <div id="grid"></div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const baseColumns = [
+        { id: 'id', header: 'ID', width: 110, type: 'number' },
+        { id: 'name', header: 'Name', width: 240, type: 'text' },
+        { id: 'email', header: 'Email', width: 300, type: 'text' },
+        { id: 'status', header: 'Status', width: 160, type: 'text' },
+        { id: 'region', header: 'Region', width: 180, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 240, type: 'date' },
+        { id: 'owner', header: 'Owner', width: 200, type: 'text' }
+      ];
+
+      const rowData = Array.from({ length: 5000 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        email: 'customer' + (index + 1) + '@example.com',
+        status: index % 2 === 0 ? 'active' : 'idle',
+        region: ['Seoul', 'Busan', 'Incheon', 'Daegu'][index % 4],
+        score: (index * 13) % 1000,
+        updatedAt: new Date(Date.now() - index * 120000).toISOString(),
+        owner: ['Kim', 'Lee', 'Park', 'Choi'][index % 4]
+      }));
+
+      const shellElement = document.getElementById('grid-shell');
+      const logElement = document.getElementById('log');
+      let pinMode = 'both';
+
+      const buildColumns = (mode) => {
+        return baseColumns.map((column) => {
+          if (mode === 'both') {
+            if (column.id === 'id') {
+              return { ...column, pinned: 'left' };
+            }
+            if (column.id === 'owner') {
+              return { ...column, pinned: 'right' };
+            }
+            return { ...column, pinned: undefined };
+          }
+
+          if (mode === 'swap') {
+            if (column.id === 'status') {
+              return { ...column, pinned: 'left' };
+            }
+            if (column.id === 'updatedAt') {
+              return { ...column, pinned: 'right' };
+            }
+            return { ...column, pinned: undefined };
+          }
+
+          return { ...column, pinned: undefined };
+        });
+      };
+
+      const writeLog = (value) => {
+        logElement.textContent = typeof value === 'string' ? value : JSON.stringify(value);
+      };
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: buildColumns(pinMode),
+        rowData,
+        height: 380,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      const getElements = () => {
+        return {
+          leftCell: document.querySelector('.hgrid__row--left .hgrid__cell'),
+          centerCell: document.querySelector('.hgrid__row--center .hgrid__cell'),
+          hScroll: document.querySelector('.hgrid__h-scroll'),
+          vScroll: document.querySelector('.hgrid__v-scroll') || document.querySelector('.hgrid__viewport'),
+          headerViewport: document.querySelector('.hgrid__header-viewport'),
+          centerViewport: document.querySelector('.hgrid__rows-viewport--center'),
+          leftViewport: document.querySelector('.hgrid__rows-viewport--left')
+        };
+      };
+
+      const inspectState = () => {
+        const elements = getElements();
+        const hScroll = elements.hScroll;
+        const vScroll = elements.vScroll;
+        if (!hScroll || !vScroll) {
+          return;
+        }
+
+        writeLog({
+          pinMode,
+          shellWidth: shellElement.clientWidth,
+          scrollLeft: hScroll.scrollLeft,
+          scrollTop: vScroll.scrollTop,
+          hMax: hScroll.scrollWidth - hScroll.clientWidth,
+          vMax: vScroll.scrollHeight - vScroll.clientHeight,
+          headerTransform: elements.headerViewport ? elements.headerViewport.style.transform : '',
+          centerTransform: elements.centerViewport ? elements.centerViewport.style.transform : '',
+          leftTransform: elements.leftViewport ? elements.leftViewport.style.transform : '',
+          state: grid.getState()
+        });
+      };
+
+      const applyPin = (mode) => {
+        pinMode = mode;
+        grid.setColumns(buildColumns(mode));
+        inspectState();
+      };
+
+      document.getElementById('stress-wheel').addEventListener('click', () => {
+        const elements = getElements();
+        if (!elements.leftCell || !elements.centerCell) {
+          return;
+        }
+
+        for (let index = 0; index < 80; index += 1) {
+          const source = index % 2 === 0 ? elements.leftCell : elements.centerCell;
+          source.dispatchEvent(
+            new WheelEvent('wheel', {
+              deltaX: 26,
+              deltaY: 8,
+              bubbles: true,
+              cancelable: true
+            })
+          );
+        }
+        requestAnimationFrame(() => inspectState());
+      });
+
+      document.getElementById('pin-both').addEventListener('click', () => {
+        applyPin('both');
+      });
+
+      document.getElementById('pin-swap').addEventListener('click', () => {
+        applyPin('swap');
+      });
+
+      document.getElementById('pin-clear').addEventListener('click', () => {
+        applyPin('none');
+      });
+
+      document.getElementById('resize-narrow').addEventListener('click', () => {
+        shellElement.style.width = '640px';
+        window.dispatchEvent(new Event('resize'));
+        requestAnimationFrame(() => inspectState());
+      });
+
+      document.getElementById('resize-wide').addEventListener('click', () => {
+        shellElement.style.width = '920px';
+        window.dispatchEvent(new Event('resize'));
+        requestAnimationFrame(() => inspectState());
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        inspectState();
+      });
+
+      inspectState();
+
+      grid.on('cellClick', (event) => {
+        writeLog(`cellClick row=${event.rowIndex} col=${event.columnId}`);
+      });
+    </script>
+  </body>
+</html>

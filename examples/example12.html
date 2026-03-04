@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 12 - Render Scheduler Dirty Flags</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        padding: 6px 10px;
+        border: 1px solid #b7c3d4;
+        background: #f8fafc;
+        cursor: pointer;
+      }
+
+      #grid {
+        width: 760px;
+        margin-top: 12px;
+      }
+
+      #log {
+        margin-top: 12px;
+        padding: 8px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 12 - Render Scheduler Dirty Flags</h1>
+    <div class="controls">
+      <button id="inspect">inspect</button>
+      <button id="burst-scroll">burst scroll x60</button>
+      <button id="burst-wheel">burst wheel x60</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 240, type: 'text' },
+        { id: 'status', header: 'Status', width: 180, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const rowData = Array.from({ length: 1000 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        status: index % 2 === 0 ? 'active' : 'idle',
+        updatedAt: new Date(Date.now() - index * 60000).toISOString()
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      const logElement = document.getElementById('log');
+      const verticalScroll = () => document.querySelector('.hgrid__v-scroll') || document.querySelector('.hgrid__viewport');
+      const firstVisibleId = () => {
+        const cell = document.querySelector('.hgrid__row--center .hgrid__cell[data-column-id="id"]');
+        return cell ? Number(cell.textContent) : null;
+      };
+      const writeLog = (payload) => {
+        logElement.textContent = JSON.stringify(payload);
+      };
+
+      const renderer = grid.renderer;
+      const originalRenderRows = renderer.renderRows.bind(renderer);
+      let renderPassCount = 0;
+      renderer.renderRows = (...args) => {
+        renderPassCount += 1;
+        return originalRenderRows(...args);
+      };
+
+      const inspect = (label) => {
+        const vScroll = verticalScroll();
+        writeLog({
+          label,
+          renderPassCount,
+          firstVisibleId: firstVisibleId(),
+          scrollTop: vScroll ? vScroll.scrollTop : null
+        });
+      };
+
+      const runBurstScroll = () => {
+        const vScroll = verticalScroll();
+        if (!vScroll) {
+          return;
+        }
+
+        renderPassCount = 0;
+        const beforeId = firstVisibleId();
+        const maxTop = Math.max(0, vScroll.scrollHeight - vScroll.clientHeight);
+        const base = Math.max(0, Math.min(maxTop, Math.floor(maxTop * 0.55)));
+
+        for (let index = 0; index < 60; index += 1) {
+          vScroll.scrollTop = Math.min(maxTop, base + index * 37);
+          vScroll.dispatchEvent(new Event('scroll'));
+        }
+
+        const beforeRafPayload = {
+          label: 'burst-scroll-before-raf',
+          renderPassCountBeforeRaf: renderPassCount,
+          firstVisibleIdBeforeRaf: beforeId,
+          firstVisibleIdImmediate: firstVisibleId()
+        };
+
+        requestAnimationFrame(() => {
+          writeLog({
+            ...beforeRafPayload,
+            label: 'burst-scroll-after-raf',
+            renderPassCountAfterRaf: renderPassCount,
+            firstVisibleIdAfterRaf: firstVisibleId(),
+            scrollTop: vScroll.scrollTop
+          });
+        });
+      };
+
+      const runBurstWheel = () => {
+        const bodyCenter = document.querySelector('.hgrid__body-center');
+        if (!bodyCenter) {
+          return;
+        }
+
+        renderPassCount = 0;
+        const beforeId = firstVisibleId();
+
+        for (let index = 0; index < 60; index += 1) {
+          bodyCenter.dispatchEvent(
+            new WheelEvent('wheel', {
+              bubbles: true,
+              cancelable: true,
+              deltaY: 20
+            })
+          );
+        }
+
+        const beforeRafPayload = {
+          label: 'burst-wheel-before-raf',
+          renderPassCountBeforeRaf: renderPassCount,
+          firstVisibleIdBeforeRaf: beforeId,
+          firstVisibleIdImmediate: firstVisibleId()
+        };
+
+        requestAnimationFrame(() => {
+          const vScroll = verticalScroll();
+          writeLog({
+            ...beforeRafPayload,
+            label: 'burst-wheel-after-raf',
+            renderPassCountAfterRaf: renderPassCount,
+            firstVisibleIdAfterRaf: firstVisibleId(),
+            scrollTop: vScroll ? vScroll.scrollTop : null
+          });
+        });
+      };
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        inspect('inspect');
+      });
+
+      document.getElementById('burst-scroll').addEventListener('click', () => {
+        runBurstScroll();
+      });
+
+      document.getElementById('burst-wheel').addEventListener('click', () => {
+        runBurstWheel();
+      });
+
+      requestAnimationFrame(() => {
+        inspect('initial');
+      });
+    </script>
+  </body>
+</html>

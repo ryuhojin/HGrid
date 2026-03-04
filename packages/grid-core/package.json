@@ -1,0 +1,32 @@
+{
+  "name": "@hgrid/grid-core",
+  "version": "0.0.0",
+  "description": "Enterprise DOM virtualized data grid core",
+  "type": "module",
+  "main": "dist/grid.umd.js",
+  "module": "dist/grid.esm.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/grid.esm.js",
+      "default": "./dist/grid.umd.js"
+    },
+    "./grid.css": "./dist/grid.css"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "pnpm run clean && rollup -c && tsc -p tsconfig.types.json && node scripts/copy-css.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --environment jsdom"
+  },
+  "devDependencies": {
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "jsdom": "^26.0.0",
+    "rollup": "^4.28.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

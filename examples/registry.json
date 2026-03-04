@@ -1,0 +1,136 @@
+{
+  "examples": [
+    {
+      "number": 1,
+      "file": "example1.html",
+      "title": "Example 1 - Basic UMD Grid",
+      "tags": [
+        "phase0",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 2,
+      "file": "example2.html",
+      "title": "Example 2 - Public API Contract",
+      "tags": [
+        "phase1",
+        "public-api",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 3,
+      "file": "example3.html",
+      "title": "Example 3 - Column Schema",
+      "tags": [
+        "phase1",
+        "column-schema",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 4,
+      "file": "example4.html",
+      "title": "Example 4 - Data Provider",
+      "tags": [
+        "phase1",
+        "data-provider",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 5,
+      "file": "example5.html",
+      "title": "Example 5 - Row Model",
+      "tags": [
+        "phase1",
+        "row-model",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 6,
+      "file": "example6.html",
+      "title": "Example 6 - DOM Layout",
+      "tags": [
+        "phase2",
+        "dom-layout",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 7,
+      "file": "example7.html",
+      "title": "Example 7 - Scrollbar Policy",
+      "tags": [
+        "phase2",
+        "scrollbar-policy",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 8,
+      "file": "example8.html",
+      "title": "Example 8 - Scroll Orchestration",
+      "tags": [
+        "phase2",
+        "scroll-orchestration",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 9,
+      "file": "example9.html",
+      "title": "Example 9 - Vertical Virtualization",
+      "tags": [
+        "phase2",
+        "vertical-virtualization",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 10,
+      "file": "example10.html",
+      "title": "Example 10 - Horizontal Virtualization",
+      "tags": [
+        "phase2",
+        "horizontal-virtualization",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 11,
+      "file": "example11.html",
+      "title": "Example 11 - Row Cell Pooling",
+      "tags": [
+        "phase2",
+        "row-cell-pooling",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 12,
+      "file": "example12.html",
+      "title": "Example 12 - Render Scheduler Dirty Flags",
+      "tags": [
+        "phase2",
+        "render-scheduler",
+        "dirty-flags",
+        "umd"
+      ],
+      "plugins": []
+    }
+  ]
+}

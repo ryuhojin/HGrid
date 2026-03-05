@@ -985,6 +985,169 @@ async function runExample12Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample13Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example13.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  await page.waitForFunction(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      return false;
+    }
+    try {
+      const payload = JSON.parse(logElement.textContent);
+      return payload.label === 'initial';
+    } catch (_error) {
+      return false;
+    }
+  });
+
+  const initialState = await page.evaluate(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      throw new Error('Missing example13 initial payload');
+    }
+    return JSON.parse(logElement.textContent);
+  });
+
+  assert.equal(initialState.rowCount, 100_000_000, `example13 should start at 100M, got ${initialState.rowCount}`);
+  assert.equal(initialState.virtualHeight, 2_800_000_000, `example13 virtualHeight mismatch: ${initialState.virtualHeight}`);
+  assert.equal(initialState.physicalHeight, 16_000_000, `example13 physicalHeight mismatch: ${initialState.physicalHeight}`);
+  assert.ok(initialState.scale > 100, `example13 scale should be high for 100M, got ${initialState.scale}`);
+
+  await page.evaluate(() => {
+    const verticalScroll = document.querySelector('.hgrid__v-scroll');
+    if (!verticalScroll) {
+      throw new Error('Missing vertical scroll source in example13');
+    }
+    verticalScroll.scrollTop = verticalScroll.scrollHeight;
+    verticalScroll.dispatchEvent(new Event('scroll'));
+  });
+  await waitAnimationFrame(page);
+  await waitAnimationFrame(page);
+  await page.click('#inspect');
+
+  const thumbBottomState = await page.evaluate(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      throw new Error('Missing example13 thumb-bottom payload');
+    }
+    return JSON.parse(logElement.textContent);
+  });
+
+  assert.ok(
+    thumbBottomState.firstVisibleId > 99_000_000,
+    `example13 thumb-bottom should reach deep rows, got ${thumbBottomState.firstVisibleId}`
+  );
+  assert.ok(
+    thumbBottomState.scrollTopNative >= thumbBottomState.physicalMaxScrollTop - 1,
+    `example13 thumb-bottom native top should reach max, top=${thumbBottomState.scrollTopNative}, max=${thumbBottomState.physicalMaxScrollTop}`
+  );
+
+  await page.evaluate(() => {
+    const verticalScroll = document.querySelector('.hgrid__v-scroll');
+    if (!verticalScroll) {
+      throw new Error('Missing vertical scroll source in example13');
+    }
+    verticalScroll.scrollTop = 0;
+    verticalScroll.dispatchEvent(new Event('scroll'));
+  });
+  await waitAnimationFrame(page);
+  await waitAnimationFrame(page);
+  await page.click('#inspect');
+
+  const thumbTopState = await page.evaluate(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      throw new Error('Missing example13 thumb-top payload');
+    }
+    return JSON.parse(logElement.textContent);
+  });
+
+  assert.ok(
+    thumbTopState.firstVisibleId <= 2,
+    `example13 thumb-top should return near first row, got ${thumbTopState.firstVisibleId}`
+  );
+  assert.ok(
+    thumbTopState.scrollTopVirtual <= 1,
+    `example13 thumb-top virtual top should be near zero, got ${thumbTopState.scrollTopVirtual}`
+  );
+
+  await page.click('#jump-bottom');
+  await page.waitForFunction(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      return false;
+    }
+    try {
+      const payload = JSON.parse(logElement.textContent);
+      return payload.label === 'jump-bottom';
+    } catch (_error) {
+      return false;
+    }
+  });
+
+  const bottomState = await page.evaluate(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      throw new Error('Missing example13 jump-bottom payload');
+    }
+    return JSON.parse(logElement.textContent);
+  });
+
+  assert.ok(
+    bottomState.firstVisibleId > 99_000_000,
+    `example13 bottom jump should reach deep rows, got ${bottomState.firstVisibleId}`
+  );
+  assert.ok(
+    bottomState.scrollTopVirtual >= bottomState.virtualMaxScrollTop - 1,
+    `example13 bottom virtual top should reach max, top=${bottomState.scrollTopVirtual}, max=${bottomState.virtualMaxScrollTop}`
+  );
+
+  await page.click('#jump-top');
+  await page.waitForFunction(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      return false;
+    }
+    try {
+      const payload = JSON.parse(logElement.textContent);
+      return payload.label === 'jump-top';
+    } catch (_error) {
+      return false;
+    }
+  });
+
+  await page.click('#roundtrip');
+  await page.waitForFunction(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      return false;
+    }
+    try {
+      const payload = JSON.parse(logElement.textContent);
+      return payload.label === 'roundtrip';
+    } catch (_error) {
+      return false;
+    }
+  });
+
+  const roundtripState = await page.evaluate(() => {
+    const logElement = document.querySelector('#log');
+    if (!logElement || !logElement.textContent) {
+      throw new Error('Missing example13 roundtrip payload');
+    }
+    return JSON.parse(logElement.textContent);
+  });
+
+  assert.ok(roundtripState.driftRows <= 1, `example13 roundtrip drift must be <=1 row, got ${roundtripState.driftRows}`);
+  assert.ok(
+    roundtripState.topAfter.firstVisibleId <= 2,
+    `example13 top restore should return near first row, got ${roundtripState.topAfter.firstVisibleId}`
+  );
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -1041,6 +1204,8 @@ async function main() {
     await runExample11Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample12Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample13Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

@@ -131,6 +131,17 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 13,
+      "file": "example13.html",
+      "title": "Example 13 - Scroll Height Scaling",
+      "tags": [
+        "phase3",
+        "scroll-scaling",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

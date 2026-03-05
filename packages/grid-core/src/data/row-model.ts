@@ -9,6 +9,8 @@ export interface RowModelState {
   viewRowCount: number;
   hasFilterMapping: boolean;
   hasDataToViewIndex: boolean;
+  isBaseIdentityMapping: boolean;
+  isDataToViewIdentity: boolean;
 }
 
 interface ResolvedRowModelOptions {
@@ -30,6 +32,8 @@ function createIdentityMapping(rowCount: number): Int32Array {
 
   return mapping;
 }
+
+const MATERIALIZED_MAPPING_LIMIT = 5_000_000;
 
 function toNumberArray(mapping: ViewToDataMapping): number[] {
   if (Array.isArray(mapping)) {
@@ -63,15 +67,18 @@ function validateMapping(mapping: ViewToDataMapping, rowCount: number): void {
 
 export class RowModel {
   private rowCount: number;
-  private baseViewToData: Int32Array;
+  private baseViewToData: Int32Array | null = null;
+  private isBaseIdentityMapping = true;
   private filterViewToData: Int32Array | null = null;
   private options: ResolvedRowModelOptions;
   private dataToView: Int32Array | null = null;
+  private isDataToViewIdentity = false;
 
   public constructor(rowCount: number, options?: RowModelOptions) {
     this.rowCount = Math.max(0, rowCount);
     this.options = resolveOptions(options);
-    this.baseViewToData = createIdentityMapping(this.rowCount);
+    this.isBaseIdentityMapping = true;
+    this.baseViewToData = null;
     this.rebuildDataToViewIndex();
   }
 
@@ -94,7 +101,8 @@ export class RowModel {
       this.rowCount = Math.max(0, rowCount);
     }
 
-    this.baseViewToData = createIdentityMapping(this.rowCount);
+    this.baseViewToData = null;
+    this.isBaseIdentityMapping = true;
     this.filterViewToData = null;
     this.rebuildDataToViewIndex();
   }
@@ -106,6 +114,7 @@ export class RowModel {
 
     validateMapping(mapping, this.rowCount);
     this.baseViewToData = normalizeMapping(mapping);
+    this.isBaseIdentityMapping = false;
     this.rebuildDataToViewIndex();
   }
 
@@ -126,16 +135,28 @@ export class RowModel {
   }
 
   public getViewRowCount(): number {
-    return this.getActiveViewToData().length;
+    return this.getActiveViewLength();
   }
 
   public getDataIndex(viewIndex: number): number {
-    const activeMapping = this.getActiveViewToData();
-    if (viewIndex < 0 || viewIndex >= activeMapping.length) {
+    const viewRowCount = this.getActiveViewLength();
+    if (viewIndex < 0 || viewIndex >= viewRowCount) {
       return -1;
     }
 
-    return activeMapping[viewIndex];
+    if (this.filterViewToData) {
+      return this.filterViewToData[viewIndex];
+    }
+
+    if (this.isBaseIdentityMapping) {
+      return viewIndex;
+    }
+
+    if (!this.baseViewToData) {
+      return -1;
+    }
+
+    return this.baseViewToData[viewIndex];
   }
 
   public getViewIndex(dataIndex: number): number {
@@ -143,13 +164,34 @@ export class RowModel {
       return -1;
     }
 
+    if (this.isDataToViewIdentity) {
+      return dataIndex;
+    }
+
     if (this.dataToView) {
       return this.dataToView[dataIndex];
     }
 
-    const activeMapping = this.getActiveViewToData();
-    for (let viewIndex = 0; viewIndex < activeMapping.length; viewIndex += 1) {
-      if (activeMapping[viewIndex] === dataIndex) {
+    if (this.filterViewToData) {
+      for (let viewIndex = 0; viewIndex < this.filterViewToData.length; viewIndex += 1) {
+        if (this.filterViewToData[viewIndex] === dataIndex) {
+          return viewIndex;
+        }
+      }
+
+      return -1;
+    }
+
+    if (this.isBaseIdentityMapping) {
+      return dataIndex;
+    }
+
+    if (!this.baseViewToData) {
+      return -1;
+    }
+
+    for (let viewIndex = 0; viewIndex < this.baseViewToData.length; viewIndex += 1) {
+      if (this.baseViewToData[viewIndex] === dataIndex) {
         return viewIndex;
       }
     }
@@ -158,7 +200,24 @@ export class RowModel {
   }
 
   public getActiveViewToData(): Int32Array {
-    return this.filterViewToData ?? this.baseViewToData;
+    if (this.filterViewToData) {
+      return this.filterViewToData;
+    }
+
+    if (!this.isBaseIdentityMapping) {
+      if (!this.baseViewToData) {
+        throw new Error('Missing base mapping in non-identity mode');
+      }
+      return this.baseViewToData;
+    }
+
+    if (this.rowCount > MATERIALIZED_MAPPING_LIMIT) {
+      throw new Error(
+        `Materialized identity mapping exceeds limit (${MATERIALIZED_MAPPING_LIMIT}). Use getDataIndex(viewIndex) instead.`
+      );
+    }
+
+    return createIdentityMapping(this.rowCount);
   }
 
   public getState(): RowModelState {
@@ -166,11 +225,31 @@ export class RowModel {
       rowCount: this.rowCount,
       viewRowCount: this.getViewRowCount(),
       hasFilterMapping: this.filterViewToData !== null,
-      hasDataToViewIndex: this.dataToView !== null
+      hasDataToViewIndex: this.dataToView !== null || this.isDataToViewIdentity,
+      isBaseIdentityMapping: this.isBaseIdentityMapping,
+      isDataToViewIdentity: this.isDataToViewIdentity
     };
   }
 
   public getBaseViewToDataSnapshot(): number[] {
+    if (this.isBaseIdentityMapping) {
+      if (this.rowCount > MATERIALIZED_MAPPING_LIMIT) {
+        throw new Error(
+          `Base identity snapshot exceeds limit (${MATERIALIZED_MAPPING_LIMIT}). Use getDataIndex(viewIndex) instead.`
+        );
+      }
+
+      const snapshot = new Array<number>(this.rowCount);
+      for (let viewIndex = 0; viewIndex < this.rowCount; viewIndex += 1) {
+        snapshot[viewIndex] = viewIndex;
+      }
+      return snapshot;
+    }
+
+    if (!this.baseViewToData) {
+      return [];
+    }
+
     return toNumberArray(this.baseViewToData);
   }
 
@@ -181,10 +260,23 @@ export class RowModel {
   private rebuildDataToViewIndex(): void {
     if (!this.options.enableDataToViewIndex) {
       this.dataToView = null;
+      this.isDataToViewIdentity = false;
       return;
     }
 
-    const activeMapping = this.getActiveViewToData();
+    if (this.filterViewToData === null && this.isBaseIdentityMapping) {
+      this.dataToView = null;
+      this.isDataToViewIdentity = true;
+      return;
+    }
+
+    const activeMapping = this.filterViewToData ?? this.baseViewToData;
+    if (!activeMapping) {
+      this.dataToView = null;
+      this.isDataToViewIdentity = false;
+      return;
+    }
+
     const nextDataToView = new Int32Array(this.rowCount);
     nextDataToView.fill(-1);
 
@@ -194,5 +286,18 @@ export class RowModel {
     }
 
     this.dataToView = nextDataToView;
+    this.isDataToViewIdentity = false;
+  }
+
+  private getActiveViewLength(): number {
+    if (this.filterViewToData) {
+      return this.filterViewToData.length;
+    }
+
+    if (this.isBaseIdentityMapping) {
+      return this.rowCount;
+    }
+
+    return this.baseViewToData ? this.baseViewToData.length : 0;
   }
 }

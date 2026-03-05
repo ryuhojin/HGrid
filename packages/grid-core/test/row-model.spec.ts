@@ -56,4 +56,22 @@ describe('RowModel', () => {
     expect(state.hasDataToViewIndex).toBe(false);
     expect(rowModel.getDataIndex(9_999_999)).toBe(9_999_999);
   });
+
+  it('keeps 100M identity mapping lazy without materializing full Int32Array', () => {
+    const rowModel = new RowModel(100_000_000);
+    const state = rowModel.getState();
+
+    expect(state.rowCount).toBe(100_000_000);
+    expect(state.isBaseIdentityMapping).toBe(true);
+    expect(state.hasFilterMapping).toBe(false);
+    expect(rowModel.getDataIndex(0)).toBe(0);
+    expect(rowModel.getDataIndex(99_999_999)).toBe(99_999_999);
+    expect(rowModel.getViewIndex(99_999_999)).toBe(99_999_999);
+
+    rowModel.setOptions({ enableDataToViewIndex: true });
+    const indexedState = rowModel.getState();
+    expect(indexedState.hasDataToViewIndex).toBe(true);
+    expect(indexedState.isDataToViewIdentity).toBe(true);
+    expect(rowModel.getViewIndex(42_424_242)).toBe(42_424_242);
+  });
 });

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 13 - Scroll Height Scaling</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #1f2937;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        color: #0f172a;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .controls button.active {
+        border-color: #2563eb;
+        background: #dbeafe;
+        color: #1e3a8a;
+      }
+
+      .stats {
+        margin-bottom: 12px;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-line;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        border: 1px solid #e2e8f0;
+        background: #fcfdff;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      #grid {
+        width: 960px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 13 - Scroll Height Scaling</h1>
+    <div class="controls">
+      <button type="button" data-row-count="100000">100K</button>
+      <button type="button" data-row-count="1000000">1M</button>
+      <button type="button" data-row-count="10000000">10M</button>
+      <button type="button" data-row-count="100000000" class="active">100M</button>
+      <button type="button" id="jump-top">jump top</button>
+      <button type="button" id="jump-bottom">jump bottom</button>
+      <button type="button" id="roundtrip">roundtrip drift</button>
+      <button type="button" id="inspect">inspect</button>
+    </div>
+    <div id="stats" class="stats"></div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      class SyntheticLargeDataProvider {
+        constructor(rowCount) {
+          this.rowCount = rowCount;
+        }
+
+        setRowCount(rowCount) {
+          this.rowCount = rowCount;
+        }
+
+        getRowCount() {
+          return this.rowCount;
+        }
+
+        getRowKey(dataIndex) {
+          return dataIndex;
+        }
+
+        getValue(dataIndex, columnId) {
+          if (columnId === 'id') return dataIndex + 1;
+          if (columnId === 'name') return 'Customer-' + (dataIndex + 1);
+          if (columnId === 'status') return dataIndex % 2 === 0 ? 'active' : 'idle';
+          if (columnId === 'score') return (dataIndex * 17) % 10000;
+          if (columnId === 'region') return ['KR', 'US', 'JP', 'DE'][dataIndex % 4];
+          if (columnId === 'updatedAt') return new Date(1700000000000 + (dataIndex % 100000) * 1000).toISOString();
+          return '';
+        }
+
+        setValue() {}
+        applyTransactions() {}
+
+        getRow(dataIndex) {
+          return {
+            id: dataIndex + 1,
+            name: 'Customer-' + (dataIndex + 1),
+            status: dataIndex % 2 === 0 ? 'active' : 'idle',
+            score: (dataIndex * 17) % 10000,
+            region: ['KR', 'US', 'JP', 'DE'][dataIndex % 4],
+            updatedAt: new Date(1700000000000 + (dataIndex % 100000) * 1000).toISOString()
+          };
+        }
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 120, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 240, type: 'text' },
+        { id: 'status', header: 'Status', width: 180, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 240, type: 'date' }
+      ];
+
+      const provider = new SyntheticLargeDataProvider(100000000);
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: provider,
+        height: 460,
+        rowHeight: 28,
+        overscan: 8,
+        overscanCols: 2
+      });
+
+      const statsElement = document.getElementById('stats');
+      const logElement = document.getElementById('log');
+      const buttons = Array.from(document.querySelectorAll('button[data-row-count]'));
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function getVerticalScrollElement() {
+        return document.querySelector('.hgrid__v-scroll') || document.querySelector('.hgrid__viewport');
+      }
+
+      function getFirstVisibleId() {
+        const cell = document.querySelector('.hgrid__row--left .hgrid__cell[data-column-id="id"]');
+        return cell ? Number(cell.textContent) : null;
+      }
+
+      function updateStats() {
+        const renderer = grid.renderer;
+        const state = grid.getState();
+        const verticalScrollElement = getVerticalScrollElement();
+        const physicalScrollTop = verticalScrollElement ? verticalScrollElement.scrollTop : 0;
+        const lines = [
+          'rowCount: ' + provider.getRowCount().toLocaleString(),
+          'virtualHeight: ' + Math.round(renderer.virtualScrollHeight).toLocaleString() + ' px',
+          'scrollHeight(physical): ' + Math.round(renderer.physicalScrollHeight).toLocaleString() + ' px',
+          'virtualMaxScrollTop: ' + Math.round(renderer.virtualMaxScrollTop).toLocaleString() + ' px',
+          'physicalMaxScrollTop: ' + Math.round(renderer.physicalMaxScrollTop).toLocaleString() + ' px',
+          'scale(virtual/physical): ' + renderer.scrollScale.toFixed(4),
+          'state.scrollTop(virtual): ' + Math.round(state.scrollTop).toLocaleString() + ' px',
+          'native scrollTop(physical): ' + Math.round(physicalScrollTop).toLocaleString() + ' px'
+        ];
+        statsElement.textContent = lines.join('\n');
+      }
+
+      function collectSnapshot(label) {
+        const renderer = grid.renderer;
+        const state = grid.getState();
+        const verticalScrollElement = getVerticalScrollElement();
+        return {
+          label,
+          rowCount: provider.getRowCount(),
+          firstVisibleId: getFirstVisibleId(),
+          scrollTopVirtual: Math.round(state.scrollTop),
+          scrollTopNative: verticalScrollElement ? verticalScrollElement.scrollTop : 0,
+          virtualHeight: Math.round(renderer.virtualScrollHeight),
+          physicalHeight: Math.round(renderer.physicalScrollHeight),
+          virtualMaxScrollTop: Math.round(renderer.virtualMaxScrollTop),
+          physicalMaxScrollTop: Math.round(renderer.physicalMaxScrollTop),
+          scale: Number(renderer.scrollScale.toFixed(4))
+        };
+      }
+
+      function writeLog(payload) {
+        logElement.textContent = JSON.stringify(payload);
+      }
+
+      function inspect(label) {
+        updateStats();
+        writeLog(collectSnapshot(label || 'inspect'));
+      }
+
+      function setRowCount(rowCount) {
+        provider.setRowCount(rowCount);
+        grid.setOptions({ dataProvider: provider });
+        grid.setState({ scrollTop: 0 });
+        requestAnimationFrame(() => inspect('set-row-count'));
+      }
+
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const nextCount = Number(button.dataset.rowCount);
+          buttons.forEach((item) => item.classList.remove('active'));
+          button.classList.add('active');
+          setRowCount(nextCount);
+        });
+      });
+
+      document.getElementById('jump-top').addEventListener('click', () => {
+        grid.setState({ scrollTop: 0 });
+        requestAnimationFrame(() => inspect('jump-top'));
+      });
+
+      document.getElementById('jump-bottom').addEventListener('click', () => {
+        const renderer = grid.renderer;
+        grid.setState({ scrollTop: renderer.virtualMaxScrollTop });
+        requestAnimationFrame(() => inspect('jump-bottom'));
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        inspect('inspect');
+      });
+
+      document.getElementById('roundtrip').addEventListener('click', async () => {
+        const topBefore = collectSnapshot('top-before');
+        const renderer = grid.renderer;
+        grid.setState({ scrollTop: renderer.virtualMaxScrollTop });
+        await waitFrame();
+        await waitFrame();
+        const bottom = collectSnapshot('bottom');
+
+        grid.setState({ scrollTop: 0 });
+        await waitFrame();
+        await waitFrame();
+        const topAfter = collectSnapshot('top-after');
+        const driftRows = Math.abs((topAfter.firstVisibleId ?? 1) - (topBefore.firstVisibleId ?? 1));
+
+        updateStats();
+        writeLog({
+          label: 'roundtrip',
+          driftRows,
+          topBefore,
+          bottom,
+          topAfter
+        });
+      });
+
+      const attachScrollListener = () => {
+        const verticalScrollElement = getVerticalScrollElement();
+        if (!verticalScrollElement) {
+          return;
+        }
+        verticalScrollElement.addEventListener(
+          'scroll',
+          () => {
+            updateStats();
+          },
+          { passive: true }
+        );
+      };
+
+      attachScrollListener();
+      inspect('initial');
+    </script>
+  </body>
+</html>

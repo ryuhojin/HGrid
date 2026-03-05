@@ -289,6 +289,133 @@ describe('Grid DOM pooling', () => {
     }
   });
 
+  it('computes scroll scaling metrics with capped physical height for 100M rows', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const height = 280;
+    const rowHeight = 28;
+    const rowCount = 100_000_000;
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' }
+      ],
+      dataProvider: new SyntheticLargeDataProvider(rowCount),
+      height,
+      rowHeight,
+      overscan: 4
+    });
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          virtualScrollHeight: number;
+          physicalScrollHeight: number;
+          virtualMaxScrollTop: number;
+          physicalMaxScrollTop: number;
+          scrollScale: number;
+        };
+      }
+    ).renderer;
+
+    expect(renderer.virtualScrollHeight).toBe(rowCount * rowHeight);
+    expect(renderer.physicalScrollHeight).toBe(16_000_000);
+    expect(renderer.virtualMaxScrollTop).toBe(rowCount * rowHeight - height);
+    expect(renderer.physicalMaxScrollTop).toBe(16_000_000 - height);
+    expect(renderer.scrollScale).toBeCloseTo(renderer.virtualMaxScrollTop / renderer.physicalMaxScrollTop, 10);
+    expect(renderer.scrollScale).toBeGreaterThan(100);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies wheel delta on virtual axis even when physical scroll delta is sub-pixel at 100M scale', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' }
+      ],
+      dataProvider: new SyntheticLargeDataProvider(100_000_000),
+      height: 280,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    const bodyCenter = container.querySelector('.hgrid__body-center') as HTMLDivElement;
+    const verticalScroll = getVerticalScrollElement(container);
+    expect(grid.getState().scrollTop).toBe(0);
+    expect(verticalScroll.scrollTop).toBe(0);
+
+    for (let index = 0; index < 10; index += 1) {
+      bodyCenter.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: 30,
+          bubbles: true,
+          cancelable: true
+        })
+      );
+    }
+
+    await waitForFrame();
+
+    const virtualScrollTop = grid.getState().scrollTop;
+    expect(virtualScrollTop).toBeGreaterThan(200);
+    expect(verticalScroll.scrollTop).toBeGreaterThanOrEqual(1);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('moves virtual scroll by viewport height on PageDown/PageUp', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const height = 280;
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' }
+      ],
+      dataProvider: new SyntheticLargeDataProvider(100_000_000),
+      height,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    expect(grid.getState().scrollTop).toBe(0);
+
+    root.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'PageDown',
+        bubbles: true,
+        cancelable: true
+      })
+    );
+    await waitForFrame();
+
+    const afterPageDown = grid.getState().scrollTop;
+    expect(afterPageDown).toBe(height);
+
+    root.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'PageUp',
+        bubbles: true,
+        cancelable: true
+      })
+    );
+    await waitForFrame();
+
+    expect(grid.getState().scrollTop).toBe(0);
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('virtualizes center columns with fixed cell pool while scrolling horizontally', async () => {
     const container = document.createElement('div');
     Object.defineProperty(container, 'clientWidth', { value: 760, configurable: true });

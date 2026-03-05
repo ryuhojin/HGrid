@@ -2,6 +2,12 @@ import { EventBus } from '../core/event-bus';
 import type { ColumnDef, GridOptions, GridState, ScrollbarPolicy, ScrollbarVisibility } from '../core/grid-options';
 import { formatColumnValue, getColumnValue } from '../data/column-model';
 import type { GridRowData } from '../data/data-provider';
+import {
+  MAX_SCROLL_PX,
+  createScrollScaleMetrics,
+  mapPhysicalToVirtualScrollTop,
+  mapVirtualToPhysicalScrollTop
+} from '../virtualization/scroll-scaling';
 
 type ColumnZoneName = 'left' | 'center' | 'right';
 
@@ -54,7 +60,6 @@ const DEFAULT_HEIGHT = 360;
 const DEFAULT_ROW_HEIGHT = 28;
 const DEFAULT_OVERSCAN = 6;
 const DEFAULT_COLUMN_OVERSCAN = 2;
-const MAX_NATIVE_SCROLL_HEIGHT = 16_000_000;
 const MIN_SCROLLBAR_SIZE = 0;
 const INVISIBLE_SCROLLBAR_FALLBACK_SIZE = 16;
 const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
@@ -116,6 +121,7 @@ export class DomRenderer {
   private pendingThemeTokens: Record<string, string> = {};
   private isSyncingScroll = false;
   private pendingScrollTop = 0;
+  private pendingVirtualScrollTop = 0;
   private pendingScrollLeft = 0;
   private renderedScrollTop = 0;
   private renderedStartRow = 0;
@@ -124,6 +130,7 @@ export class DomRenderer {
   private physicalScrollHeight = 0;
   private virtualMaxScrollTop = 0;
   private physicalMaxScrollTop = 0;
+  private scrollScale = 1;
   private renderedHorizontalWindow: HorizontalWindow = { start: 0, end: 0 };
   private centerColumnLeft: number[] = [];
   private centerColumnWidth: number[] = [];
@@ -202,9 +209,8 @@ export class DomRenderer {
   }
 
   public getState(): GridState {
-    const currentPhysicalScrollTop = this.verticalScrollElement.scrollTop || this.pendingScrollTop;
     return {
-      scrollTop: this.toVirtualScrollTop(currentPhysicalScrollTop)
+      scrollTop: this.pendingVirtualScrollTop
     };
   }
 
@@ -226,6 +232,7 @@ export class DomRenderer {
     this.horizontalScrollElement.removeEventListener('wheel', this.handleAuxiliaryWheel);
     this.headerElement.removeEventListener('wheel', this.handleAuxiliaryWheel);
     this.bodyElement.removeEventListener('wheel', this.handleBodyWheel);
+    this.rootElement.removeEventListener('keydown', this.handleRootKeyDown);
     this.rootElement.removeEventListener('click', this.handleRootClick);
     this.teardownResizeObserver();
 
@@ -241,6 +248,7 @@ export class DomRenderer {
   private initializeDom(): void {
     this.rootElement.className = 'hgrid';
     this.rootElement.setAttribute('role', 'grid');
+    this.rootElement.tabIndex = 0;
 
     this.headerElement.className = 'hgrid__header';
     this.headerLeftElement.className = 'hgrid__header-left';
@@ -311,6 +319,7 @@ export class DomRenderer {
     this.horizontalScrollElement.addEventListener('wheel', this.handleAuxiliaryWheel, { passive: false });
     this.headerElement.addEventListener('wheel', this.handleAuxiliaryWheel, { passive: false });
     this.bodyElement.addEventListener('wheel', this.handleBodyWheel, { passive: false });
+    this.rootElement.addEventListener('keydown', this.handleRootKeyDown);
     this.rootElement.addEventListener('click', this.handleRootClick);
 
     this.container.replaceChildren(this.rootElement);
@@ -321,7 +330,7 @@ export class DomRenderer {
     const previousScrollTop = this.pendingScrollTop;
     const previousScrollLeft = this.pendingScrollLeft;
     const previousCenterCellCapacity = this.centerCellCapacity;
-    const previousVirtualScrollTop = this.toVirtualScrollTop(previousScrollTop);
+    const previousVirtualScrollTop = this.pendingVirtualScrollTop;
 
     this.updateViewportHeights();
     this.applyZoneLayout();
@@ -577,25 +586,32 @@ export class DomRenderer {
   }
 
   private updateSpacerSize(): void {
-    const rowTrackHeight = this.options.rowModel.getViewRowCount() * this.getRowHeight();
+    const rowCount = this.options.rowModel.getViewRowCount();
+    const rowHeight = this.getRowHeight();
     const configuredViewportHeight = this.getViewportHeight();
     const measuredViewportHeight =
       this.viewportElement.clientHeight || this.verticalScrollElement.clientHeight || configuredViewportHeight;
-    const physicalTrackHeight = Math.min(rowTrackHeight, MAX_NATIVE_SCROLL_HEIGHT);
-    this.virtualScrollHeight = rowTrackHeight;
-    this.physicalScrollHeight = physicalTrackHeight;
-    this.virtualMaxScrollTop = Math.max(0, this.virtualScrollHeight - measuredViewportHeight);
-    this.physicalMaxScrollTop = Math.max(0, this.physicalScrollHeight - measuredViewportHeight);
+    const metrics = createScrollScaleMetrics({
+      rowCount,
+      rowHeight,
+      viewportHeight: measuredViewportHeight,
+      maxScrollPx: MAX_SCROLL_PX
+    });
+    this.virtualScrollHeight = metrics.virtualHeight;
+    this.physicalScrollHeight = metrics.scrollHeight;
+    this.virtualMaxScrollTop = metrics.virtualMaxScrollTop;
+    this.physicalMaxScrollTop = metrics.physicalMaxScrollTop;
+    this.scrollScale = metrics.scale;
 
     this.spacerElement.style.width = '1px';
-    this.spacerElement.style.height = `${physicalTrackHeight}px`;
+    this.spacerElement.style.height = `${metrics.scrollHeight}px`;
     this.verticalSpacerElement.style.width = '1px';
-    this.verticalSpacerElement.style.height = `${physicalTrackHeight}px`;
+    this.verticalSpacerElement.style.height = `${metrics.scrollHeight}px`;
     this.horizontalSpacerElement.style.width = `${Math.max(1, this.centerColumnsWidth)}px`;
   }
 
   private renderRows(scrollTop: number, scrollLeft: number): void {
-    const virtualScrollTop = this.toVirtualScrollTop(scrollTop);
+    const virtualScrollTop = this.pendingVirtualScrollTop;
     const rowHeight = this.getRowHeight();
     const startRow = this.getStartRowForScrollTop(virtualScrollTop);
     const viewportOffsetY = startRow * rowHeight;
@@ -1056,6 +1072,7 @@ export class DomRenderer {
     const viewportElement = event.currentTarget as HTMLDivElement;
     if (!this.canUseVerticalScroll) {
       this.pendingScrollTop = viewportElement.scrollTop;
+      this.pendingVirtualScrollTop = this.toVirtualScrollTop(this.pendingScrollTop);
       this.syncViewportTransforms(this.pendingScrollTop, this.pendingScrollLeft, false);
       this.markScrollDirty();
       this.scheduleRender();
@@ -1172,6 +1189,23 @@ export class DomRenderer {
       columnId,
       value: column ? getColumnValue(column, row) : this.options.dataProvider.getValue(dataIndex, columnId)
     });
+  };
+
+  private handleRootKeyDown = (event: KeyboardEvent): void => {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    if (event.key !== 'PageDown' && event.key !== 'PageUp') {
+      return;
+    }
+
+    const direction = event.key === 'PageDown' ? 1 : -1;
+    const viewportDelta = this.getViewportHeight() * direction;
+    this.addVerticalScrollDelta(viewportDelta);
+    this.markScrollDirty();
+    this.scheduleRender();
+    event.preventDefault();
   };
 
   private resolveRow(dataIndex: number): GridRowData {
@@ -1291,7 +1325,7 @@ export class DomRenderer {
   private syncViewportTransforms(scrollTop: number, scrollLeft: number, forceVerticalSync: boolean): void {
     this.syncHorizontalOffset(scrollLeft);
 
-    const virtualScrollTop = this.toVirtualScrollTop(scrollTop);
+    const virtualScrollTop = this.pendingVirtualScrollTop;
     const canSyncVertical = forceVerticalSync || this.getStartRowForScrollTop(virtualScrollTop) === this.renderedStartRow;
     const effectiveVirtualScrollTop = canSyncVertical ? virtualScrollTop : this.renderedScrollTop;
     const centerVerticalOffset = this.renderedViewportOffsetY - effectiveVirtualScrollTop + scrollTop;
@@ -1321,9 +1355,14 @@ export class DomRenderer {
     return Math.max(0, maxHorizontal, modelMax);
   }
 
-  private setVerticalScrollTop(scrollTop: number): void {
+  private setVerticalScrollTop(scrollTop: number, virtualScrollTopOverride?: number): void {
     const nextScrollTop = Math.min(this.getMaxVerticalScrollTop(), Math.max(0, scrollTop));
     this.pendingScrollTop = nextScrollTop;
+    if (typeof virtualScrollTopOverride === 'number') {
+      this.pendingVirtualScrollTop = this.clampVirtualScrollTop(virtualScrollTopOverride);
+    } else {
+      this.pendingVirtualScrollTop = this.toVirtualScrollTop(nextScrollTop);
+    }
 
     const shouldSyncVertical = this.verticalScrollElement.scrollTop !== nextScrollTop;
     const shouldSyncViewport = this.viewportElement.scrollTop !== nextScrollTop;
@@ -1340,12 +1379,16 @@ export class DomRenderer {
       this.viewportElement.scrollTop = nextScrollTop;
     }
     this.pendingScrollTop = this.verticalScrollElement.scrollTop || this.viewportElement.scrollTop;
+    if (typeof virtualScrollTopOverride !== 'number') {
+      this.pendingVirtualScrollTop = this.toVirtualScrollTop(this.pendingScrollTop);
+    }
     this.isSyncingScroll = false;
     this.syncViewportTransforms(this.pendingScrollTop, this.pendingScrollLeft, false);
   }
 
   private setVirtualScrollTop(virtualScrollTop: number): void {
-    this.setVerticalScrollTop(this.toPhysicalScrollTop(virtualScrollTop));
+    const nextVirtualScrollTop = this.clampVirtualScrollTop(virtualScrollTop);
+    this.setVerticalScrollTop(this.toPhysicalScrollTop(nextVirtualScrollTop), nextVirtualScrollTop);
   }
 
   private addVerticalScrollDelta(deltaPx: number): void {
@@ -1353,26 +1396,19 @@ export class DomRenderer {
       return;
     }
 
-    const currentVirtualScrollTop = this.toVirtualScrollTop(this.pendingScrollTop);
-    this.setVirtualScrollTop(currentVirtualScrollTop + deltaPx);
+    this.setVirtualScrollTop(this.pendingVirtualScrollTop + deltaPx);
   }
 
   private toVirtualScrollTop(physicalScrollTop: number): number {
-    if (this.virtualMaxScrollTop <= 0 || this.physicalMaxScrollTop <= 0) {
-      return 0;
-    }
-
-    const clampedPhysicalScrollTop = Math.max(0, Math.min(this.physicalMaxScrollTop, physicalScrollTop));
-    return (clampedPhysicalScrollTop / this.physicalMaxScrollTop) * this.virtualMaxScrollTop;
+    return mapPhysicalToVirtualScrollTop(physicalScrollTop, this.physicalMaxScrollTop, this.virtualMaxScrollTop);
   }
 
   private toPhysicalScrollTop(virtualScrollTop: number): number {
-    if (this.virtualMaxScrollTop <= 0 || this.physicalMaxScrollTop <= 0) {
-      return 0;
-    }
+    return mapVirtualToPhysicalScrollTop(virtualScrollTop, this.virtualMaxScrollTop, this.physicalMaxScrollTop);
+  }
 
-    const clampedVirtualScrollTop = Math.max(0, Math.min(this.virtualMaxScrollTop, virtualScrollTop));
-    return (clampedVirtualScrollTop / this.virtualMaxScrollTop) * this.physicalMaxScrollTop;
+  private clampVirtualScrollTop(virtualScrollTop: number): number {
+    return Math.max(0, Math.min(this.virtualMaxScrollTop, virtualScrollTop));
   }
 
   private setHorizontalScrollLeft(scrollLeft: number): void {

@@ -155,7 +155,7 @@
   - 문서: `docs/scroll-orchestration-phase2.md`, e2e: `example8` 시나리오 추가
 
 ## 2.2 Vertical Virtualization(수직 가상화)
-- [x] 고정 `rowHeight` 기반(1.0 고정 높이)
+- [x] 고정 `rowHeight` 기반(1.0 고정 높이, variable rowHeight는 3.5에서 확장)
 - [x] visible range 계산:
   - [x] `firstRow = floor(virtualScrollTop / rowHeight)`
   - [x] overscanTop/Bottom 적용
@@ -247,38 +247,71 @@
 
 # Phase 3 — 100M 대응: Scroll Scaling(필수)
 ## 3.1 Scroll Height 한계 감지/정의
-- [ ] `MAX_SCROLL_PX` 상수 정의(`16,000,000 px` 권장; 브라우저 native scroll 안정 범위 기준)
-- [ ] `virtualHeight = rowCount * rowHeight`
-- [ ] `scrollHeight = min(virtualHeight, MAX_SCROLL_PX)`
-- [ ] `virtualMaxScrollTop = max(0, virtualHeight - viewportHeight)`
-- [ ] `physicalMaxScrollTop = max(0, scrollHeight - viewportHeight)`
-- [ ] `scale = virtualMaxScrollTop / physicalMaxScrollTop` (`physicalMaxScrollTop == 0`이면 `scale = 1`)
-- [ ] AG-like y-scroll viewport 높이와 scaling 매핑 결합
+- [x] `MAX_SCROLL_PX` 상수 정의(`16,000,000 px` 권장; 브라우저 native scroll 안정 범위 기준)
+- [x] `virtualHeight = rowCount * rowHeight`
+- [x] `scrollHeight = min(virtualHeight, MAX_SCROLL_PX)`
+- [x] `virtualMaxScrollTop = max(0, virtualHeight - viewportHeight)`
+- [x] `physicalMaxScrollTop = max(0, scrollHeight - viewportHeight)`
+- [x] `scale = virtualMaxScrollTop / physicalMaxScrollTop` (`physicalMaxScrollTop == 0`이면 `scale = 1`)
+- [x] AG-like y-scroll viewport 높이와 scaling 매핑 결합
+
+### 코어 변경 코멘트 (3.1 반영, 2026-03-05)
+- 스크롤 스케일 계산 유틸 분리:
+  - `packages/grid-core/src/virtualization/scroll-scaling.ts`
+  - 상수 `MAX_SCROLL_PX(16,000,000)` + scale metrics 계산 공식 고정
+- renderer 결합:
+  - `updateSpacerSize()`에서 `virtualHeight/scrollHeight/virtualMaxScrollTop/physicalMaxScrollTop/scale`를 단일 계산
+  - `.hgrid__v-scroll` + `.hgrid__v-spacer`는 physical height 기준, row window 계산은 virtual scrollTop 기준 유지
+- 검증:
+  - unit: `packages/grid-core/test/scroll-scaling.spec.ts`
+  - integration: `packages/grid-core/test/grid.spec.ts` 100M scaling metrics 검증
+  - 문서: `docs/scroll-scaling-phase3.md`
 
 ## 3.2 매핑 함수 구현
-- [ ] `virtualScrollTop = (physicalScrollTop / physicalMaxScrollTop) * virtualMaxScrollTop`
-- [ ] `physicalScrollTop = (virtualScrollTop / virtualMaxScrollTop) * physicalMaxScrollTop`
-- [ ] rowIndex 계산 규칙 고정: `firstVisibleRow = floor(virtualScrollTop / rowHeight)`
+- [x] `virtualScrollTop = (physicalScrollTop / physicalMaxScrollTop) * virtualMaxScrollTop`
+- [x] `physicalScrollTop = (virtualScrollTop / virtualMaxScrollTop) * physicalMaxScrollTop`
+- [x] rowIndex 계산 규칙 고정: `firstVisibleRow = floor(virtualScrollTop / rowHeight)`
 - [ ] thumb 드래그/휠 UX 보정:
-  - [ ] wheel delta는 virtual 축 기준으로 누적/클램프
-  - [ ] page up/down 이동량은 `viewportHeight`(virtual px) 기준으로 고정
-- [ ] `getState()/setState()`의 `scrollTop`은 virtual 값으로 일관
-- [ ] pinned 영역 스크롤 입력도 동일 매핑 함수를 사용
+  - [x] wheel delta는 virtual 축 기준으로 누적/클램프
+  - [x] page up/down 이동량은 `viewportHeight`(virtual px) 기준으로 고정
+- [x] `getState()/setState()`의 `scrollTop`은 virtual 값으로 일관
+- [x] pinned 영역 스크롤 입력도 동일 매핑 함수를 사용
+
+### 코어 변경 코멘트 (3.2 반영, 2026-03-05)
+- 매핑 함수 고정:
+  - `mapPhysicalToVirtualScrollTop`, `mapVirtualToPhysicalScrollTop`를 렌더러 scroll path에 단일 적용
+- virtual 축 누적 보강:
+  - `pendingVirtualScrollTop` 도입으로 고배율 스케일(100M)에서 sub-pixel physical delta 손실 없이 휠 스크롤 누적
+- 입력 규칙:
+  - body/pinned 휠 입력은 virtual delta 기준으로 동일 처리
+  - root keydown의 `PageUp/PageDown`은 `viewportHeight`만큼 virtual scroll 이동
+- 검증:
+  - unit/integration: `packages/grid-core/test/grid.spec.ts` 100M wheel + page up/down 케이스 추가
 
 ### 수용 기준
-- [ ] rowCount=100,000,000, rowHeight=28 기준에서:
-  - [ ] `virtualHeight = 2,800,000,000 px`에서도 스크롤 동작/매핑이 유지
-  - [ ] 스크롤 thumb로 최상/최하 이동 가능
-  - [ ] jump bottom 후 가시 rowIndex가 하단 범위(>99,000,000)로 이동
-  - [ ] top -> bottom -> top 왕복 후 rowIndex 드리프트가 `±1` row 이내
+- [x] rowCount=100,000,000, rowHeight=28 기준에서:
+  - [x] `virtualHeight = 2,800,000,000 px`에서도 스크롤 동작/매핑이 유지
+  - [x] 스크롤 thumb로 최상/최하 이동 가능
+  - [x] jump bottom 후 가시 rowIndex가 하단 범위(>99,000,000)로 이동
+  - [x] top -> bottom -> top 왕복 후 rowIndex 드리프트가 `±1` row 이내
 
 ## 3.3 예제 추가
-- [ ] `example{N}.html`(권장: `example13.html`): 100M row model 스크롤 매핑 데모
-- [ ] e2e 시나리오 추가(최상/최하 jump + 왕복 drift 검증)
-- [ ] registry 업데이트
+- [x] `example{N}.html`(권장: `example13.html`): 100M row model 스크롤 매핑 데모
+- [x] e2e 시나리오 추가(최상/최하 jump + 왕복 drift 검증)
+- [x] registry 업데이트
+
+### 코어 변경 코멘트 (3.3 반영, 2026-03-05)
+- 예제:
+  - `examples/example13.html`에 100M 기준 `jump-top`, `jump-bottom`, `roundtrip drift`, `inspect` 제어 추가
+  - 로그 payload(`label`, `firstVisibleId`, `scrollTopVirtual`, `scrollTopNative`, `virtualMaxScrollTop`)를 JSON으로 표준화
+- e2e:
+  - `scripts/run-e2e.mjs`에 Example13 시나리오 추가
+  - 검증 항목: 100M 초기 상태, bottom jump 심도, roundtrip drift(<=1 row)
+- registry:
+  - `examples/registry.json`에 `example13` 등록/태그(`phase3`, `scroll-scaling`) 반영
 
 ## 3.4 RowModel 메모리 최적화(100M 대응)
-- [ ] identity view에서는 full `Int32Array`를 즉시 생성하지 않는 lazy mapping 모드
+- [x] identity view에서는 full `Int32Array`를 즉시 생성하지 않는 lazy mapping 모드
 - [ ] 정렬/필터 적용 시에만 mapping materialize 또는 segmented mapping 생성
 - [ ] 대용량 transaction 적용을 위한 sparse override 구조(기본 identity + 변경분)
 - [ ] `setRowCount(100_000_000)` 시 초기화 경로 메모리 예산 문서화
@@ -288,6 +321,42 @@
 - [ ] rowCount=100,000,000(identity)에서 초기화 시 브라우저 메모리 급증 없이 마운트 가능
 - [ ] 100M에서 jump bottom 후 가시 rowIndex가 하단 범위(>99,000,000)로 이동
 - [ ] 정렬/필터 on/off 반복 시 mapping 생성/해제가 누수 없이 동작
+
+## 3.5 Variable Row Height(멀티라인 텍스트 대응, 신규)
+- [ ] 목표: row별 상이 높이에서도 스크롤/가상화/핀 동기화를 안정적으로 유지
+- [ ] 높이 전략 확정:
+  - [ ] `rowHeightMode: \"fixed\" | \"estimated\" | \"measured\"`
+  - [ ] `estimatedRowHeight` 옵션 정의
+  - [ ] `getRowHeight?(rowIndex, dataIndex) => number` 계약 확정
+- [ ] 높이 캐시/인덱스 구조:
+  - [ ] row별 measured height cache
+  - [ ] prefix-sum 또는 Fenwick tree로 누적 높이 관리
+  - [ ] `rowIndex <-> virtualTop` 매핑 O(logN) 보장
+- [ ] 렌더링 파이프라인 변경:
+  - [ ] visible range 계산을 binary search(virtualScrollTop) 기반으로 전환
+  - [ ] row translateY를 `poolIndex * rowHeight`가 아닌 cumulative top 기준으로 갱신
+  - [ ] overscan 정책을 `rows` + `px` 혼합으로 정의
+- [ ] 측정/재측정 규칙:
+  - [ ] multiline wrapping 측정은 rAF 배치(읽기/쓰기 분리)
+  - [ ] column width/viewport width 변경 시 dirty range만 재측정
+  - [ ] 측정 중 스크롤 점프 방지를 위한 anchor row 보정
+- [ ] 스크롤 스케일링 결합:
+  - [ ] 3.1/3.2의 virtual/physical 매핑을 variable height virtualTop 기준으로 유지
+  - [ ] pinned left/center/right가 동일 row top map을 공유
+- [ ] API/상태:
+  - [ ] `resetRowHeights(rowIndexes?)` API 추가
+  - [ ] `getState()/setState()`가 variable height에서도 scrollTop 안정 복원
+- [ ] 검증:
+  - [ ] unit: prefix-sum/search/anchor 보정
+  - [ ] e2e: multiline + mixed heights + pinned + 100M synthetic
+  - [ ] example: variable row height demo 추가 + registry 업데이트
+
+### 수용 기준
+- [ ] 1~6줄 혼합 데이터에서 center/pinned 행 정렬 오차 0
+- [ ] 고속 휠/트랙패드 입력 중 행 겹침/출렁임 없음
+- [ ] 100M(identity)에서 초기 마운트/스크롤 입력 프리즈 없음
+- [ ] top -> bottom -> top 왕복 후 rowIndex drift가 ±1 row 이내
+- [ ] 스크롤 중 DOM create/remove 0 유지(pooling 유지)
 
 ---
 
@@ -581,6 +650,7 @@
 - [ ] Step E: `3.1~3.2` 100M scroll scaling 결합
 - [ ] Step F: `4.1` interaction/wheel 오케스트레이션 최종화
 - [ ] Step G: `14.2` AG-like 회귀 벤치/게이트 확정
+- [ ] Step H: `3.5` variable row height 확장(prefix-sum + anchor remeasure + e2e)
 
 ---
 

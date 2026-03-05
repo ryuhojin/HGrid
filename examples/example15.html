@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 15 - Variable Row Height</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        color: #0f172a;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .controls button.active {
+        border-color: #2563eb;
+        background: #dbeafe;
+        color: #1e3a8a;
+      }
+
+      #stats {
+        margin-bottom: 12px;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-line;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        border: 1px solid #e2e8f0;
+        background: #fcfdff;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      #grid {
+        width: 1080px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 15 - Variable Row Height</h1>
+
+    <div class="controls">
+      <button id="data-local" type="button" class="active">data: 5K mixed</button>
+      <button id="data-100m" type="button">data: 100M synthetic</button>
+      <button id="mode-fixed" type="button">fixed</button>
+      <button id="mode-estimated" type="button">estimated</button>
+      <button id="mode-measured" type="button" class="active">measured</button>
+      <button id="estimated-compact" type="button">estimated compact</button>
+      <button id="estimated-spacious" type="button">estimated spacious</button>
+      <button id="jump-top" type="button">jump top</button>
+      <button id="jump-bottom" type="button">jump bottom</button>
+      <button id="reset-heights" type="button">reset row heights</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div id="stats">Ready</div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      function buildDescription(index) {
+        const lineCount = (index % 6) + 1;
+        const blocks = [];
+        for (let line = 0; line < lineCount; line += 1) {
+          blocks.push('row ' + (index + 1) + ' line ' + (line + 1) + ' variable height wrapping sample text');
+        }
+        return blocks.join(' ');
+      }
+
+      class SyntheticLargeDataProvider {
+        constructor(rowCount) {
+          this.rowCount = rowCount;
+        }
+
+        getRowCount() {
+          return this.rowCount;
+        }
+
+        getRowKey(dataIndex) {
+          return dataIndex;
+        }
+
+        getValue(dataIndex, columnId) {
+          if (columnId === 'id') return dataIndex + 1;
+          if (columnId === 'name') return 'Synthetic-' + (dataIndex + 1);
+          if (columnId === 'description') return 'synthetic row ' + (dataIndex + 1);
+          if (columnId === 'note') return dataIndex % 2 === 0 ? 'synthetic long note' : 'synthetic short';
+          if (columnId === 'region') return ['KR', 'US', 'JP', 'DE'][dataIndex % 4];
+          return '';
+        }
+
+        setValue() {}
+        applyTransactions() {}
+
+        getRow(dataIndex) {
+          return {
+            id: dataIndex + 1,
+            name: 'Synthetic-' + (dataIndex + 1),
+            description: 'synthetic row ' + (dataIndex + 1),
+            note: dataIndex % 2 === 0 ? 'synthetic long note' : 'synthetic short',
+            region: ['KR', 'US', 'JP', 'DE'][dataIndex % 4]
+          };
+        }
+      }
+
+      const localRowData = Array.from({ length: 5000 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        description: buildDescription(index),
+        note: index % 2 === 0 ? 'long memo: alpha beta gamma delta epsilon zeta eta theta' : 'short memo',
+        region: ['KR', 'US', 'JP', 'DE'][index % 4]
+      }));
+
+      const syntheticProvider = new SyntheticLargeDataProvider(100000000);
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 120, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'description', header: 'Description', width: 360, type: 'text' },
+        { id: 'note', header: 'Note', width: 300, type: 'text' },
+        { id: 'region', header: 'Region', width: 120, type: 'text', pinned: 'right' }
+      ];
+
+      let estimatedScale = 1;
+      let mode = 'measured';
+      let dataMode = 'local';
+      let currentRowCount = localRowData.length;
+
+      function estimatedHeightGetter(_rowIndex, dataIndex) {
+        if (dataMode === '100m') {
+          return 28 + (dataIndex % 4) * 2;
+        }
+
+        return 28 + ((dataIndex % 4) + 1) * 8 * estimatedScale;
+      }
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: localRowData,
+        height: 460,
+        rowHeight: 28,
+        rowHeightMode: mode,
+        estimatedRowHeight: 28,
+        getRowHeight: estimatedHeightGetter,
+        overscan: 8,
+        overscanCols: 2
+      });
+
+      const statsElement = document.getElementById('stats');
+      const logElement = document.getElementById('log');
+      const modeButtons = [
+        document.getElementById('mode-fixed'),
+        document.getElementById('mode-estimated'),
+        document.getElementById('mode-measured')
+      ];
+      const dataButtons = [document.getElementById('data-local'), document.getElementById('data-100m')];
+
+      function waitFrames(count) {
+        return new Promise((resolve) => {
+          let remaining = count;
+          const step = () => {
+            if (remaining <= 0) {
+              resolve();
+              return;
+            }
+            remaining -= 1;
+            requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        });
+      }
+
+      function getVisibleRows(zoneClassName) {
+        return Array.from(document.querySelectorAll(zoneClassName)).filter((rowElement) => {
+          return rowElement.style.display !== 'none';
+        });
+      }
+
+      function getRowSnapshot() {
+        const leftRows = getVisibleRows('.hgrid__row--left');
+        const centerRows = getVisibleRows('.hgrid__row--center');
+        const rightRows = getVisibleRows('.hgrid__row--right');
+
+        if (!leftRows.length || !centerRows.length || !rightRows.length) {
+          return null;
+        }
+
+        const leftRow = leftRows[0];
+        const centerRow = centerRows[0];
+        const rightRow = rightRows[0];
+        const idCell = leftRow.querySelector('.hgrid__cell[data-column-id="id"]');
+        const maxVisibleCenterHeight = centerRows.reduce((maxHeight, rowElement) => {
+          const rowHeight = Number.parseFloat(rowElement.style.height || '0');
+          if (!Number.isFinite(rowHeight)) {
+            return maxHeight;
+          }
+          return Math.max(maxHeight, rowHeight);
+        }, 0);
+
+        return {
+          rowIndexLeft: Number(leftRow.dataset.rowIndex),
+          rowIndexCenter: Number(centerRow.dataset.rowIndex),
+          rowIndexRight: Number(rightRow.dataset.rowIndex),
+          leftTransform: leftRow.style.transform,
+          centerTransform: centerRow.style.transform,
+          rightTransform: rightRow.style.transform,
+          leftHeight: leftRow.style.height,
+          centerHeight: centerRow.style.height,
+          rightHeight: rightRow.style.height,
+          maxVisibleCenterHeight,
+          firstVisibleId: idCell ? Number(idCell.textContent) : null,
+          isPinnedAligned:
+            leftRow.dataset.rowIndex === centerRow.dataset.rowIndex &&
+            centerRow.dataset.rowIndex === rightRow.dataset.rowIndex &&
+            leftRow.style.transform === centerRow.style.transform &&
+            centerRow.style.transform === rightRow.style.transform &&
+            leftRow.style.height === centerRow.style.height &&
+            centerRow.style.height === rightRow.style.height
+        };
+      }
+
+      function updateStats(snapshot) {
+        const renderer = grid.renderer;
+        const state = grid.getState();
+        const lines = [
+          'dataMode: ' + dataMode,
+          'mode: ' + mode,
+          'estimatedScale: ' + estimatedScale,
+          'rowCount: ' + currentRowCount.toLocaleString(),
+          'scrollTop(virtual): ' + Math.round(state.scrollTop).toLocaleString() + ' px',
+          'virtualHeight: ' + Math.round(renderer.virtualScrollHeight).toLocaleString() + ' px',
+          'physicalHeight: ' + Math.round(renderer.physicalScrollHeight).toLocaleString() + ' px',
+          'firstVisibleId: ' + (snapshot ? snapshot.firstVisibleId : '-'),
+          'firstRowHeight(left/center/right): ' +
+            (snapshot ? snapshot.leftHeight + ' / ' + snapshot.centerHeight + ' / ' + snapshot.rightHeight : '-'),
+          'maxVisibleCenterHeight: ' + (snapshot ? snapshot.maxVisibleCenterHeight + 'px' : '-'),
+          'pinnedAligned: ' + (snapshot ? snapshot.isPinnedAligned : false)
+        ];
+        statsElement.textContent = lines.join('\n');
+      }
+
+      function writeLog(label) {
+        const snapshot = getRowSnapshot();
+        updateStats(snapshot);
+        logElement.textContent = JSON.stringify({
+          label,
+          dataMode,
+          mode,
+          estimatedScale,
+          scrollTop: Math.round(grid.getState().scrollTop),
+          rowCount: currentRowCount,
+          snapshot
+        });
+      }
+
+      async function inspect(label) {
+        await waitFrames(2);
+        writeLog(label);
+      }
+
+      function setActiveModeButton(nextMode) {
+        modeButtons.forEach((button) => {
+          const shouldActivate = button.id === 'mode-' + nextMode;
+          button.classList.toggle('active', shouldActivate);
+        });
+      }
+
+      function setActiveDataButton(nextDataMode) {
+        dataButtons.forEach((button) => {
+          const shouldActivate = button.id === 'data-' + nextDataMode;
+          button.classList.toggle('active', shouldActivate);
+        });
+      }
+
+      async function applyMode(nextMode) {
+        mode = nextMode;
+        setActiveModeButton(nextMode);
+        grid.setOptions({
+          rowHeightMode: mode,
+          estimatedRowHeight: 28,
+          getRowHeight: estimatedHeightGetter
+        });
+        grid.resetRowHeights();
+        grid.setState({ scrollTop: 0 });
+        await inspect('mode-' + mode);
+      }
+
+      async function applyDataMode(nextDataMode) {
+        dataMode = nextDataMode;
+        setActiveDataButton(nextDataMode);
+
+        if (nextDataMode === '100m') {
+          mode = 'estimated';
+          setActiveModeButton(mode);
+          currentRowCount = syntheticProvider.getRowCount();
+          grid.setOptions({
+            dataProvider: syntheticProvider,
+            rowHeightMode: mode,
+            estimatedRowHeight: 28,
+            getRowHeight: estimatedHeightGetter
+          });
+        } else {
+          currentRowCount = localRowData.length;
+          grid.setOptions({
+            rowData: localRowData,
+            rowHeightMode: mode,
+            estimatedRowHeight: 28,
+            getRowHeight: estimatedHeightGetter
+          });
+        }
+
+        grid.resetRowHeights();
+        grid.setState({ scrollTop: 0 });
+        await inspect('data-' + nextDataMode);
+      }
+
+      document.getElementById('data-local').addEventListener('click', () => {
+        applyDataMode('local');
+      });
+
+      document.getElementById('data-100m').addEventListener('click', () => {
+        applyDataMode('100m');
+      });
+
+      document.getElementById('mode-fixed').addEventListener('click', () => {
+        applyMode('fixed');
+      });
+
+      document.getElementById('mode-estimated').addEventListener('click', () => {
+        applyMode('estimated');
+      });
+
+      document.getElementById('mode-measured').addEventListener('click', () => {
+        applyMode('measured');
+      });
+
+      document.getElementById('estimated-compact').addEventListener('click', async () => {
+        estimatedScale = 1;
+        if (mode === 'estimated') {
+          grid.resetRowHeights();
+        }
+        await inspect('estimated-compact');
+      });
+
+      document.getElementById('estimated-spacious').addEventListener('click', async () => {
+        estimatedScale = 2;
+        if (mode === 'estimated') {
+          grid.resetRowHeights();
+        }
+        await inspect('estimated-spacious');
+      });
+
+      document.getElementById('jump-top').addEventListener('click', async () => {
+        grid.setState({ scrollTop: 0 });
+        await inspect('jump-top');
+      });
+
+      document.getElementById('jump-bottom').addEventListener('click', async () => {
+        grid.setState({ scrollTop: grid.renderer.virtualMaxScrollTop });
+        await inspect('jump-bottom');
+      });
+
+      document.getElementById('reset-heights').addEventListener('click', async () => {
+        grid.resetRowHeights();
+        await inspect('reset-row-heights');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        inspect('inspect');
+      });
+
+      inspect('initial');
+    </script>
+  </body>
+</html>

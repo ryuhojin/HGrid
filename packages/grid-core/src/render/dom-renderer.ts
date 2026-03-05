@@ -1,5 +1,5 @@
 import { EventBus } from '../core/event-bus';
-import type { ColumnDef, GridOptions, GridState, ScrollbarPolicy, ScrollbarVisibility } from '../core/grid-options';
+import type { ColumnDef, GridOptions, GridState, RowHeightMode, ScrollbarPolicy, ScrollbarVisibility } from '../core/grid-options';
 import { formatColumnValue, getColumnValue } from '../data/column-model';
 import type { GridRowData } from '../data/data-provider';
 import {
@@ -8,6 +8,7 @@ import {
   mapPhysicalToVirtualScrollTop,
   mapVirtualToPhysicalScrollTop
 } from '../virtualization/scroll-scaling';
+import { RowHeightMap } from '../virtualization/row-height-map';
 
 type ColumnZoneName = 'left' | 'center' | 'right';
 
@@ -30,6 +31,7 @@ interface ZoneRowRenderState {
   rowIndex: number;
   dataIndex: number;
   translateY: number;
+  height: number;
 }
 
 interface ZoneRowItem {
@@ -56,10 +58,20 @@ interface HorizontalWindow {
   end: number;
 }
 
+interface CellHitTestResult {
+  zone: ColumnZoneName;
+  rowIndex: number;
+  dataIndex: number;
+  columnIndex: number;
+  column: ColumnDef;
+}
+
 const DEFAULT_HEIGHT = 360;
 const DEFAULT_ROW_HEIGHT = 28;
+const DEFAULT_ESTIMATED_ROW_HEIGHT = 28;
 const DEFAULT_OVERSCAN = 6;
 const DEFAULT_COLUMN_OVERSCAN = 2;
+const VARIABLE_POOL_EXTRA_ROWS = 12;
 const MIN_SCROLLBAR_SIZE = 0;
 const INVISIBLE_SCROLLBAR_FALLBACK_SIZE = 16;
 const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
@@ -132,13 +144,21 @@ export class DomRenderer {
   private physicalMaxScrollTop = 0;
   private scrollScale = 1;
   private renderedHorizontalWindow: HorizontalWindow = { start: 0, end: 0 };
+  private leftColumnLeft: number[] = [];
+  private leftColumnWidth: number[] = [];
   private centerColumnLeft: number[] = [];
   private centerColumnWidth: number[] = [];
+  private rightColumnLeft: number[] = [];
+  private rightColumnWidth: number[] = [];
+  private leftPinnedWidth = 0;
+  private rightPinnedWidth = 0;
   private centerColumnsWidth = 0;
   private centerVisibleWidth = 0;
   private centerCellCapacity = 0;
   private centerHeaderCellPool: HTMLDivElement[] = [];
   private centerHeaderCellStates: CellRenderState[] = [];
+  private readonly rowHeightMap: RowHeightMap;
+  private measurementFrameId: number | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
   public constructor(container: HTMLElement, options: GridOptions, eventBus: EventBus) {
@@ -181,6 +201,7 @@ export class DomRenderer {
 
     this.columnsByZone = this.splitColumns(this.options.columns);
     this.scrollbarSize = this.measureScrollbarSize();
+    this.rowHeightMap = new RowHeightMap(this.options.rowModel.getViewRowCount(), this.getBaseRowHeight());
 
     this.initializeDom();
     this.markLayoutDirty(true);
@@ -214,6 +235,20 @@ export class DomRenderer {
     };
   }
 
+  public resetRowHeights(rowIndexes?: number[]): void {
+    if (!this.isVariableRowHeightMode()) {
+      return;
+    }
+
+    const hasChanged = this.rowHeightMap.clearRows(rowIndexes);
+    if (!hasChanged) {
+      return;
+    }
+
+    this.markLayoutDirty(false);
+    this.scheduleRender();
+  }
+
   public setTheme(themeTokens: Record<string, string>): void {
     for (const tokenName in themeTokens) {
       if (Object.prototype.hasOwnProperty.call(themeTokens, tokenName)) {
@@ -233,12 +268,17 @@ export class DomRenderer {
     this.headerElement.removeEventListener('wheel', this.handleAuxiliaryWheel);
     this.bodyElement.removeEventListener('wheel', this.handleBodyWheel);
     this.rootElement.removeEventListener('keydown', this.handleRootKeyDown);
-    this.rootElement.removeEventListener('click', this.handleRootClick);
+    this.rootElement.removeEventListener('pointerdown', this.handleRootPointerDown);
     this.teardownResizeObserver();
 
     if (this.scheduledFrameId !== null) {
       cancelAnimationFrame(this.scheduledFrameId);
       this.scheduledFrameId = null;
+    }
+
+    if (this.measurementFrameId !== null) {
+      cancelAnimationFrame(this.measurementFrameId);
+      this.measurementFrameId = null;
     }
 
     this.rowPool = [];
@@ -320,20 +360,25 @@ export class DomRenderer {
     this.headerElement.addEventListener('wheel', this.handleAuxiliaryWheel, { passive: false });
     this.bodyElement.addEventListener('wheel', this.handleBodyWheel, { passive: false });
     this.rootElement.addEventListener('keydown', this.handleRootKeyDown);
-    this.rootElement.addEventListener('click', this.handleRootClick);
+    this.rootElement.addEventListener('pointerdown', this.handleRootPointerDown);
 
     this.container.replaceChildren(this.rootElement);
     this.setupResizeObserver();
   }
 
   private refreshLayout(forcePoolRebuild: boolean): void {
-    const previousScrollTop = this.pendingScrollTop;
     const previousScrollLeft = this.pendingScrollLeft;
     const previousCenterCellCapacity = this.centerCellCapacity;
     const previousVirtualScrollTop = this.pendingVirtualScrollTop;
+    const previousCenterVisibleWidth = this.centerVisibleWidth;
 
     this.updateViewportHeights();
+    this.applyRowHeightModeClass();
     this.applyZoneLayout();
+    const didResetRowHeightCache = this.syncRowHeightCache(forcePoolRebuild, previousCenterVisibleWidth);
+    if (didResetRowHeightCache) {
+      this.applyZoneLayout();
+    }
     this.buildCenterColumnMetrics();
     this.rebuildHeader();
     this.updateSpacerSize();
@@ -437,7 +482,7 @@ export class DomRenderer {
     const visibleDisplay = zoneName === 'center' ? 'block' : '';
     const rowElement = document.createElement('div');
     rowElement.className = `hgrid__row hgrid__row--${zoneName}`;
-    rowElement.style.height = `${this.getRowHeight()}px`;
+    rowElement.style.height = `${this.getBaseRowHeight()}px`;
     rowElement.style.width = `${width}px`;
 
     if (zoneName === 'center') {
@@ -479,7 +524,8 @@ export class DomRenderer {
         isVisible: true,
         rowIndex: -1,
         dataIndex: -1,
-        translateY: Number.NaN
+        translateY: Number.NaN,
+        height: Number.NaN
       },
       cellStates
     };
@@ -490,7 +536,9 @@ export class DomRenderer {
     const centerWidth = this.getColumnsWidth(this.columnsByZone.center);
     this.centerColumnsWidth = centerWidth;
     const rightWidth = this.getColumnsWidth(this.columnsByZone.right);
-    const rowTrackHeight = this.options.rowModel.getViewRowCount() * this.getRowHeight();
+    this.leftPinnedWidth = leftWidth;
+    this.rightPinnedWidth = rightWidth;
+    const rowTrackHeight = this.getVirtualRowTrackHeight();
     const viewportHeight = this.getViewportHeight();
     const rootWidth = this.rootElement.clientWidth || this.container.clientWidth || leftWidth + centerWidth + rightWidth;
     const scrollbarPolicy = this.getResolvedScrollbarPolicy();
@@ -587,13 +635,15 @@ export class DomRenderer {
 
   private updateSpacerSize(): void {
     const rowCount = this.options.rowModel.getViewRowCount();
-    const rowHeight = this.getRowHeight();
+    const baseRowHeight = this.getBaseRowHeight();
+    const virtualHeight = this.getVirtualRowTrackHeight();
     const configuredViewportHeight = this.getViewportHeight();
     const measuredViewportHeight =
       this.viewportElement.clientHeight || this.verticalScrollElement.clientHeight || configuredViewportHeight;
     const metrics = createScrollScaleMetrics({
       rowCount,
-      rowHeight,
+      rowHeight: baseRowHeight,
+      virtualHeight,
       viewportHeight: measuredViewportHeight,
       maxScrollPx: MAX_SCROLL_PX
     });
@@ -611,10 +661,10 @@ export class DomRenderer {
   }
 
   private renderRows(scrollTop: number, scrollLeft: number): void {
+    const viewRowCount = this.options.rowModel.getViewRowCount();
     const virtualScrollTop = this.pendingVirtualScrollTop;
-    const rowHeight = this.getRowHeight();
     const startRow = this.getStartRowForScrollTop(virtualScrollTop);
-    const viewportOffsetY = startRow * rowHeight;
+    const viewportOffsetY = this.getRowTop(startRow);
     const horizontalWindow = this.getHorizontalWindow(scrollLeft);
     this.renderCenterHeader(horizontalWindow);
     this.renderedStartRow = startRow;
@@ -625,6 +675,14 @@ export class DomRenderer {
 
     for (let poolIndex = 0; poolIndex < this.rowPool.length; poolIndex += 1) {
       const rowIndex = startRow + poolIndex;
+      if (rowIndex >= viewRowCount) {
+        const hiddenPoolItem = this.rowPool[poolIndex];
+        this.hidePoolRow(hiddenPoolItem.left);
+        this.hidePoolRow(hiddenPoolItem.center);
+        this.hidePoolRow(hiddenPoolItem.right);
+        continue;
+      }
+
       const dataIndex = this.options.rowModel.getDataIndex(rowIndex);
       const poolItem = this.rowPool[poolIndex];
 
@@ -636,12 +694,15 @@ export class DomRenderer {
       }
 
       const row = this.resolveRow(dataIndex);
-      const rowTranslateY = poolIndex * rowHeight;
+      const rowHeight = this.resolveRenderedRowHeight(rowIndex, dataIndex);
+      const rowTranslateY = this.getRowTop(rowIndex) - viewportOffsetY;
 
-      this.renderZoneRow(poolItem.left, this.columnsByZone.left, row, rowIndex, dataIndex, rowTranslateY);
-      this.renderCenterZoneRow(poolItem.center, row, rowIndex, dataIndex, rowTranslateY, horizontalWindow);
-      this.renderZoneRow(poolItem.right, this.columnsByZone.right, row, rowIndex, dataIndex, rowTranslateY);
+      this.renderZoneRow(poolItem.left, this.columnsByZone.left, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
+      this.renderCenterZoneRow(poolItem.center, row, rowIndex, dataIndex, rowTranslateY, rowHeight, horizontalWindow);
+      this.renderZoneRow(poolItem.right, this.columnsByZone.right, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
     }
+
+    this.scheduleMeasuredRowHeightPass();
   }
 
   private renderZoneRow(
@@ -650,14 +711,15 @@ export class DomRenderer {
     row: GridRowData,
     rowIndex: number,
     dataIndex: number,
-    rowTranslateY: number
+    rowTranslateY: number,
+    rowHeight: number
   ): void {
     if (columns.length === 0) {
       this.hidePoolRow(zoneRow);
       return;
     }
 
-    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY);
+    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight);
 
     for (let colIndex = 0; colIndex < columns.length; colIndex += 1) {
       const column = columns[colIndex];
@@ -677,6 +739,7 @@ export class DomRenderer {
     rowIndex: number,
     dataIndex: number,
     rowTranslateY: number,
+    rowHeight: number,
     horizontalWindow: HorizontalWindow
   ): void {
     if (this.columnsByZone.center.length === 0 || horizontalWindow.end <= horizontalWindow.start) {
@@ -684,7 +747,7 @@ export class DomRenderer {
       return;
     }
 
-    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY);
+    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight);
 
     const centerColumns = this.columnsByZone.center;
     let slotIndex = 0;
@@ -729,7 +792,13 @@ export class DomRenderer {
     zoneRow.rowState.dataIndex = -1;
   }
 
-  private bindRowPosition(zoneRow: ZoneRowItem, rowIndex: number, dataIndex: number, rowTranslateY: number): void {
+  private bindRowPosition(
+    zoneRow: ZoneRowItem,
+    rowIndex: number,
+    dataIndex: number,
+    rowTranslateY: number,
+    rowHeight: number
+  ): void {
     const rowState = zoneRow.rowState;
 
     if (!rowState.isVisible) {
@@ -740,6 +809,11 @@ export class DomRenderer {
     if (rowState.translateY !== rowTranslateY) {
       zoneRow.element.style.transform = `translate3d(0, ${rowTranslateY}px, 0)`;
       rowState.translateY = rowTranslateY;
+    }
+
+    if (rowState.height !== rowHeight) {
+      zoneRow.element.style.height = `${rowHeight}px`;
+      rowState.height = rowHeight;
     }
 
     if (rowState.rowIndex !== rowIndex) {
@@ -822,6 +896,17 @@ export class DomRenderer {
   }
 
   private buildCenterColumnMetrics(): void {
+    const leftColumns = this.columnsByZone.left;
+    this.leftColumnLeft = new Array(leftColumns.length);
+    this.leftColumnWidth = new Array(leftColumns.length);
+    let nextLeftPinnedOffset = 0;
+    for (let colIndex = 0; colIndex < leftColumns.length; colIndex += 1) {
+      const width = Math.max(1, leftColumns[colIndex].width);
+      this.leftColumnLeft[colIndex] = nextLeftPinnedOffset;
+      this.leftColumnWidth[colIndex] = width;
+      nextLeftPinnedOffset += width;
+    }
+
     const centerColumns = this.columnsByZone.center;
     this.centerColumnLeft = new Array(centerColumns.length);
     this.centerColumnWidth = new Array(centerColumns.length);
@@ -836,6 +921,17 @@ export class DomRenderer {
       minWidth = Math.min(minWidth, width);
     }
     this.centerColumnsWidth = nextLeft;
+
+    const rightColumns = this.columnsByZone.right;
+    this.rightColumnLeft = new Array(rightColumns.length);
+    this.rightColumnWidth = new Array(rightColumns.length);
+    let nextRightPinnedOffset = 0;
+    for (let colIndex = 0; colIndex < rightColumns.length; colIndex += 1) {
+      const width = Math.max(1, rightColumns[colIndex].width);
+      this.rightColumnLeft[colIndex] = nextRightPinnedOffset;
+      this.rightColumnWidth[colIndex] = width;
+      nextRightPinnedOffset += width;
+    }
 
     if (centerColumns.length === 0) {
       this.centerCellCapacity = 0;
@@ -916,6 +1012,30 @@ export class DomRenderer {
     return Math.min(low, this.centerColumnLeft.length);
   }
 
+  private findColumnIndexAtOffset(columnLeft: number[], columnWidth: number[], offset: number): number {
+    if (columnLeft.length === 0 || offset < 0) {
+      return -1;
+    }
+
+    let low = 0;
+    let high = columnLeft.length;
+
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      const start = columnLeft[mid];
+      const end = start + columnWidth[mid];
+      if (offset < start) {
+        high = mid;
+      } else if (offset >= end) {
+        low = mid + 1;
+      } else {
+        return mid;
+      }
+    }
+
+    return -1;
+  }
+
   private renderCenterHeader(horizontalWindow: HorizontalWindow): void {
     if (this.centerHeaderCellPool.length === 0 || horizontalWindow.end <= horizontalWindow.start) {
       for (let slotIndex = 0; slotIndex < this.centerHeaderCellPool.length; slotIndex += 1) {
@@ -958,13 +1078,201 @@ export class DomRenderer {
   }
 
   private getPoolSize(): number {
-    const rowHeight = this.getRowHeight();
-    const visibleRows = Math.ceil(this.getViewportHeight() / rowHeight);
-    return Math.max(1, visibleRows + this.getOverscan() * 2);
+    const baseRowHeight = this.getBaseRowHeight();
+    const visibleRows = Math.ceil(this.getViewportHeight() / baseRowHeight);
+    const overscanRows = this.getOverscan() * 2;
+    const variableRows = this.isVariableRowHeightMode() ? VARIABLE_POOL_EXTRA_ROWS : 0;
+    return Math.max(1, visibleRows + overscanRows + variableRows);
   }
 
-  private getRowHeight(): number {
-    return this.options.rowHeight ?? DEFAULT_ROW_HEIGHT;
+  private getFixedRowHeight(): number {
+    return Math.max(1, Math.round(this.options.rowHeight ?? DEFAULT_ROW_HEIGHT));
+  }
+
+  private getBaseRowHeight(): number {
+    const defaultEstimated = this.options.rowHeight ?? DEFAULT_ESTIMATED_ROW_HEIGHT;
+    const estimated = this.options.estimatedRowHeight ?? defaultEstimated;
+    return Math.max(1, Math.round(estimated));
+  }
+
+  private getRowHeightMode(): RowHeightMode {
+    return this.options.rowHeightMode ?? 'fixed';
+  }
+
+  private isVariableRowHeightMode(): boolean {
+    const mode = this.getRowHeightMode();
+    return mode === 'estimated' || mode === 'measured';
+  }
+
+  private normalizeRowHeightValue(value: number): number {
+    const fallback = this.getBaseRowHeight();
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.max(1, Math.round(value));
+  }
+
+  private resolveRenderedRowHeight(rowIndex: number, dataIndex: number): number {
+    if (!this.isVariableRowHeightMode()) {
+      return this.getFixedRowHeight();
+    }
+
+    if (this.getRowHeightMode() === 'estimated' && this.options.getRowHeight && !this.rowHeightMap.hasRowHeight(rowIndex)) {
+      const estimatedHeight = this.options.getRowHeight(rowIndex, dataIndex);
+      this.rowHeightMap.setRowHeight(rowIndex, this.normalizeRowHeightValue(estimatedHeight));
+    }
+
+    return this.rowHeightMap.getRowHeight(rowIndex);
+  }
+
+  private getVirtualRowTrackHeight(): number {
+    if (!this.isVariableRowHeightMode()) {
+      return this.options.rowModel.getViewRowCount() * this.getFixedRowHeight();
+    }
+
+    return this.rowHeightMap.getTotalHeight();
+  }
+
+  private getRowTop(rowIndex: number): number {
+    if (!this.isVariableRowHeightMode()) {
+      const clampedRowIndex = Math.max(0, Math.floor(rowIndex));
+      return clampedRowIndex * this.getFixedRowHeight();
+    }
+
+    return this.rowHeightMap.getRowTop(rowIndex);
+  }
+
+  private syncRowHeightCache(forcePoolRebuild: boolean, previousCenterVisibleWidth: number): boolean {
+    const rowCount = this.options.rowModel.getViewRowCount();
+    const baseRowHeight = this.getBaseRowHeight();
+    const mode = this.getRowHeightMode();
+
+    if (mode !== 'measured' && this.measurementFrameId !== null) {
+      cancelAnimationFrame(this.measurementFrameId);
+      this.measurementFrameId = null;
+    }
+
+    const measuredWidthChanged = mode === 'measured' && Math.abs(this.centerVisibleWidth - previousCenterVisibleWidth) >= 1;
+    const shouldResetCompletely =
+      !this.isVariableRowHeightMode() ||
+      this.rowHeightMap.getRowCount() !== rowCount ||
+      this.rowHeightMap.getBaseHeight() !== baseRowHeight;
+
+    if (shouldResetCompletely) {
+      this.rowHeightMap.reset(rowCount, baseRowHeight);
+      return true;
+    }
+
+    if (mode === 'measured' && (measuredWidthChanged || forcePoolRebuild)) {
+      // Width-sensitive measured mode: invalidate only current rendered range and re-measure in next pass.
+      const dirtyRowIndexes = this.collectVisibleRowIndexesFromPool();
+      if (dirtyRowIndexes.length > 0) {
+        this.rowHeightMap.clearRows(dirtyRowIndexes);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private applyRowHeightModeClass(): void {
+    const mode = this.getRowHeightMode();
+    this.rootElement.classList.toggle('hgrid--row-height-estimated', mode === 'estimated');
+    this.rootElement.classList.toggle('hgrid--row-height-measured', mode === 'measured');
+  }
+
+  private scheduleMeasuredRowHeightPass(): void {
+    if (this.getRowHeightMode() !== 'measured') {
+      return;
+    }
+
+    if (this.measurementFrameId !== null) {
+      return;
+    }
+
+    this.measurementFrameId = requestAnimationFrame(() => {
+      this.measurementFrameId = null;
+      this.measureVisibleRowHeights();
+    });
+  }
+
+  private measureVisibleRowHeights(): void {
+    if (this.getRowHeightMode() !== 'measured') {
+      return;
+    }
+
+    const baseHeight = this.getBaseRowHeight();
+    const anchorRowIndex = this.renderedStartRow;
+    const anchorTopBefore = this.rowHeightMap.getRowTop(anchorRowIndex);
+    let hasChanged = false;
+
+    for (let poolIndex = 0; poolIndex < this.rowPool.length; poolIndex += 1) {
+      const poolItem = this.rowPool[poolIndex];
+      if (!poolItem.center.rowState.isVisible) {
+        continue;
+      }
+
+      const rowIndex = poolItem.center.rowState.rowIndex;
+      if (rowIndex < 0) {
+        continue;
+      }
+
+      const measuredHeight = Math.max(
+        baseHeight,
+        Math.ceil(
+          Math.max(
+            this.measureZoneContentHeight(poolItem.left),
+            this.measureZoneContentHeight(poolItem.center),
+            this.measureZoneContentHeight(poolItem.right)
+          )
+        )
+      );
+
+      if (this.rowHeightMap.setRowHeight(rowIndex, measuredHeight)) {
+        hasChanged = true;
+      }
+    }
+
+    if (!hasChanged) {
+      return;
+    }
+
+    const anchorTopAfter = this.rowHeightMap.getRowTop(anchorRowIndex);
+    if (anchorTopAfter !== anchorTopBefore) {
+      this.setVirtualScrollTop(this.pendingVirtualScrollTop + (anchorTopAfter - anchorTopBefore));
+    }
+
+    this.markLayoutDirty(false);
+    this.scheduleRender();
+  }
+
+  private measureZoneContentHeight(zoneRow: ZoneRowItem): number {
+    let maxHeight = zoneRow.element.scrollHeight;
+
+    for (let cellIndex = 0; cellIndex < zoneRow.cells.length; cellIndex += 1) {
+      const cell = zoneRow.cells[cellIndex];
+      if (cell.style.display === 'none') {
+        continue;
+      }
+
+      maxHeight = Math.max(maxHeight, cell.scrollHeight);
+    }
+
+    return maxHeight;
+  }
+
+  private collectVisibleRowIndexesFromPool(): number[] {
+    const rowIndexes: number[] = [];
+    for (let poolIndex = 0; poolIndex < this.rowPool.length; poolIndex += 1) {
+      const rowState = this.rowPool[poolIndex].center.rowState;
+      if (!rowState.isVisible || rowState.rowIndex < 0) {
+        continue;
+      }
+      rowIndexes.push(rowState.rowIndex);
+    }
+
+    return rowIndexes;
   }
 
   private getOverscan(): number {
@@ -975,11 +1283,25 @@ export class DomRenderer {
     return this.options.height ?? DEFAULT_HEIGHT;
   }
 
+  private getVariableOverscanPx(): number {
+    if (!this.isVariableRowHeightMode()) {
+      return 0;
+    }
+
+    return this.getBaseRowHeight() * Math.max(1, this.getOverscan());
+  }
+
   private getStartRowForScrollTop(scrollTop: number): number {
-    const rowHeight = this.getRowHeight();
     const overscan = this.getOverscan();
-    const firstVisibleRow = Math.floor(scrollTop / rowHeight);
-    return Math.max(0, firstVisibleRow - overscan);
+    if (!this.isVariableRowHeightMode()) {
+      const firstVisibleRow = Math.floor(scrollTop / this.getFixedRowHeight());
+      return Math.max(0, firstVisibleRow - overscan);
+    }
+
+    const firstVisibleRow = this.rowHeightMap.findRowIndexAtOffset(scrollTop);
+    const overscanByRows = Math.max(0, firstVisibleRow - overscan);
+    const overscanByPixels = this.rowHeightMap.findRowIndexAtOffset(Math.max(0, scrollTop - this.getVariableOverscanPx()));
+    return Math.max(0, Math.min(overscanByRows, overscanByPixels));
   }
 
   private markLayoutDirty(forcePoolRebuild: boolean): void {
@@ -1114,7 +1436,9 @@ export class DomRenderer {
       return;
     }
 
-    const horizontalDelta = event.deltaX !== 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0;
+    const isPinnedZone =
+      bodyZone.classList.contains('hgrid__body-left') || bodyZone.classList.contains('hgrid__body-right');
+    const horizontalDelta = isPinnedZone ? 0 : event.deltaX !== 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0;
     const verticalDelta = event.shiftKey && event.deltaX === 0 ? 0 : event.deltaY;
     const shouldHandleHorizontal = this.canUseHorizontalScroll && horizontalDelta !== 0;
     const shouldHandleVertical = this.canUseVerticalScroll && verticalDelta !== 0;
@@ -1159,37 +1483,145 @@ export class DomRenderer {
     }
   };
 
-  private handleRootClick = (event: Event): void => {
-    const target = event.target as HTMLElement;
-    const cellElement = target.closest('.hgrid__cell') as HTMLDivElement | null;
-    const rowElement = target.closest('.hgrid__row') as HTMLDivElement | null;
-
-    if (!cellElement || !rowElement) {
+  private handleRootPointerDown = (event: PointerEvent): void => {
+    if (event.defaultPrevented) {
       return;
     }
 
-    const rowIndex = Number(rowElement.dataset.rowIndex);
-    const dataIndexFromDom = Number(rowElement.dataset.dataIndex);
-    const columnId = cellElement.dataset.columnId ?? '';
-
-    if (Number.isNaN(rowIndex) || !columnId) {
+    if (event.button !== 0) {
       return;
     }
 
-    const dataIndex = Number.isNaN(dataIndexFromDom) ? this.options.rowModel.getDataIndex(rowIndex) : dataIndexFromDom;
-    if (dataIndex === -1) {
+    const hit = this.hitTestCellAtPoint(event.clientX, event.clientY);
+    if (!hit) {
       return;
     }
 
-    const row = this.resolveRow(dataIndex);
-    const column = this.options.columns.find((item) => item.id === columnId);
+    const row = this.resolveRow(hit.dataIndex);
     this.eventBus.emit('cellClick', {
-      rowIndex,
-      dataIndex,
-      columnId,
-      value: column ? getColumnValue(column, row) : this.options.dataProvider.getValue(dataIndex, columnId)
+      rowIndex: hit.rowIndex,
+      dataIndex: hit.dataIndex,
+      columnId: hit.column.id,
+      value: getColumnValue(hit.column, row)
     });
   };
+
+  private hitTestCellAtPoint(clientX: number, clientY: number): CellHitTestResult | null {
+    const viewRowCount = this.options.rowModel.getViewRowCount();
+    if (viewRowCount <= 0) {
+      return null;
+    }
+
+    const bodyRect = this.bodyElement.getBoundingClientRect();
+    const horizontalScrollbarHeight = this.horizontalScrollElement.offsetHeight;
+    const bodyBottomLimit = bodyRect.bottom - horizontalScrollbarHeight;
+    if (clientX < bodyRect.left || clientX > bodyRect.right || clientY < bodyRect.top || clientY >= bodyBottomLimit) {
+      return null;
+    }
+
+    const virtualOffsetY = this.pendingVirtualScrollTop + (clientY - bodyRect.top);
+    const rowIndex = this.resolveRowIndexFromVirtualOffset(virtualOffsetY);
+    if (rowIndex < 0 || rowIndex >= viewRowCount) {
+      return null;
+    }
+
+    const dataIndex = this.options.rowModel.getDataIndex(rowIndex);
+    if (dataIndex === -1) {
+      return null;
+    }
+
+    const leftRect = this.bodyLeftElement.getBoundingClientRect();
+    if (this.leftPinnedWidth > 0 && clientX >= leftRect.left && clientX < leftRect.right) {
+      const columnIndex = this.findColumnIndexAtOffset(this.leftColumnLeft, this.leftColumnWidth, clientX - leftRect.left);
+      if (columnIndex === -1) {
+        return null;
+      }
+
+      const column = this.columnsByZone.left[columnIndex];
+      if (!column) {
+        return null;
+      }
+
+      return {
+        zone: 'left',
+        rowIndex,
+        dataIndex,
+        columnIndex,
+        column
+      };
+    }
+
+    const rightRect = this.bodyRightElement.getBoundingClientRect();
+    if (this.rightPinnedWidth > 0 && clientX >= rightRect.left && clientX < rightRect.right) {
+      const columnIndex = this.findColumnIndexAtOffset(this.rightColumnLeft, this.rightColumnWidth, clientX - rightRect.left);
+      if (columnIndex === -1) {
+        return null;
+      }
+
+      const column = this.columnsByZone.right[columnIndex];
+      if (!column) {
+        return null;
+      }
+
+      return {
+        zone: 'right',
+        rowIndex,
+        dataIndex,
+        columnIndex,
+        column
+      };
+    }
+
+    const viewportRect = this.viewportElement.getBoundingClientRect();
+    const centerVisibleLeft = viewportRect.left + this.leftPinnedWidth;
+    const centerVisibleRight = viewportRect.right - this.rightPinnedWidth;
+    if (clientX < centerVisibleLeft || clientX >= centerVisibleRight) {
+      return null;
+    }
+
+    const centerRect = this.rowsViewportCenterElement.getBoundingClientRect();
+    if (clientX < centerRect.left) {
+      return null;
+    }
+
+    const centerOffsetX = clientX - centerRect.left;
+    const centerColumnIndex = this.findColumnIndexAtOffset(this.centerColumnLeft, this.centerColumnWidth, centerOffsetX);
+    if (centerColumnIndex === -1) {
+      return null;
+    }
+
+    const centerColumn = this.columnsByZone.center[centerColumnIndex];
+    if (!centerColumn) {
+      return null;
+    }
+
+    return {
+      zone: 'center',
+      rowIndex,
+      dataIndex,
+      columnIndex: centerColumnIndex,
+      column: centerColumn
+    };
+  }
+
+  private resolveRowIndexFromVirtualOffset(virtualOffsetY: number): number {
+    if (!Number.isFinite(virtualOffsetY)) {
+      return -1;
+    }
+
+    const rowCount = this.options.rowModel.getViewRowCount();
+    if (rowCount <= 0) {
+      return -1;
+    }
+
+    if (!this.isVariableRowHeightMode()) {
+      const fixedRowHeight = this.getFixedRowHeight();
+      const rowIndex = Math.floor(Math.max(0, virtualOffsetY) / fixedRowHeight);
+      return Math.max(0, Math.min(rowCount - 1, rowIndex));
+    }
+
+    return this.rowHeightMap.findRowIndexAtOffset(Math.max(0, virtualOffsetY));
+  }
 
   private handleRootKeyDown = (event: KeyboardEvent): void => {
     if (event.defaultPrevented) {

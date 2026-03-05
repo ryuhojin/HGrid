@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 14 - RowModel Memory Optimization</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        color: #0f172a;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .controls button.active {
+        border-color: #2563eb;
+        background: #dbeafe;
+        color: #1e3a8a;
+      }
+
+      .stats {
+        margin-bottom: 12px;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-line;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        border: 1px solid #e2e8f0;
+        background: #fcfdff;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      #grid {
+        width: 980px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 14 - RowModel Memory Optimization</h1>
+    <div class="controls">
+      <button type="button" data-row-count="200000">200K</button>
+      <button type="button" data-row-count="100000000" class="active">100M</button>
+      <button type="button" id="jump-top">jump top</button>
+      <button type="button" id="jump-bottom">jump bottom</button>
+      <button type="button" id="save-state">save state</button>
+      <button type="button" id="restore-state">restore state</button>
+      <button type="button" id="apply-sparse">apply sparse swap</button>
+      <button type="button" id="clear-sparse">clear sparse</button>
+      <button type="button" id="run-materialize-loop">materialize loop</button>
+      <button type="button" id="inspect">inspect</button>
+    </div>
+    <div id="stats" class="stats"></div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      class SyntheticLargeDataProvider {
+        constructor(rowCount) {
+          this.rowCount = rowCount;
+        }
+
+        setRowCount(rowCount) {
+          this.rowCount = rowCount;
+        }
+
+        getRowCount() {
+          return this.rowCount;
+        }
+
+        getRowKey(dataIndex) {
+          return dataIndex;
+        }
+
+        getValue(dataIndex, columnId) {
+          if (columnId === 'id') return dataIndex + 1;
+          if (columnId === 'name') return 'Customer-' + (dataIndex + 1);
+          if (columnId === 'status') return dataIndex % 2 === 0 ? 'active' : 'idle';
+          if (columnId === 'score') return (dataIndex * 31) % 10000;
+          if (columnId === 'region') return ['KR', 'US', 'JP', 'DE'][dataIndex % 4];
+          return '';
+        }
+
+        setValue() {}
+        applyTransactions() {}
+
+        getRow(dataIndex) {
+          return {
+            id: dataIndex + 1,
+            name: 'Customer-' + (dataIndex + 1),
+            status: dataIndex % 2 === 0 ? 'active' : 'idle',
+            score: (dataIndex * 31) % 10000,
+            region: ['KR', 'US', 'JP', 'DE'][dataIndex % 4]
+          };
+        }
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 120, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 260, type: 'text' },
+        { id: 'status', header: 'Status', width: 180, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'region', header: 'Region', width: 140, type: 'text', pinned: 'right' }
+      ];
+
+      const provider = new SyntheticLargeDataProvider(100000000);
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: provider,
+        height: 460,
+        rowHeight: 28,
+        overscan: 8,
+        overscanCols: 2
+      });
+
+      const statsElement = document.getElementById('stats');
+      const logElement = document.getElementById('log');
+      const rowCountButtons = Array.from(document.querySelectorAll('button[data-row-count]'));
+      let savedState = null;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+
+      function getVerticalScrollElement() {
+        return document.querySelector('.hgrid__v-scroll') || document.querySelector('.hgrid__viewport');
+      }
+
+      function getFirstVisibleId() {
+        const cell = document.querySelector('.hgrid__row--left .hgrid__cell[data-column-id="id"]');
+        return cell ? Number(cell.textContent) : null;
+      }
+
+      function formatBytes(bytes) {
+        if (!bytes) {
+          return '0 B';
+        }
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MiB';
+      }
+
+      function getSnapshot(label) {
+        const rowModelState = grid.getRowModelState();
+        const state = grid.getState();
+        const renderer = grid.renderer;
+        const verticalScrollElement = getVerticalScrollElement();
+
+        return {
+          label,
+          rowCount: provider.getRowCount(),
+          firstVisibleId: getFirstVisibleId(),
+          scrollTopVirtual: Math.round(state.scrollTop),
+          scrollTopNative: verticalScrollElement ? verticalScrollElement.scrollTop : 0,
+          virtualMaxScrollTop: Math.round(renderer.virtualMaxScrollTop),
+          physicalMaxScrollTop: Math.round(renderer.physicalMaxScrollTop),
+          baseMappingMode: rowModelState.baseMappingMode,
+          hasFilterMapping: rowModelState.hasFilterMapping,
+          sparseOverrideCount: rowModelState.sparseOverrideCount,
+          materializedBaseBytes: rowModelState.materializedBaseBytes,
+          materializedFilterBytes: rowModelState.materializedFilterBytes,
+          materializedDataToViewBytes: rowModelState.materializedDataToViewBytes,
+          sparseBytes: rowModelState.sparseBytes,
+          estimatedMappingBytes: rowModelState.estimatedMappingBytes
+        };
+      }
+
+      function updateStats() {
+        const rowModelState = grid.getRowModelState();
+        const renderer = grid.renderer;
+        const lines = [
+          'rowCount: ' + provider.getRowCount().toLocaleString(),
+          'baseMappingMode: ' + rowModelState.baseMappingMode,
+          'hasFilterMapping: ' + rowModelState.hasFilterMapping,
+          'sparseOverrideCount: ' + rowModelState.sparseOverrideCount,
+          'virtualMaxScrollTop: ' + Math.round(renderer.virtualMaxScrollTop).toLocaleString() + ' px',
+          'physicalMaxScrollTop: ' + Math.round(renderer.physicalMaxScrollTop).toLocaleString() + ' px',
+          'materializedBase: ' + formatBytes(rowModelState.materializedBaseBytes),
+          'materializedFilter: ' + formatBytes(rowModelState.materializedFilterBytes),
+          'materializedDataToView: ' + formatBytes(rowModelState.materializedDataToViewBytes),
+          'sparseMapping: ' + formatBytes(rowModelState.sparseBytes),
+          'estimatedMappingTotal: ' + formatBytes(rowModelState.estimatedMappingBytes)
+        ];
+
+        statsElement.textContent = lines.join('\n');
+      }
+
+      function writeLog(payload) {
+        logElement.textContent = JSON.stringify(payload);
+      }
+
+      function inspect(label) {
+        updateStats();
+        writeLog(getSnapshot(label));
+      }
+
+      function setRowCount(rowCount) {
+        provider.setRowCount(rowCount);
+        grid.setOptions({ dataProvider: provider });
+        grid.setState({ scrollTop: 0 });
+        savedState = null;
+        requestAnimationFrame(() => inspect('set-row-count'));
+      }
+
+      function createReverseMapping(rowCount) {
+        const mapping = new Int32Array(rowCount);
+        for (let viewIndex = 0; viewIndex < rowCount; viewIndex += 1) {
+          mapping[viewIndex] = rowCount - 1 - viewIndex;
+        }
+        return mapping;
+      }
+
+      function createFilterMapping(limit, sourceMapping) {
+        const size = Math.min(limit, sourceMapping.length);
+        const mapping = new Int32Array(size);
+        for (let viewIndex = 0; viewIndex < size; viewIndex += 1) {
+          mapping[viewIndex] = sourceMapping[viewIndex];
+        }
+        return mapping;
+      }
+
+      rowCountButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const nextCount = Number(button.dataset.rowCount);
+          rowCountButtons.forEach((item) => item.classList.remove('active'));
+          button.classList.add('active');
+          setRowCount(nextCount);
+        });
+      });
+
+      document.getElementById('jump-top').addEventListener('click', () => {
+        grid.setState({ scrollTop: 0 });
+        requestAnimationFrame(() => inspect('jump-top'));
+      });
+
+      document.getElementById('jump-bottom').addEventListener('click', () => {
+        const renderer = grid.renderer;
+        grid.setState({ scrollTop: renderer.virtualMaxScrollTop });
+        requestAnimationFrame(() => inspect('jump-bottom'));
+      });
+
+      document.getElementById('save-state').addEventListener('click', () => {
+        savedState = grid.getState();
+        inspect('save-state');
+      });
+
+      document.getElementById('restore-state').addEventListener('click', async () => {
+        if (!savedState) {
+          inspect('restore-state-empty');
+          return;
+        }
+        grid.setState(savedState);
+        await waitFrame();
+        inspect('restore-state');
+      });
+
+      document.getElementById('apply-sparse').addEventListener('click', () => {
+        const rowCount = provider.getRowCount();
+        grid.setSparseRowOverrides([
+          { viewIndex: 0, dataIndex: rowCount - 1 },
+          { viewIndex: rowCount - 1, dataIndex: 0 }
+        ]);
+        grid.setState({ scrollTop: 0 });
+        requestAnimationFrame(() => inspect('sparse-on'));
+      });
+
+      document.getElementById('clear-sparse').addEventListener('click', () => {
+        grid.clearSparseRowOverrides();
+        grid.setState({ scrollTop: 0 });
+        requestAnimationFrame(() => inspect('sparse-off'));
+      });
+
+      document.getElementById('run-materialize-loop').addEventListener('click', async () => {
+        const rowCount = provider.getRowCount();
+        if (rowCount > 1000000) {
+          inspect('materialize-loop-skipped');
+          return;
+        }
+
+        for (let iteration = 0; iteration < 3; iteration += 1) {
+          const reverseMapping = createReverseMapping(rowCount);
+          const filterMapping = createFilterMapping(2000, reverseMapping);
+          grid.setRowOrder(reverseMapping);
+          grid.setFilteredRowOrder(filterMapping);
+          grid.setFilteredRowOrder(null);
+          grid.resetRowOrder();
+          await waitFrame();
+        }
+
+        grid.setState({ scrollTop: 0 });
+        await waitFrame();
+        inspect('materialize-loop');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        inspect('inspect');
+      });
+
+      const verticalScrollElement = getVerticalScrollElement();
+      if (verticalScrollElement) {
+        verticalScrollElement.addEventListener(
+          'scroll',
+          () => {
+            updateStats();
+          },
+          { passive: true }
+        );
+      }
+
+      inspect('initial');
+    </script>
+  </body>
+</html>

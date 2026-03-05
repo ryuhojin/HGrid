@@ -142,6 +142,39 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 14,
+      "file": "example14.html",
+      "title": "Example 14 - RowModel Memory Optimization",
+      "tags": [
+        "phase3",
+        "row-model-memory",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 15,
+      "file": "example15.html",
+      "title": "Example 15 - Variable Row Height",
+      "tags": [
+        "phase3",
+        "variable-row-height",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 16,
+      "file": "example16.html",
+      "title": "Example 16 - Event Delegation Hit Test",
+      "tags": [
+        "phase4",
+        "event-delegation",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

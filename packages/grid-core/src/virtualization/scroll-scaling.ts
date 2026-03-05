@@ -15,6 +15,7 @@ function toFiniteOrFallback(value: number, fallback: number): number {
 export function createScrollScaleMetrics(params: {
   rowCount: number;
   rowHeight: number;
+  virtualHeight?: number;
   viewportHeight: number;
   maxScrollPx?: number;
 }): ScrollScaleMetrics {
@@ -23,7 +24,7 @@ export function createScrollScaleMetrics(params: {
   const viewportHeight = Math.max(0, toFiniteOrFallback(params.viewportHeight, 0));
   const maxScrollPx = Math.max(1, toFiniteOrFallback(params.maxScrollPx ?? MAX_SCROLL_PX, MAX_SCROLL_PX));
 
-  const virtualHeight = rowCount * rowHeight;
+  const virtualHeight = Math.max(0, toFiniteOrFallback(params.virtualHeight ?? rowCount * rowHeight, rowCount * rowHeight));
   const scrollHeight = Math.min(virtualHeight, maxScrollPx);
   const virtualMaxScrollTop = Math.max(0, virtualHeight - viewportHeight);
   const physicalMaxScrollTop = Math.max(0, scrollHeight - viewportHeight);

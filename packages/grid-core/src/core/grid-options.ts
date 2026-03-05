@@ -5,11 +5,13 @@ import type { RowModelOptions } from '../data/row-model';
 export type CellValueType = 'text' | 'number' | 'date' | 'boolean';
 export type ColumnPinPosition = 'left' | 'right';
 export type ScrollbarVisibility = 'auto' | 'always' | 'hidden';
+export type RowHeightMode = 'fixed' | 'estimated' | 'measured';
 
 export type ColumnFormatter = (value: unknown, row: GridRowData) => string;
 export type ColumnComparator = (a: unknown, b: unknown) => number;
 export type ColumnValueGetter = (row: GridRowData, column: ColumnDef) => unknown;
 export type ColumnValueSetter = (row: GridRowData, value: unknown, column: ColumnDef) => void;
+export type RowHeightGetter = (rowIndex: number, dataIndex: number) => number;
 
 export interface ColumnDef {
   id: string;
@@ -38,6 +40,9 @@ export interface GridOptions {
   rowModel: RowModel;
   height?: number;
   rowHeight?: number;
+  rowHeightMode?: RowHeightMode;
+  estimatedRowHeight?: number;
+  getRowHeight?: RowHeightGetter;
   overscan?: number;
   overscanCols?: number;
   scrollbarPolicy?: ScrollbarPolicy;

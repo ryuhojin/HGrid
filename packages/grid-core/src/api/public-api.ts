@@ -7,6 +7,8 @@ export type {
   ColumnValueSetter,
   GridConfig,
   GridOptions,
+  RowHeightGetter,
+  RowHeightMode,
   GridState,
   GridTheme,
   ScrollbarPolicy,
@@ -36,4 +38,4 @@ export type {
   SortDirection,
   SortModelItem
 } from '../data/remote-data-provider';
-export type { RowModelOptions, RowModelState, ViewToDataMapping } from '../data/row-model';
+export type { BaseMappingMode, RowModelOptions, RowModelState, SparseRowOverride, ViewToDataMapping } from '../data/row-model';

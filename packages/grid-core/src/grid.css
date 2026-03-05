@@ -3,6 +3,9 @@
   --hgrid-bg: #ffffff;
   --hgrid-text: #1f2937;
   --hgrid-header-bg: #f8fafc;
+  --hgrid-pinned-separator-color: rgba(148, 163, 184, 0.8);
+  --hgrid-pinned-shadow-color: rgba(15, 23, 42, 0.08);
+  --hgrid-pinned-shadow-size: 10px;
   --hgrid-header-height: 32px;
   --hgrid-v-scrollbar-width: 0px;
   --hgrid-h-scrollbar-height: 0px;
@@ -41,6 +44,44 @@
 .hgrid__body-right {
   position: relative;
   overflow: hidden;
+}
+
+.hgrid__header-right::before,
+.hgrid__body-right::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--hgrid-pinned-separator-color);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.hgrid__header-left::after,
+.hgrid__body-left::after,
+.hgrid__header-right::after,
+.hgrid__body-right::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--hgrid-pinned-shadow-size);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.hgrid__header-left::after,
+.hgrid__body-left::after {
+  right: 0;
+  background: linear-gradient(to right, rgba(15, 23, 42, 0), var(--hgrid-pinned-shadow-color));
+}
+
+.hgrid__header-right::after,
+.hgrid__body-right::after {
+  left: 0;
+  background: linear-gradient(to right, var(--hgrid-pinned-shadow-color), rgba(15, 23, 42, 0));
 }
 
 .hgrid__header-center {
@@ -210,4 +251,10 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+.hgrid--row-height-measured .hgrid__row .hgrid__cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }

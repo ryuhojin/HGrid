@@ -60,6 +60,15 @@ function waitForFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+function parseTranslateY(transformValue: string): number {
+  const match = transformValue.match(/translate3d\(([-\d.]+)(?:px)?,\s*([-\d.]+)(?:px)?,\s*0(?:px)?\)/);
+  if (!match) {
+    return Number.NaN;
+  }
+
+  return Number(match[2]);
+}
+
 describe('Grid DOM pooling', () => {
   it('keeps the same row pool size while scrolling', async () => {
     const container = document.createElement('div');
@@ -809,5 +818,365 @@ describe('Grid DOM pooling', () => {
     expect(resetIdCell.textContent).toBe('1');
 
     grid.destroy();
+  });
+
+  it('applies sparse row overrides without materializing full base mapping', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const rowCount = 100_000_000;
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' }
+      ],
+      dataProvider: new SyntheticLargeDataProvider(rowCount),
+      height: 120,
+      rowHeight: 30,
+      overscan: 2
+    });
+
+    const lastIndex = rowCount - 1;
+    grid.setSparseRowOverrides([
+      { viewIndex: 0, dataIndex: lastIndex },
+      { viewIndex: lastIndex, dataIndex: 0 }
+    ]);
+
+    const firstIdCell = container.querySelector('.hgrid__row .hgrid__cell[data-column-id=\"id\"]') as HTMLDivElement;
+    expect(firstIdCell.textContent).toBe(String(rowCount));
+
+    const rowModelState = grid.getRowModelState();
+    expect(rowModelState.baseMappingMode).toBe('sparse');
+    expect(rowModelState.sparseOverrideCount).toBe(2);
+    expect(rowModelState.materializedBaseBytes).toBe(0);
+
+    grid.clearSparseRowOverrides();
+    const resetIdCell = container.querySelector('.hgrid__row .hgrid__cell[data-column-id=\"id\"]') as HTMLDivElement;
+    expect(resetIdCell.textContent).toBe('1');
+
+    grid.destroy();
+  });
+
+  it('keeps pinned rows aligned when variable row heights are provided by estimated mode', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 960, configurable: true });
+    document.body.append(container);
+
+    const rowData = Array.from({ length: 500 }, (_value, index) => ({
+      id: index + 1,
+      name: `row-${index + 1}`,
+      region: ['KR', 'US', 'JP', 'DE'][index % 4]
+    }));
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 320, type: 'text' },
+        { id: 'region', header: 'Region', width: 160, type: 'text', pinned: 'right' }
+      ],
+      rowData,
+      height: 260,
+      rowHeightMode: 'estimated',
+      estimatedRowHeight: 28,
+      getRowHeight: (_rowIndex, dataIndex) => 28 + (dataIndex % 5) * 8,
+      overscan: 4
+    });
+
+    grid.setState({ scrollTop: 4200 });
+    await waitForFrame();
+
+    const leftRows = Array.from(container.querySelectorAll('.hgrid__row--left')).filter(
+      (element) => (element as HTMLDivElement).style.display !== 'none'
+    ) as HTMLDivElement[];
+    const centerRows = Array.from(container.querySelectorAll('.hgrid__row--center')).filter(
+      (element) => (element as HTMLDivElement).style.display !== 'none'
+    ) as HTMLDivElement[];
+    const rightRows = Array.from(container.querySelectorAll('.hgrid__row--right')).filter(
+      (element) => (element as HTMLDivElement).style.display !== 'none'
+    ) as HTMLDivElement[];
+
+    const sampleSize = Math.min(leftRows.length, centerRows.length, rightRows.length);
+    expect(sampleSize).toBeGreaterThan(0);
+
+    for (let index = 0; index < sampleSize; index += 1) {
+      expect(leftRows[index].dataset.rowIndex).toBe(centerRows[index].dataset.rowIndex);
+      expect(centerRows[index].dataset.rowIndex).toBe(rightRows[index].dataset.rowIndex);
+      expect(leftRows[index].style.transform).toBe(centerRows[index].style.transform);
+      expect(centerRows[index].style.transform).toBe(rightRows[index].style.transform);
+      expect(leftRows[index].style.height).toBe(centerRows[index].style.height);
+      expect(centerRows[index].style.height).toBe(rightRows[index].style.height);
+    }
+
+    const savedState = grid.getState();
+    grid.setState({ scrollTop: 0 });
+    await waitForFrame();
+    grid.setState(savedState);
+    await waitForFrame();
+
+    const restoredIdCell = container.querySelector(
+      '.hgrid__row--left .hgrid__cell[data-column-id=\"id\"]'
+    ) as HTMLDivElement;
+    expect(Number(restoredIdCell.textContent)).toBeGreaterThan(1);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('re-applies estimated row heights after resetRowHeights()', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    let dynamicHeight = 40;
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 280, type: 'text' }
+      ],
+      rowData: Array.from({ length: 200 }, (_value, index) => ({
+        id: index + 1,
+        name: `row-${index + 1}`
+      })),
+      height: 220,
+      rowHeightMode: 'estimated',
+      estimatedRowHeight: 28,
+      getRowHeight: () => dynamicHeight,
+      overscan: 4
+    });
+
+    await waitForFrame();
+    const firstRow = container.querySelector('.hgrid__row--center') as HTMLDivElement;
+    expect(firstRow.style.height).toBe('40px');
+
+    dynamicHeight = 60;
+    grid.setState({ scrollTop: 0 });
+    await waitForFrame();
+    expect(firstRow.style.height).toBe('40px');
+
+    grid.resetRowHeights();
+    await waitForFrame();
+    await waitForFrame();
+    expect(firstRow.style.height).toBe('60px');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('keeps variable-height rows monotonic without overlap under burst wheel input', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 1040, configurable: true });
+    document.body.append(container);
+
+    const rowData = Array.from({ length: 3_000 }, (_value, index) => ({
+      id: index + 1,
+      description: `row-${index + 1} ` + 'lorem ipsum '.repeat((index % 6) * 6 + 4),
+      region: ['KR', 'US', 'JP', 'DE'][index % 4]
+    }));
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number', pinned: 'left' },
+        { id: 'description', header: 'Description', width: 520, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text', pinned: 'right' }
+      ],
+      rowData,
+      height: 280,
+      rowHeight: 28,
+      rowHeightMode: 'estimated',
+      estimatedRowHeight: 28,
+      getRowHeight: (_rowIndex, dataIndex) => 28 + ((dataIndex % 6) + 1) * 6,
+      overscan: 6
+    });
+
+    const bodyCenter = container.querySelector('.hgrid__body-center') as HTMLDivElement;
+
+    for (let burst = 0; burst < 6; burst += 1) {
+      for (let index = 0; index < 20; index += 1) {
+        bodyCenter.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: 120,
+            bubbles: true,
+            cancelable: true
+          })
+        );
+      }
+      await waitForFrame();
+      await waitForFrame();
+    }
+
+    const visibleCenterRows = Array.from(container.querySelectorAll('.hgrid__row--center')).filter(
+      (element) => (element as HTMLDivElement).style.display !== 'none'
+    ) as HTMLDivElement[];
+    const visibleLeftRows = Array.from(container.querySelectorAll('.hgrid__row--left')).filter(
+      (element) => (element as HTMLDivElement).style.display !== 'none'
+    ) as HTMLDivElement[];
+    const visibleRightRows = Array.from(container.querySelectorAll('.hgrid__row--right')).filter(
+      (element) => (element as HTMLDivElement).style.display !== 'none'
+    ) as HTMLDivElement[];
+
+    const sampleSize = Math.min(visibleCenterRows.length, visibleLeftRows.length, visibleRightRows.length);
+    expect(sampleSize).toBeGreaterThan(3);
+
+    let validatedPairCount = 0;
+    for (let index = 0; index < sampleSize - 1; index += 1) {
+      const currentCenter = visibleCenterRows[index];
+      const nextCenter = visibleCenterRows[index + 1];
+      const currentY = parseTranslateY(currentCenter.style.transform);
+      const nextY = parseTranslateY(nextCenter.style.transform);
+      const currentHeight = Number.parseFloat(currentCenter.style.height);
+
+      if (!Number.isFinite(currentY) || !Number.isFinite(nextY) || !Number.isFinite(currentHeight)) {
+        continue;
+      }
+
+      validatedPairCount += 1;
+      expect(nextY).toBeGreaterThanOrEqual(currentY + currentHeight - 0.5);
+
+      const leftRow = visibleLeftRows[index];
+      const rightRow = visibleRightRows[index];
+      expect(leftRow.dataset.rowIndex).toBe(currentCenter.dataset.rowIndex);
+      expect(rightRow.dataset.rowIndex).toBe(currentCenter.dataset.rowIndex);
+      expect(leftRow.style.transform).toBe(currentCenter.style.transform);
+      expect(rightRow.style.transform).toBe(currentCenter.style.transform);
+      expect(leftRow.style.height).toBe(currentCenter.style.height);
+      expect(rightRow.style.height).toBe(currentCenter.style.height);
+    }
+    expect(validatedPairCount).toBeGreaterThan(2);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('keeps variable-height row pooling stable and drift bounded on 100M roundtrip', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 980, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 320, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text', pinned: 'right' }
+      ],
+      dataProvider: new SyntheticLargeDataProvider(100_000_000),
+      height: 260,
+      rowHeight: 28,
+      rowHeightMode: 'estimated',
+      estimatedRowHeight: 28,
+      getRowHeight: (_rowIndex, dataIndex) => 28 + (dataIndex % 4) * 2,
+      overscan: 6
+    });
+
+    const centerLayer = container.querySelector('.hgrid__rows-layer--center') as HTMLDivElement;
+    const mutationRecords: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => {
+      for (let index = 0; index < records.length; index += 1) {
+        const record = records[index];
+        if (record.type === 'childList') {
+          mutationRecords.push(record);
+        }
+      }
+    });
+    observer.observe(centerLayer, { childList: true, subtree: false });
+
+    const rowCountBefore = container.querySelectorAll('.hgrid__row').length;
+    grid.setState({ scrollTop: (grid as unknown as { renderer: { virtualMaxScrollTop: number } }).renderer.virtualMaxScrollTop });
+    await waitForFrame();
+    await waitForFrame();
+
+    const bottomIdCell = container.querySelector('.hgrid__row--left .hgrid__cell[data-column-id=\"id\"]') as HTMLDivElement;
+    const bottomId = Number(bottomIdCell.textContent);
+    expect(bottomId).toBeGreaterThan(99_000_000);
+
+    grid.setState({ scrollTop: 0 });
+    await waitForFrame();
+    await waitForFrame();
+
+    const topIdCell = container.querySelector('.hgrid__row--left .hgrid__cell[data-column-id=\"id\"]') as HTMLDivElement;
+    const topId = Number(topIdCell.textContent);
+    expect(Math.abs(topId - 1)).toBeLessThanOrEqual(1);
+
+    observer.disconnect();
+    const rowCountAfter = container.querySelectorAll('.hgrid__row').length;
+    expect(rowCountAfter).toBe(rowCountBefore);
+    const hasPoolMutation = mutationRecords.some(
+      (record) => record.addedNodes.length > 0 || record.removedNodes.length > 0
+    );
+    expect(hasPoolMutation).toBe(false);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('invalidates measured height cache only on visible dirty range after width changes', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 1000, configurable: true });
+    document.body.append(container);
+
+    const rowData = Array.from({ length: 2_000 }, (_value, index) => ({
+      id: index + 1,
+      description: 'row-' + (index + 1) + ' ' + 'wrapped text '.repeat(20 + (index % 5) * 8),
+      region: ['KR', 'US', 'JP', 'DE'][index % 4]
+    }));
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number', pinned: 'left' },
+        { id: 'description', header: 'Description', width: 520, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text', pinned: 'right' }
+      ],
+      rowData: rowData.map((row) => ({ ...row, description: `row-${row.id}` })),
+      height: 280,
+      rowHeight: 28,
+      rowHeightMode: 'measured',
+      estimatedRowHeight: 28,
+      overscan: 6
+    });
+
+    await waitForFrame();
+    await waitForFrame();
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          rowHeightMap: {
+            hasRowHeight: (rowIndex: number) => boolean;
+            setRowHeight: (rowIndex: number, height: number) => boolean;
+          };
+        };
+      }
+    ).renderer;
+
+    const topVisibleRows = Array.from(container.querySelectorAll('.hgrid__row--center')).filter(
+      (element) => (element as HTMLDivElement).style.display !== 'none'
+    ) as HTMLDivElement[];
+    expect(topVisibleRows.length).toBeGreaterThan(0);
+    const topMeasuredRow = topVisibleRows[0];
+    const topRowIndex = Number(topMeasuredRow.dataset.rowIndex);
+    renderer.rowHeightMap.setRowHeight(topRowIndex, 64);
+    expect(renderer.rowHeightMap.hasRowHeight(topRowIndex)).toBe(true);
+
+    grid.setState({ scrollTop: 8_000 });
+    await waitForFrame();
+    await waitForFrame();
+
+    const midVisibleRows = Array.from(container.querySelectorAll('.hgrid__row--center')).filter(
+      (element) => (element as HTMLDivElement).style.display !== 'none'
+    ) as HTMLDivElement[];
+    expect(midVisibleRows.length).toBeGreaterThan(0);
+    const midMeasuredRow = midVisibleRows[0];
+    const midRowIndex = Number(midMeasuredRow.dataset.rowIndex);
+    renderer.rowHeightMap.setRowHeight(midRowIndex, 72);
+    expect(renderer.rowHeightMap.hasRowHeight(midRowIndex)).toBe(true);
+
+    grid.setColumnWidth('description', 280);
+    await waitForFrame();
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(renderer.rowHeightMap.hasRowHeight(topRowIndex)).toBe(true);
+    expect(renderer.rowHeightMap.hasRowHeight(midRowIndex)).toBe(false);
+
+    grid.destroy();
+    container.remove();
   });
 });

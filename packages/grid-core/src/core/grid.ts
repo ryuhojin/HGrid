@@ -4,7 +4,7 @@ import type { ColumnDef, GridConfig, GridOptions, GridState, GridTheme } from '.
 import { DomRenderer } from '../render/dom-renderer';
 import { ColumnModel } from '../data/column-model';
 import { LocalDataProvider } from '../data/local-data-provider';
-import type { RowModelOptions, RowModelState, ViewToDataMapping } from '../data/row-model';
+import type { RowModelOptions, RowModelState, SparseRowOverride, ViewToDataMapping } from '../data/row-model';
 import { RowModel } from '../data/row-model';
 
 const DEFAULT_SCROLLBAR_POLICY = {
@@ -36,6 +36,9 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     rowModel,
     height: config?.height,
     rowHeight: config?.rowHeight,
+    rowHeightMode: config?.rowHeightMode,
+    estimatedRowHeight: config?.estimatedRowHeight,
+    getRowHeight: config?.getRowHeight,
     overscan: config?.overscan,
     overscanCols: config?.overscanCols,
     scrollbarPolicy: mergeScrollbarPolicy(DEFAULT_SCROLLBAR_POLICY, config?.scrollbarPolicy)
@@ -88,6 +91,9 @@ export class Grid {
       ...this.options,
       height: options.height ?? this.options.height,
       rowHeight: options.rowHeight ?? this.options.rowHeight,
+      rowHeightMode: options.rowHeightMode ?? this.options.rowHeightMode,
+      estimatedRowHeight: options.estimatedRowHeight ?? this.options.estimatedRowHeight,
+      getRowHeight: options.getRowHeight ?? this.options.getRowHeight,
       overscan: options.overscan ?? this.options.overscan,
       overscanCols: options.overscanCols ?? this.options.overscanCols,
       scrollbarPolicy: mergeScrollbarPolicy(this.options.scrollbarPolicy, options.scrollbarPolicy),
@@ -110,6 +116,16 @@ export class Grid {
 
   public resetRowOrder(): void {
     this.rowModel.resetToIdentity(this.options.dataProvider.getRowCount());
+    this.renderer.setOptions(this.getRendererOptions());
+  }
+
+  public setSparseRowOverrides(overrides: SparseRowOverride[]): void {
+    this.rowModel.setBaseSparseOverrides(overrides);
+    this.renderer.setOptions(this.getRendererOptions());
+  }
+
+  public clearSparseRowOverrides(): void {
+    this.rowModel.clearBaseSparseOverrides();
     this.renderer.setOptions(this.getRendererOptions());
   }
 
@@ -146,6 +162,10 @@ export class Grid {
 
   public setState(state: GridState): void {
     this.renderer.setState(state);
+  }
+
+  public resetRowHeights(rowIndexes?: number[]): void {
+    this.renderer.resetRowHeights(rowIndexes);
   }
 
   public on<K extends GridEventName>(eventName: K, handler: (payload: GridEventMap[K]) => void): void {

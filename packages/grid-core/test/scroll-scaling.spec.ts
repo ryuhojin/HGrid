@@ -71,4 +71,19 @@ describe('scroll scaling metrics', () => {
 
     expect(roundTripPhysical).toBeCloseTo(midwayPhysical, 3);
   });
+
+  it('respects explicit virtualHeight for variable row height mode', () => {
+    const metrics = createScrollScaleMetrics({
+      rowCount: 1_000,
+      rowHeight: 28,
+      virtualHeight: 40_000,
+      viewportHeight: 280
+    });
+
+    expect(metrics.virtualHeight).toBe(40_000);
+    expect(metrics.scrollHeight).toBe(40_000);
+    expect(metrics.virtualMaxScrollTop).toBe(39_720);
+    expect(metrics.physicalMaxScrollTop).toBe(39_720);
+    expect(metrics.scale).toBe(1);
+  });
 });

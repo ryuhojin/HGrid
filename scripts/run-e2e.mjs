@@ -100,25 +100,13 @@ async function runExample2Checks(page, serverUrl, pageErrors) {
   await page.click('#unbind-event');
   await expectLogContains(log, 'off(cellClick) applied');
 
-  await page.evaluate(() => {
-    const cell = document.querySelector('.hgrid__row--center .hgrid__cell');
-    if (!cell) {
-      throw new Error('Missing center cell for click test');
-    }
-    cell.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  });
+  await page.click('.hgrid__row--center .hgrid__cell');
   await expectLogContains(log, 'off(cellClick) applied');
 
   await page.click('#bind-event');
   await expectLogContains(log, 'on(cellClick) applied');
 
-  await page.evaluate(() => {
-    const cell = document.querySelector('.hgrid__row--center .hgrid__cell');
-    if (!cell) {
-      throw new Error('Missing center cell for click test');
-    }
-    cell.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  });
+  await page.click('.hgrid__row--center .hgrid__cell');
   await expectLogContains(log, 'cellClick row=');
 
   await page.click('#destroy-grid');
@@ -389,9 +377,10 @@ async function runExample6Checks(page, serverUrl, pageErrors) {
       topAfterVertical: verticalScroll.scrollTop
     };
   });
-  assert.ok(
-    pinnedWheelBehavior.leftAfterHorizontal > 0,
-    `pinned-zone horizontal wheel should change x-scroll, got ${pinnedWheelBehavior.leftAfterHorizontal}`
+  assert.equal(
+    Math.round(pinnedWheelBehavior.leftAfterHorizontal),
+    0,
+    `pinned-zone horizontal wheel must not move x-scroll, got ${pinnedWheelBehavior.leftAfterHorizontal}`
   );
   assert.ok(
     pinnedWheelBehavior.topAfterVertical > 0,
@@ -1148,6 +1137,322 @@ async function runExample13Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample14Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example14.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+  const initialState = await readLogPayload('Missing example14 initial payload');
+  assert.equal(initialState.rowCount, 100_000_000, `example14 should start at 100M, got ${initialState.rowCount}`);
+  assert.equal(initialState.baseMappingMode, 'identity', `example14 should start in identity mode, got ${initialState.baseMappingMode}`);
+  assert.equal(initialState.estimatedMappingBytes, 0, `example14 identity bytes should be 0, got ${initialState.estimatedMappingBytes}`);
+
+  await page.click('#jump-bottom');
+  await waitForLogLabel('jump-bottom');
+  const jumpBottomState = await readLogPayload('Missing example14 jump-bottom payload');
+  assert.ok(
+    jumpBottomState.firstVisibleId > 99_000_000,
+    `example14 jump-bottom should reach deep rows, got ${jumpBottomState.firstVisibleId}`
+  );
+
+  await page.click('#save-state');
+  await waitForLogLabel('save-state');
+  await page.click('#jump-top');
+  await waitForLogLabel('jump-top');
+  await page.click('#restore-state');
+  await waitForLogLabel('restore-state');
+  const restoredState = await readLogPayload('Missing example14 restore-state payload');
+  assert.ok(
+    restoredState.firstVisibleId > 99_000_000,
+    `example14 restore-state should restore deep position, got ${restoredState.firstVisibleId}`
+  );
+
+  await page.click('#jump-top');
+  await waitForLogLabel('jump-top');
+  await page.click('#apply-sparse');
+  await waitForLogLabel('sparse-on');
+  const sparseOnState = await readLogPayload('Missing example14 sparse-on payload');
+  assert.equal(sparseOnState.baseMappingMode, 'sparse', `example14 sparse mode mismatch: ${sparseOnState.baseMappingMode}`);
+  assert.equal(sparseOnState.sparseOverrideCount, 2, `example14 sparse override count mismatch: ${sparseOnState.sparseOverrideCount}`);
+  assert.equal(sparseOnState.materializedBaseBytes, 0, `example14 sparse should not materialize base bytes`);
+  assert.equal(
+    sparseOnState.firstVisibleId,
+    sparseOnState.rowCount,
+    `example14 sparse swap should bring last row first, got ${sparseOnState.firstVisibleId}`
+  );
+
+  await page.click('#clear-sparse');
+  await waitForLogLabel('sparse-off');
+  const sparseOffState = await readLogPayload('Missing example14 sparse-off payload');
+  assert.equal(
+    sparseOffState.baseMappingMode,
+    'identity',
+    `example14 sparse clear should restore identity mode, got ${sparseOffState.baseMappingMode}`
+  );
+  assert.ok(
+    sparseOffState.firstVisibleId <= 2,
+    `example14 sparse clear should restore top rows, got ${sparseOffState.firstVisibleId}`
+  );
+
+  await page.click('button[data-row-count=\"200000\"]');
+  await waitForLogLabel('set-row-count');
+  await page.click('#run-materialize-loop');
+  await waitForLogLabel('materialize-loop');
+  const materializeLoopState = await readLogPayload('Missing example14 materialize-loop payload');
+  assert.equal(materializeLoopState.rowCount, 200_000, `example14 materialize loop rowCount mismatch`);
+  assert.equal(
+    materializeLoopState.baseMappingMode,
+    'identity',
+    `example14 materialize loop should return identity mode, got ${materializeLoopState.baseMappingMode}`
+  );
+  assert.equal(
+    materializeLoopState.hasFilterMapping,
+    false,
+    `example14 materialize loop should clear filter mapping`
+  );
+  assert.equal(
+    materializeLoopState.estimatedMappingBytes,
+    0,
+    `example14 materialize loop should release mappings, got ${materializeLoopState.estimatedMappingBytes}`
+  );
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample15Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example15.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  function parsePx(value) {
+    if (typeof value !== 'string') {
+      return Number.NaN;
+    }
+
+    const numericValue = Number.parseFloat(value.replace('px', ''));
+    return Number.isFinite(numericValue) ? numericValue : Number.NaN;
+  }
+
+  await waitForLogLabel('initial');
+  const initialState = await readLogPayload('Missing example15 initial payload');
+  assert.equal(initialState.mode, 'measured', `example15 should start in measured mode, got ${initialState.mode}`);
+  assert.equal(initialState.snapshot.isPinnedAligned, true, 'example15 measured mode must align pinned zones');
+  assert.ok(
+    initialState.snapshot.maxVisibleCenterHeight > 28,
+    `example15 measured row height should exceed base height, got ${initialState.snapshot.maxVisibleCenterHeight}`
+  );
+
+  await page.click('#jump-bottom');
+  await waitForLogLabel('jump-bottom');
+  const jumpBottomState = await readLogPayload('Missing example15 jump-bottom payload');
+  assert.ok(
+    jumpBottomState.snapshot.firstVisibleId > 4_500,
+    `example15 jump-bottom should reach deep rows, got ${jumpBottomState.snapshot.firstVisibleId}`
+  );
+  assert.equal(jumpBottomState.snapshot.isPinnedAligned, true, 'example15 jump-bottom must keep pinned alignment');
+
+  await page.click('#mode-estimated');
+  await waitForLogLabel('mode-estimated');
+
+  await page.click('#estimated-compact');
+  await waitForLogLabel('estimated-compact');
+  const compactState = await readLogPayload('Missing example15 estimated-compact payload');
+
+  await page.click('#estimated-spacious');
+  await waitForLogLabel('estimated-spacious');
+  const spaciousState = await readLogPayload('Missing example15 estimated-spacious payload');
+
+  const compactHeight = parsePx(compactState.snapshot.centerHeight);
+  const spaciousHeight = parsePx(spaciousState.snapshot.centerHeight);
+  assert.ok(Number.isFinite(compactHeight), `example15 compact height must be numeric, got ${compactState.snapshot.centerHeight}`);
+  assert.ok(Number.isFinite(spaciousHeight), `example15 spacious height must be numeric, got ${spaciousState.snapshot.centerHeight}`);
+  assert.ok(spaciousHeight > compactHeight, `example15 estimated mode height should increase, compact=${compactHeight}, spacious=${spaciousHeight}`);
+
+  await page.click('#reset-heights');
+  await waitForLogLabel('reset-row-heights');
+  const resetState = await readLogPayload('Missing example15 reset-row-heights payload');
+  assert.equal(resetState.snapshot.isPinnedAligned, true, 'example15 resetRowHeights must preserve pinned alignment');
+
+  await page.click('#data-100m');
+  await waitForLogLabel('data-100m');
+  const data100mState = await readLogPayload('Missing example15 data-100m payload');
+  assert.equal(data100mState.dataMode, '100m', `example15 data mode should be 100m, got ${data100mState.dataMode}`);
+  assert.equal(data100mState.mode, 'estimated', `example15 100m mode should switch to estimated, got ${data100mState.mode}`);
+  assert.equal(data100mState.rowCount, 100_000_000, `example15 100m rowCount mismatch`);
+
+  await page.click('#jump-bottom');
+  await waitForLogLabel('jump-bottom');
+  const data100mBottomState = await readLogPayload('Missing example15 100m jump-bottom payload');
+  assert.ok(
+    data100mBottomState.snapshot.firstVisibleId > 99_000_000,
+    `example15 100m jump-bottom should reach deep rows, got ${data100mBottomState.snapshot.firstVisibleId}`
+  );
+  assert.equal(
+    data100mBottomState.snapshot.isPinnedAligned,
+    true,
+    'example15 100m jump-bottom must keep pinned alignment'
+  );
+
+  await page.click('#jump-top');
+  await waitForLogLabel('jump-top');
+  const data100mTopState = await readLogPayload('Missing example15 100m jump-top payload');
+  assert.ok(
+    data100mTopState.snapshot.firstVisibleId <= 2,
+    `example15 100m jump-top should restore near first row, got ${data100mTopState.snapshot.firstVisibleId}`
+  );
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample16Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example16.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+
+  await page.click('#probe-left');
+  await waitForLogLabel('probe-left');
+  const probeLeft = await readLogPayload('Missing example16 probe-left payload');
+  assert.equal(probeLeft.snapshot.lastCellClick.columnId, 'id', `example16 left probe column mismatch`);
+
+  await page.click('#probe-center-c0');
+  await waitForLogLabel('probe-center-c0');
+  const probeCenter0 = await readLogPayload('Missing example16 probe-center-c0 payload');
+  assert.equal(probeCenter0.snapshot.lastCellClick.columnId, 'c0', `example16 center c0 probe mismatch`);
+
+  await page.click('#probe-center-c5');
+  await waitForLogLabel('probe-center-c5');
+  const probeCenter5 = await readLogPayload('Missing example16 probe-center-c5 payload');
+  assert.equal(probeCenter5.snapshot.lastCellClick.columnId, 'c5', `example16 center c5 probe mismatch`);
+
+  await page.click('#probe-right');
+  await waitForLogLabel('probe-right');
+  const probeRight = await readLogPayload('Missing example16 probe-right payload');
+  assert.equal(probeRight.snapshot.lastCellClick.columnId, 'status', `example16 right probe column mismatch`);
+
+  await page.click('#header-wheel');
+  await waitForLogLabel('header-wheel');
+  const headerWheelState = await readLogPayload('Missing example16 header-wheel payload');
+  assert.ok(
+    headerWheelState.after.hScrollLeft > headerWheelState.before.hScrollLeft,
+    `example16 header wheel should propagate horizontal scroll`
+  );
+  assert.ok(
+    headerWheelState.after.vScrollTopVirtual > headerWheelState.before.vScrollTopVirtual,
+    `example16 header wheel should propagate vertical scroll`
+  );
+
+  await page.click('#pinned-wheel-x');
+  await waitForLogLabel('pinned-wheel-x');
+  const pinnedWheelXState = await readLogPayload('Missing example16 pinned-wheel-x payload');
+  assert.equal(
+    Math.round(pinnedWheelXState.after.hScrollLeft),
+    Math.round(pinnedWheelXState.before.hScrollLeft),
+    `example16 pinned x-only wheel should not move horizontal scroll`
+  );
+
+  await page.click('#pinned-wheel-y');
+  await waitForLogLabel('pinned-wheel-y');
+  const pinnedWheelYState = await readLogPayload('Missing example16 pinned-wheel-y payload');
+  assert.ok(
+    pinnedWheelYState.after.vScrollTopVirtual > pinnedWheelYState.before.vScrollTopVirtual,
+    `example16 pinned y-only wheel should move vertical scroll`
+  );
+
+  await page.click('#burst-wheel');
+  await waitForLogLabel('burst-wheel');
+  const burstState = await readLogPayload('Missing example16 burst-wheel payload');
+  assert.ok(
+    burstState.after.vScrollTopVirtual > burstState.before.vScrollTopVirtual,
+    `example16 burst wheel should move virtual scroll forward`
+  );
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -1206,6 +1511,12 @@ async function main() {
     await runExample12Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample13Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample14Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample15Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample16Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

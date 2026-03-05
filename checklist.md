@@ -312,68 +312,107 @@
 
 ## 3.4 RowModel 메모리 최적화(100M 대응)
 - [x] identity view에서는 full `Int32Array`를 즉시 생성하지 않는 lazy mapping 모드
-- [ ] 정렬/필터 적용 시에만 mapping materialize 또는 segmented mapping 생성
-- [ ] 대용량 transaction 적용을 위한 sparse override 구조(기본 identity + 변경분)
-- [ ] `setRowCount(100_000_000)` 시 초기화 경로 메모리 예산 문서화
-- [ ] 100M 스모크 예제/벤치(초기 마운트, jump bottom, restore state) 추가
+- [x] 정렬/필터 적용 시에만 mapping materialize 또는 segmented mapping 생성
+- [x] 대용량 transaction 적용을 위한 sparse override 구조(기본 identity + 변경분)
+- [x] `setRowCount(100_000_000)` 시 초기화 경로 메모리 예산 문서화
+- [x] 100M 스모크 예제/벤치(초기 마운트, jump bottom, restore state) 추가
+
+### 코어 변경 코멘트 (3.4 반영, 2026-03-05)
+- RowModel:
+  - `BaseMappingMode = identity | sparse | materialized` 추가
+  - `setBaseSparseOverrides` / `clearBaseSparseOverrides`로 identity + 변경분(sparse) 저장 경로 추가
+  - `RowModelState`에 materialized/sparse 바이트 지표 추가 (`estimatedMappingBytes` 포함)
+  - `setRowCount(100_000_000)` 시 materialized/filter/dataToView 매핑을 모두 해제하고 lazy identity로 복귀
+- Grid API:
+  - `setSparseRowOverrides` / `clearSparseRowOverrides` 공개 API 추가
+- 문서:
+  - `docs/row-model-memory-phase3.md`에 100M 초기화 메모리 예산/검증 범위 명시
+- 예제/검증:
+  - `examples/example14.html` (100M mount/jump bottom/restore + sparse swap + materialize loop)
+  - `scripts/run-e2e.mjs` Example14 시나리오 추가
+  - `tests/fixtures/bench-100m.html`, `tests/fixtures/bench-100m.js`, `scripts/bench.mjs`로 100M 벤치 경로 추가
 
 ### 수용 기준
-- [ ] rowCount=100,000,000(identity)에서 초기화 시 브라우저 메모리 급증 없이 마운트 가능
-- [ ] 100M에서 jump bottom 후 가시 rowIndex가 하단 범위(>99,000,000)로 이동
-- [ ] 정렬/필터 on/off 반복 시 mapping 생성/해제가 누수 없이 동작
+- [x] rowCount=100,000,000(identity)에서 초기화 시 브라우저 메모리 급증 없이 마운트 가능
+- [x] 100M에서 jump bottom 후 가시 rowIndex가 하단 범위(>99,000,000)로 이동
+- [x] 정렬/필터 on/off 반복 시 mapping 생성/해제가 누수 없이 동작
 
 ## 3.5 Variable Row Height(멀티라인 텍스트 대응, 신규)
-- [ ] 목표: row별 상이 높이에서도 스크롤/가상화/핀 동기화를 안정적으로 유지
-- [ ] 높이 전략 확정:
-  - [ ] `rowHeightMode: \"fixed\" | \"estimated\" | \"measured\"`
-  - [ ] `estimatedRowHeight` 옵션 정의
-  - [ ] `getRowHeight?(rowIndex, dataIndex) => number` 계약 확정
-- [ ] 높이 캐시/인덱스 구조:
-  - [ ] row별 measured height cache
-  - [ ] prefix-sum 또는 Fenwick tree로 누적 높이 관리
-  - [ ] `rowIndex <-> virtualTop` 매핑 O(logN) 보장
-- [ ] 렌더링 파이프라인 변경:
-  - [ ] visible range 계산을 binary search(virtualScrollTop) 기반으로 전환
-  - [ ] row translateY를 `poolIndex * rowHeight`가 아닌 cumulative top 기준으로 갱신
-  - [ ] overscan 정책을 `rows` + `px` 혼합으로 정의
-- [ ] 측정/재측정 규칙:
-  - [ ] multiline wrapping 측정은 rAF 배치(읽기/쓰기 분리)
-  - [ ] column width/viewport width 변경 시 dirty range만 재측정
-  - [ ] 측정 중 스크롤 점프 방지를 위한 anchor row 보정
-- [ ] 스크롤 스케일링 결합:
-  - [ ] 3.1/3.2의 virtual/physical 매핑을 variable height virtualTop 기준으로 유지
-  - [ ] pinned left/center/right가 동일 row top map을 공유
-- [ ] API/상태:
-  - [ ] `resetRowHeights(rowIndexes?)` API 추가
-  - [ ] `getState()/setState()`가 variable height에서도 scrollTop 안정 복원
-- [ ] 검증:
-  - [ ] unit: prefix-sum/search/anchor 보정
-  - [ ] e2e: multiline + mixed heights + pinned + 100M synthetic
-  - [ ] example: variable row height demo 추가 + registry 업데이트
+- [x] 목표: row별 상이 높이에서도 스크롤/가상화/핀 동기화를 안정적으로 유지
+- [x] 높이 전략 확정:
+  - [x] `rowHeightMode: \"fixed\" | \"estimated\" | \"measured\"`
+  - [x] `estimatedRowHeight` 옵션 정의
+  - [x] `getRowHeight?(rowIndex, dataIndex) => number` 계약 확정
+- [x] 높이 캐시/인덱스 구조:
+  - [x] row별 measured height cache
+  - [x] prefix-sum 또는 Fenwick tree로 누적 높이 관리
+  - [x] `rowIndex <-> virtualTop` 매핑 O(logN) 보장
+- [x] 렌더링 파이프라인 변경:
+  - [x] visible range 계산을 binary search(virtualScrollTop) 기반으로 전환
+  - [x] row translateY를 `poolIndex * rowHeight`가 아닌 cumulative top 기준으로 갱신
+  - [x] overscan 정책을 `rows` + `px` 혼합으로 정의
+- [x] 측정/재측정 규칙:
+  - [x] multiline wrapping 측정은 rAF 배치(읽기/쓰기 분리)
+  - [x] column width/viewport width 변경 시 dirty range만 재측정
+  - [x] 측정 중 스크롤 점프 방지를 위한 anchor row 보정
+- [x] 스크롤 스케일링 결합:
+  - [x] 3.1/3.2의 virtual/physical 매핑을 variable height virtualTop 기준으로 유지
+  - [x] pinned left/center/right가 동일 row top map을 공유
+- [x] API/상태:
+  - [x] `resetRowHeights(rowIndexes?)` API 추가
+  - [x] `getState()/setState()`가 variable height에서도 scrollTop 안정 복원
+- [x] 검증:
+  - [x] unit/integration: prefix-sum/search + anchor 보정
+  - [x] e2e: multiline + mixed heights + pinned + 100M synthetic
+  - [x] example: variable row height demo 추가 + registry 업데이트
+
+### 코어 변경 코멘트 (3.5 반영, 2026-03-05)
+- 계약/API:
+  - `GridConfig/GridOptions`에 `rowHeightMode`, `estimatedRowHeight`, `getRowHeight` 추가
+  - `Grid.resetRowHeights(rowIndexes?)` 공개 API 추가
+- 자료구조:
+  - `packages/grid-core/src/virtualization/row-height-map.ts` 추가
+  - sparse Fenwick + override cache로 누적 높이/offset 매핑 처리
+- 렌더러:
+  - variable 모드에서 startRow를 binary search 기반으로 계산
+  - row translateY를 cumulative top 기준으로 계산
+  - measured 모드에서 rAF 측정 pass + anchor 보정 적용
+  - measured 모드에서 column width/viewport 변경 시 visible dirty range만 invalidation 후 재측정
+  - scroll scaling의 virtualHeight를 row height map totalHeight와 결합
+- 예제/검증:
+  - `examples/example15.html` 추가 (fixed/estimated/measured + 100M synthetic + resetRowHeights)
+  - `scripts/run-e2e.mjs` Example15 시나리오 추가
+  - unit/integration: `packages/grid-core/test/row-height-map.spec.ts`, `packages/grid-core/test/grid.spec.ts`
 
 ### 수용 기준
-- [ ] 1~6줄 혼합 데이터에서 center/pinned 행 정렬 오차 0
-- [ ] 고속 휠/트랙패드 입력 중 행 겹침/출렁임 없음
-- [ ] 100M(identity)에서 초기 마운트/스크롤 입력 프리즈 없음
-- [ ] top -> bottom -> top 왕복 후 rowIndex drift가 ±1 row 이내
-- [ ] 스크롤 중 DOM create/remove 0 유지(pooling 유지)
+- [x] 1~6줄 혼합 데이터에서 center/pinned 행 정렬 오차 0
+- [x] 고속 휠/트랙패드 입력 중 행 겹침/출렁임 없음
+- [x] 100M(identity)에서 초기 마운트/스크롤 입력 프리즈 없음
+- [x] top -> bottom -> top 왕복 후 rowIndex drift가 ±1 row 이내
+- [x] 스크롤 중 DOM create/remove 0 유지(pooling 유지)
 
 ---
 
 # Phase 4 — Interaction 1.0: Hit-test / Selection / Keyboard
 ## 4.1 이벤트 위임(Event Delegation)
-- [ ] root 1~2개 리스너로 pointer/keydown 처리
-- [ ] 셀/행에 리스너 금지
+- [x] root 1~2개 리스너로 pointer/keydown 처리
+- [x] 셀/행에 리스너 금지
 - [ ] hit-test:
-  - [ ] y → rowIndex O(1)
-  - [ ] x → colIndex binary search O(logN)
-- [ ] AG-like wheel 오케스트레이션:
-  - [ ] header wheel -> center x/y scroll source 전달
-  - [ ] pinned wheel -> y-only 전달, x 차단
-  - [ ] inertial scroll(트랙패드)에서 프레임 드롭/역방향 튐 방지
+  - [x] y → rowIndex O(1)
+  - [x] x → colIndex binary search O(logN)
+- [x] AG-like wheel 오케스트레이션:
+  - [x] header wheel -> center x/y scroll source 전달
+  - [x] pinned wheel -> y-only 전달, x 차단
+  - [x] inertial scroll(트랙패드)에서 프레임 드롭/역방향 튐 방지
 
 ### 수용 기준
-- [ ] col/row 수 증가해도 이벤트 비용이 일정
+- [x] col/row 수 증가해도 이벤트 비용이 일정
+
+### 코어 변경 코멘트 (4.1 반영, 2026-03-05)
+- root 이벤트 위임을 `pointerdown` + `keydown`으로 고정하고 셀/행 개별 리스너를 제거했다.
+- hit-test를 zone별(left/center/right)로 분리하고 row는 y 매핑, col은 binary search로 계산한다.
+- wheel 오케스트레이션을 AG-like로 통일하여 header는 x/y 전달, pinned는 y-only 전달로 고정했다.
+- 검증: `example16` 추가 + `scripts/run-e2e.mjs` 시나리오 보강으로 pointer/wheel 회귀를 자동화했다.
 
 ## 4.2 Selection Model (대용량 친화)
 - [ ] 셀 범위 선택은 “ranges”로 저장(개별 셀 boolean 금지)
@@ -648,7 +687,7 @@
 - [ ] Step C: `2.3` horizontal virtualization(binary search) + pinned 분리 고도화
 - [ ] Step D: `2.5` scheduler/dirty flags/scroll loop 방어
 - [ ] Step E: `3.1~3.2` 100M scroll scaling 결합
-- [ ] Step F: `4.1` interaction/wheel 오케스트레이션 최종화
+- [x] Step F: `4.1` interaction/wheel 오케스트레이션 최종화
 - [ ] Step G: `14.2` AG-like 회귀 벤치/게이트 확정
 - [ ] Step H: `3.5` variable row height 확장(prefix-sum + anchor remeasure + e2e)
 

@@ -13,6 +13,7 @@
 - `resetRowOrder()`
 - `setRowModelOptions(options)`
 - `getRowModelState()`
+- `resetRowHeights(rowIndexes?)`
 - `setTheme(themeTokens)`
 - `getState()`
 - `setState(state)`
@@ -30,6 +31,9 @@
 - `GridConfig` runtime virtualization options:
   - `overscan`: vertical row overscan count
   - `overscanCols`: horizontal center-column overscan count
+  - `rowHeightMode`: `"fixed" | "estimated" | "measured"`
+  - `estimatedRowHeight`: base row height used by variable-height mapping
+  - `getRowHeight(rowIndex, dataIndex)`: estimated height resolver (optional)
 - `ScrollbarPolicy`: scrollbar visibility contract for each axis.
   - `vertical: "auto" | "always" | "hidden"`
   - `horizontal: "auto" | "always" | "hidden"`
@@ -38,7 +42,7 @@
 `@hgrid/grid-react` and `@hgrid/grid-vue` expose thin adapters with the same control API:
 - `new ReactGridAdapter(container, config)` / `new VueGridAdapter(container, config)`
 - `setColumns`, `setOptions`, `setColumnOrder`, `setColumnVisibility`, `setColumnWidth`
-- `setRowOrder`, `setFilteredRowOrder`, `resetRowOrder`, `setRowModelOptions`, `getRowModelState`
+- `setRowOrder`, `setFilteredRowOrder`, `resetRowOrder`, `setRowModelOptions`, `getRowModelState`, `resetRowHeights`
 - `setTheme`, `getState`, `setState`, `on`, `off`, `destroy`
 
 These wrappers only delegate to `@hgrid/grid-core` and do not access core private internals.

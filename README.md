@@ -1,15 +1,32 @@
 # HGrid
 
-엔터프라이즈 환경을 목표로 설계된 **DOM 기반 가상화 데이터 그리드**입니다.  
-`Canvas/WebGL` 없이도 대용량 스크롤, pinned 컬럼, 수직/수평 가상화, 풀링 렌더를 안정적으로 제공하는 것을 목표로 합니다.
+HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 데이터 그리드**입니다.  
+`Canvas/WebGL/OffscreenCanvas` 없이 대용량(10M~100M) 스크롤, pinned 컬럼, 수직/수평 가상화, 풀링 렌더를 제공합니다.
+
+## 프로젝트 상태 (2026-03-05)
+
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1`
+- 진행 예정: `Phase 4.2+` (selection/keyboard/editing/worker data ops 등)
+- 상세 기준: `checklist.md`
+
+구현 완료된 핵심 항목:
+
+- AG-like scroll shell (x/y native scroll source 분리 + sync lock)
+- Vertical/Horizontal virtualization + binary search window
+- Row/Cell pooling (스크롤 중 DOM create/remove 0 유지)
+- rAF scheduler + dirty flags
+- 100M scroll scaling (`MAX_SCROLL_PX` 기반 virtual/physical 매핑)
+- RowModel 100M 메모리 최적화(lazy identity/sparse/materialized)
+- Variable row height (`fixed | estimated | measured`) + row top map
+- Event delegation/hit-test/wheel orchestration (Phase 4.1)
 
 ## 핵심 원칙
 
-- DOM-only 렌더링 (core에 Canvas/OffscreenCanvas/WebGL 미사용)
-- 스크롤 중 DOM 생성/삭제 금지 (row/cell pool 재사용)
-- 이벤트 위임 + `requestAnimationFrame` 렌더 배치
+- DOM-only 렌더링
+- 스크롤 핫패스에서 DOM churn 금지(풀 재사용)
+- 이벤트 위임 + rAF 배치 렌더
 - CSP 친화 (`eval`, `new Function`, `setTimeout("string")` 금지)
-- 데이터/렌더 분리 아키텍처 (DataProvider, RowModel, Renderer 계약)
+- 기본 셀 렌더는 `textContent` 사용
 
 ## Monorepo 구조
 
@@ -22,59 +39,38 @@
 │  └─ grid-plugins/     # 플러그인 패키지 영역
 ├─ examples/            # example1~N 시나리오
 ├─ docs/                # phase별 설계/결정 문서
-├─ scripts/             # 검증/생성/벤치 스크립트
-└─ checklist.md         # 개발 체크리스트(단계별 진행 현황)
+├─ scripts/             # 생성/검증/벤치 스크립트
+└─ checklist.md         # 단계별 진행 체크리스트
 ```
 
-## 현재 진행 상태 (2026-03-04 기준)
+## grid-core 배포 산출물
 
-- Phase 0: 저장소/툴체인/검증 스크립트 완료
-- Phase 1: Public API / Column / DataProvider / RowModel 계약 완료
-- Phase 2: AG-like 스크롤 셸 + 수직/수평 가상화 + Pooling + rAF scheduler 완료
-- Phase 3+: 100M 스크롤 스케일링 및 상위 기능 진행 예정
+`packages/grid-core/dist`:
 
-상세 항목은 `checklist.md`를 기준으로 관리합니다.
-
-## grid-core 산출물
-
-`packages/grid-core/dist` 기준:
-
-- `grid.umd.js`
+- `grid.umd.js` (ES5)
 - `grid.umd.min.js`
 - `grid.esm.js`
 - `index.d.ts`
 - `grid.css`
 
-UMD 전역 네임스페이스는 `HGrid`이며, 브라우저에서 `new HGrid.Grid(...)` 형태로 사용합니다.
+UMD 전역 네임스페이스는 `HGrid`이며, 브라우저에서 `new HGrid.Grid(...)`로 사용합니다.
 
 ## 빠른 시작
 
-### 1) 설치
-
 ```bash
 pnpm install
-```
-
-### 2) 빌드
-
-```bash
 pnpm build
-```
-
-### 3) 예제 규칙 검증
-
-```bash
 pnpm verify:examples
 ```
 
-### 4) example1 실행
+예제 실행:
 
-`examples/example1.html`을 브라우저에서 열면 UMD 기반 기본 동작을 확인할 수 있습니다.  
-(빌드 후 `../packages/grid-core/dist/*` 경로를 사용)
+1. `pnpm build`
+2. 브라우저에서 `examples/example1.html` 열기
 
 ## 사용 예시
 
-### UMD (레거시 / script 태그)
+### UMD
 
 ```html
 <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
@@ -104,9 +100,7 @@ pnpm verify:examples
 import { Grid } from '@hgrid/grid-core';
 import '@hgrid/grid-core/grid.css';
 
-const container = document.getElementById('grid') as HTMLElement;
-
-const grid = new Grid(container, {
+const grid = new Grid(document.getElementById('grid') as HTMLElement, {
   columns: [
     { id: 'id', header: 'ID', width: 100, type: 'number' },
     { id: 'name', header: 'Name', width: 220, type: 'text' }
@@ -118,32 +112,41 @@ const grid = new Grid(container, {
 });
 ```
 
-## 주요 스크립트
+## 루트 스크립트
 
-루트 `package.json` 기준:
+- `pnpm build`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm test:e2e`
+- `pnpm test:csp`
+- `pnpm verify:examples`
+- `pnpm new:example`
+- `pnpm check:naming`
+- `pnpm bench`
+- `pnpm ci:phase0`
 
-- `pnpm build` : grid-core 빌드
-- `pnpm typecheck` : 타입 검사
-- `pnpm test` : unit test
-- `pnpm test:e2e` : e2e 스모크
-- `pnpm test:csp` : CSP 스모크
-- `pnpm verify:examples` : examples/registry 규칙 검사
-- `pnpm new:example` : 다음 번호 example 자동 생성 + registry 갱신
-- `pnpm check:naming` : 파일/디렉토리 명명 규칙 검사
-- `pnpm bench` : 성능 벤치 스크립트
+## Examples (현재 1~16)
 
-## 예제 운영 규칙
+- `example1`: 기본 UMD 마운트
+- `example2~5`: Public API / Column / DataProvider / RowModel
+- `example6~12`: AG-like layout/scroll/orchestration/virtualization/pooling/scheduler
+- `example13`: 100M scroll scaling
+- `example14`: RowModel memory optimization (100M)
+- `example15`: variable row height
+- `example16`: event delegation + hit-test + wheel orchestration
 
-기능 추가 시 다음을 반드시 같이 반영합니다.
+기능 추가 시 규칙:
 
-1. `pnpm new:example`로 `examples/example{N}.html` 생성
-2. `examples/registry.json` 반영 확인
+1. `pnpm new:example`로 `example{N}.html` 생성
+2. `examples/registry.json` 갱신 확인
 3. `pnpm verify:examples` 통과
 
 ## 문서
 
-- `checklist.md`: 전체 로드맵 및 완료 기준
+- `checklist.md`
+- `docs/build-and-sourcemap-policy.md`
 - `docs/public-api-phase1.md`
+- `docs/column-schema-phase1.md`
 - `docs/data-provider-phase1.md`
 - `docs/row-model-phase1.md`
 - `docs/dom-layout-phase2.md`
@@ -152,7 +155,10 @@ const grid = new Grid(container, {
 - `docs/row-cell-pooling-phase2.md`
 - `docs/render-scheduler-phase2.md`
 - `docs/scroll-orchestration-phase2.md`
+- `docs/scroll-scaling-phase3.md`
+- `docs/row-model-memory-phase3.md`
+- `docs/variable-row-height-phase3.md`
 
 ## 라이선스
 
-내부 정책에 따릅니다. 외부 공개/배포 시 라이선스 파일과 상용 배포 정책을 함께 확정해야 합니다.
+내부 정책에 따릅니다. 외부 배포 시 라이선스/상용 배포 정책을 별도 확정합니다.

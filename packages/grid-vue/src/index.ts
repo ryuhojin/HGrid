@@ -1,6 +1,7 @@
 import { Grid } from '@hgrid/grid-core';
 import type {
   ColumnDef,
+  ColumnPinPosition,
   GridConfig,
   GridSelection,
   GridSelectionInput,
@@ -15,6 +16,7 @@ import type {
 
 export type {
   ColumnDef,
+  ColumnPinPosition,
   GridConfig,
   GridEventMap,
   GridEventName,
@@ -52,6 +54,10 @@ export class VueGridAdapter {
 
   public setColumnWidth(columnId: string, width: number): void {
     this.grid.setColumnWidth(columnId, width);
+  }
+
+  public setColumnPin(columnId: string, pinned?: ColumnPinPosition): void {
+    this.grid.setColumnPin(columnId, pinned);
   }
 
   public setRowOrder(viewToData: ViewToDataMapping): void {

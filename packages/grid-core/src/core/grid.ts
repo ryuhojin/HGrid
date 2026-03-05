@@ -1,6 +1,14 @@
 import { EventBus } from './event-bus';
-import type { GridEventMap, GridEventName } from './event-bus';
-import type { ColumnDef, GridConfig, GridOptions, GridState, GridTheme } from './grid-options';
+import type { ColumnReorderEvent, ColumnResizeEvent, GridEventMap, GridEventName } from './event-bus';
+import type {
+  ColumnDef,
+  ColumnPinPosition,
+  GridConfig,
+  GridOptions,
+  GridState,
+  GridTheme,
+  RowIndicatorOptions
+} from './grid-options';
 import { DomRenderer } from '../render/dom-renderer';
 import { ColumnModel } from '../data/column-model';
 import type { ColumnFilterCondition, GridFilterModel } from '../data/filter-executor';
@@ -16,6 +24,17 @@ const DEFAULT_SCROLLBAR_POLICY = {
   vertical: 'auto',
   horizontal: 'auto'
 } as const;
+const LEGACY_INDICATOR_COLUMN_ID = '__indicator';
+const INDICATOR_ROW_NUMBER_COLUMN_ID = '__indicatorRowNumber';
+const INDICATOR_CHECKBOX_COLUMN_ID = '__indicatorCheckbox';
+const INDICATOR_STATUS_COLUMN_ID = '__indicatorStatus';
+const STATE_COLUMN_ID = '__state';
+const DEFAULT_INDICATOR_CHECKBOX_WIDTH = 56;
+const DEFAULT_INDICATOR_ROW_NUMBER_WIDTH = 64;
+const DEFAULT_INDICATOR_STATUS_WIDTH = 96;
+const MIN_INDICATOR_WIDTH = 44;
+const MAX_INDICATOR_WIDTH = 180;
+const DEFAULT_STATE_COLUMN_WIDTH = 108;
 
 function mergeScrollbarPolicy(
   currentPolicy: GridOptions['scrollbarPolicy'],
@@ -31,12 +50,111 @@ function mergeScrollbarPolicy(
   };
 }
 
+function mergeRowIndicatorOptions(
+  currentOptions: GridOptions['rowIndicator'],
+  nextOptions: GridConfig['rowIndicator']
+): GridOptions['rowIndicator'] {
+  if (!nextOptions) {
+    return currentOptions;
+  }
+
+  return {
+    ...currentOptions,
+    ...nextOptions
+  };
+}
+
+function mergeStateColumnOptions(
+  currentOptions: GridOptions['stateColumn'],
+  nextOptions: GridConfig['stateColumn']
+): GridOptions['stateColumn'] {
+  if (!nextOptions) {
+    return currentOptions;
+  }
+
+  return {
+    ...currentOptions,
+    ...nextOptions
+  };
+}
+
+function clampIndicatorWidth(width: number): number {
+  return Math.max(MIN_INDICATOR_WIDTH, Math.min(MAX_INDICATOR_WIDTH, Math.round(width)));
+}
+
+function resolveIndicatorWidth(optionWidth: number | undefined, fallbackWidth: number): number {
+  const width = Number(optionWidth);
+  if (Number.isFinite(width)) {
+    return clampIndicatorWidth(width);
+  }
+
+  return clampIndicatorWidth(fallbackWidth);
+}
+
+function normalizeSpecialColumns(columns: ColumnDef[], rowIndicatorOptions?: RowIndicatorOptions): ColumnDef[] {
+  const normalizedColumns = new Array<ColumnDef>(columns.length);
+
+  for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+    const column = columns[columnIndex];
+    if (column.id === LEGACY_INDICATOR_COLUMN_ID || column.id === INDICATOR_CHECKBOX_COLUMN_ID) {
+      const indicatorWidth = resolveIndicatorWidth(rowIndicatorOptions?.width, column.width ?? DEFAULT_INDICATOR_CHECKBOX_WIDTH);
+      normalizedColumns[columnIndex] = {
+        ...column,
+        pinned: 'left',
+        width: indicatorWidth,
+        minWidth: indicatorWidth,
+        maxWidth: indicatorWidth
+      };
+      continue;
+    }
+
+    if (column.id === INDICATOR_ROW_NUMBER_COLUMN_ID) {
+      const indicatorWidth = resolveIndicatorWidth(undefined, column.width ?? DEFAULT_INDICATOR_ROW_NUMBER_WIDTH);
+      normalizedColumns[columnIndex] = {
+        ...column,
+        pinned: 'left',
+        width: indicatorWidth,
+        minWidth: indicatorWidth,
+        maxWidth: indicatorWidth
+      };
+      continue;
+    }
+
+    if (column.id === INDICATOR_STATUS_COLUMN_ID) {
+      const indicatorWidth = resolveIndicatorWidth(undefined, column.width ?? DEFAULT_INDICATOR_STATUS_WIDTH);
+      normalizedColumns[columnIndex] = {
+        ...column,
+        pinned: 'left',
+        width: indicatorWidth
+      };
+      continue;
+    }
+
+    if (column.id === STATE_COLUMN_ID) {
+      const stateWidth = Number.isFinite(column.width) ? Math.max(52, Math.round(column.width)) : DEFAULT_STATE_COLUMN_WIDTH;
+      normalizedColumns[columnIndex] = {
+        ...column,
+        pinned: 'left',
+        width: stateWidth
+      };
+      continue;
+    }
+
+    normalizedColumns[columnIndex] = {
+      ...column
+    };
+  }
+
+  return normalizedColumns;
+}
+
 function normalizeOptions(config?: GridConfig): GridOptions {
   const dataProvider = config?.dataProvider ?? new LocalDataProvider(config?.rowData ?? []);
   const rowModel = new RowModel(dataProvider.getRowCount(), config?.rowModelOptions);
+  const rowIndicator = mergeRowIndicatorOptions(undefined, config?.rowIndicator);
 
   return {
-    columns: config?.columns ?? [],
+    columns: normalizeSpecialColumns(config?.columns ?? [], rowIndicator),
     dataProvider,
     rowModel,
     height: config?.height,
@@ -47,7 +165,9 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     validateEdit: config?.validateEdit,
     overscan: config?.overscan,
     overscanCols: config?.overscanCols,
-    scrollbarPolicy: mergeScrollbarPolicy(DEFAULT_SCROLLBAR_POLICY, config?.scrollbarPolicy)
+    scrollbarPolicy: mergeScrollbarPolicy(DEFAULT_SCROLLBAR_POLICY, config?.scrollbarPolicy),
+    rowIndicator,
+    stateColumn: mergeStateColumnOptions(undefined, config?.stateColumn)
   };
 }
 
@@ -82,13 +202,15 @@ export class Grid {
       columns: this.columnModel.getColumns()
     };
     this.eventBus = new EventBus();
+    this.eventBus.on('columnResize', this.handleColumnResize);
+    this.eventBus.on('columnReorder', this.handleColumnReorder);
     this.sortExecutor = new CooperativeSortExecutor();
     this.filterExecutor = new CooperativeFilterExecutor();
     this.renderer = new DomRenderer(container, this.getRendererOptions(), this.eventBus);
   }
 
   public setColumns(columns: ColumnDef[]): void {
-    this.columnModel.setColumns(columns);
+    this.columnModel.setColumns(normalizeSpecialColumns(columns, this.options.rowIndicator));
     this.syncColumnsToRenderer();
     if (this.sortModel.length > 0) {
       void this.setSortModel(this.sortModel);
@@ -98,8 +220,12 @@ export class Grid {
   }
 
   public setOptions(options: GridConfig): void {
-    if (options.columns) {
-      this.columnModel.setColumns(options.columns);
+    const nextRowIndicator = mergeRowIndicatorOptions(this.options.rowIndicator, options.rowIndicator);
+    const nextStateColumn = mergeStateColumnOptions(this.options.stateColumn, options.stateColumn);
+
+    if (options.columns || options.rowIndicator) {
+      const sourceColumns = options.columns ?? this.columnModel.getColumns();
+      this.columnModel.setColumns(normalizeSpecialColumns(sourceColumns, nextRowIndicator));
     }
 
     const hasProviderOption = Boolean(options.dataProvider || options.rowData);
@@ -129,6 +255,8 @@ export class Grid {
       overscan: options.overscan ?? this.options.overscan,
       overscanCols: options.overscanCols ?? this.options.overscanCols,
       scrollbarPolicy: mergeScrollbarPolicy(this.options.scrollbarPolicy, options.scrollbarPolicy),
+      rowIndicator: nextRowIndicator,
+      stateColumn: nextStateColumn,
       dataProvider: nextDataProvider,
       rowModel: this.rowModel,
       columns: this.columnModel.getColumns()
@@ -271,16 +399,73 @@ export class Grid {
     this.syncColumnsToRenderer();
   }
 
+  public setColumnPin(columnId: string, pinned?: ColumnPinPosition): void {
+    this.columnModel.setColumnPin(columnId, pinned);
+    this.syncColumnsToRenderer();
+  }
+
   public setTheme(themeTokens: GridTheme): void {
     this.renderer.setTheme(themeTokens);
   }
 
   public getState(): GridState {
-    return this.renderer.getState();
+    const columns = this.columnModel.getColumns();
+    const hiddenColumnIds: string[] = [];
+    const pinnedColumns: Record<string, ColumnPinPosition> = {};
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      const column = columns[columnIndex];
+      if (column.visible === false) {
+        hiddenColumnIds.push(column.id);
+      }
+      if (column.pinned) {
+        pinnedColumns[column.id] = column.pinned;
+      }
+    }
+
+    const rendererState = this.renderer.getState();
+    return {
+      ...rendererState,
+      columnOrder: this.getColumnOrder(),
+      hiddenColumnIds,
+      pinnedColumns
+    };
   }
 
   public setState(state: GridState): void {
-    this.renderer.setState(state);
+    let shouldSyncColumns = false;
+
+    if (Array.isArray(state.columnOrder) && state.columnOrder.length > 0) {
+      this.columnModel.setColumnOrder(state.columnOrder);
+      shouldSyncColumns = true;
+    }
+
+    if (Array.isArray(state.hiddenColumnIds)) {
+      const hiddenColumnIdSet = new Set<string>(state.hiddenColumnIds);
+      const columns = this.columnModel.getColumns();
+      for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+        const column = columns[columnIndex];
+        this.columnModel.setColumnVisibility(column.id, !hiddenColumnIdSet.has(column.id));
+      }
+      shouldSyncColumns = true;
+    }
+
+    if (state.pinnedColumns && typeof state.pinnedColumns === 'object') {
+      const columns = this.columnModel.getColumns();
+      for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+        const column = columns[columnIndex];
+        const pinned = state.pinnedColumns[column.id];
+        this.columnModel.setColumnPin(column.id, pinned === 'left' || pinned === 'right' ? pinned : undefined);
+      }
+      shouldSyncColumns = true;
+    }
+
+    if (shouldSyncColumns) {
+      this.syncColumnsToRenderer();
+    }
+
+    this.renderer.setState({
+      scrollTop: state.scrollTop
+    });
   }
 
   public getSelection(): GridSelection {
@@ -308,6 +493,8 @@ export class Grid {
   }
 
   public destroy(): void {
+    this.eventBus.off('columnResize', this.handleColumnResize);
+    this.eventBus.off('columnReorder', this.handleColumnReorder);
     this.renderer.destroy();
   }
 
@@ -317,6 +504,33 @@ export class Grid {
       columns: this.columnModel.getColumns()
     };
     this.renderer.setColumns(this.columnModel.getVisibleColumns());
+  }
+
+  private handleColumnResize = (event: ColumnResizeEvent): void => {
+    if (event.phase === 'start') {
+      return;
+    }
+
+    const hasColumn = this.columnModel.getColumns().some((column) => column.id === event.columnId);
+    if (!hasColumn) {
+      return;
+    }
+
+    this.columnModel.setColumnWidth(event.columnId, event.width);
+    this.syncColumnsToRenderer();
+  };
+
+  private handleColumnReorder = (event: ColumnReorderEvent): void => {
+    if (!Array.isArray(event.columnOrder) || event.columnOrder.length === 0) {
+      return;
+    }
+
+    this.columnModel.setColumnOrder(event.columnOrder);
+    this.syncColumnsToRenderer();
+  };
+
+  private getColumnOrder(): string[] {
+    return this.columnModel.getColumns().map((column) => column.id);
   }
 
   private getRendererOptions(): GridOptions {

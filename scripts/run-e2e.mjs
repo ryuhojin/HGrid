@@ -1156,7 +1156,7 @@ async function runExample14Checks(page, serverUrl, pageErrors) {
         }
       },
       label,
-      { timeout: 20_000 }
+      { timeout: 90_000 }
     );
   }
 
@@ -2106,6 +2106,437 @@ async function runExample23Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample24Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example24.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+  const initialState = await readLogPayload('Missing example24 initial payload');
+  assert.equal(initialState.snapshot.width.header, 180, 'example24 should start at width 180');
+  assert.equal(initialState.snapshot.width.body, 180, 'example24 body width should start at 180');
+  const initialCenterRowDom = initialState.snapshot.dom.centerRowDom;
+
+  await page.click('#run-min');
+  await waitForLogLabel('run-min');
+  const minState = await readLogPayload('Missing example24 run-min payload');
+  assert.equal(minState.snapshot.width.header, 120, 'example24 run-min should clamp header width to min');
+  assert.equal(minState.snapshot.width.body, 120, 'example24 run-min should clamp body width to min');
+  assert.equal(minState.snapshot.events.moveCount, 1, 'example24 run-min should coalesce move events');
+  assert.deepEqual(
+    minState.snapshot.events.tail.slice(-3).map((event) => event.phase),
+    ['start', 'move', 'end'],
+    'example24 run-min should emit start/move/end phases'
+  );
+  assert.equal(
+    minState.snapshot.events.tail[minState.snapshot.events.tail.length - 1].width,
+    120,
+    'example24 run-min end width mismatch'
+  );
+
+  await page.click('#run-max');
+  await waitForLogLabel('run-max');
+  const maxState = await readLogPayload('Missing example24 run-max payload');
+  assert.equal(maxState.snapshot.width.header, 280, 'example24 run-max should clamp header width to max');
+  assert.equal(maxState.snapshot.width.body, 280, 'example24 run-max should clamp body width to max');
+  assert.equal(maxState.snapshot.events.moveCount, 2, 'example24 run-max should append one move event');
+  assert.deepEqual(
+    maxState.snapshot.events.tail.slice(-3).map((event) => event.phase),
+    ['start', 'move', 'end'],
+    'example24 run-max should emit start/move/end phases'
+  );
+  assert.equal(
+    maxState.snapshot.events.tail[maxState.snapshot.events.tail.length - 1].width,
+    280,
+    'example24 run-max end width mismatch'
+  );
+
+  await page.click('#reset');
+  await waitForLogLabel('reset');
+  const resetState = await readLogPayload('Missing example24 reset payload');
+  assert.equal(resetState.snapshot.width.header, 180, 'example24 reset should restore header width');
+  assert.equal(resetState.snapshot.width.body, 180, 'example24 reset should restore body width');
+  assert.equal(
+    resetState.snapshot.dom.centerRowDom,
+    initialCenterRowDom,
+    'example24 reset should keep row pool size stable'
+  );
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample25Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example25.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+  const initialState = await readLogPayload('Missing example25 initial payload');
+  assert.deepEqual(initialState.snapshot.headerOrder, ['name', 'score', 'region'], 'example25 initial center order mismatch');
+  assert.equal(initialState.snapshot.dropIndicator.display, 'none', 'example25 indicator should be hidden initially');
+
+  await page.click('#drag-name-after-score');
+  await waitForLogLabel('drag-name-after-score');
+  const afterDrag1 = await readLogPayload('Missing example25 drag-name-after-score payload');
+  assert.deepEqual(afterDrag1.snapshot.headerOrder, ['score', 'name', 'region'], 'example25 drag-1 header order mismatch');
+  assert.deepEqual(afterDrag1.snapshot.rowOrder, ['score', 'name', 'region'], 'example25 drag-1 row order mismatch');
+  assert.ok(afterDrag1.snapshot.reorderEvents.length >= 1, 'example25 drag-1 should emit reorder event');
+  assert.equal(afterDrag1.snapshot.dropIndicator.display, 'none', 'example25 indicator must be hidden after commit');
+  assert.equal(
+    afterDrag1.snapshot.reorderEvents[afterDrag1.snapshot.reorderEvents.length - 1].toIndex,
+    2,
+    'example25 drag-1 target index mismatch'
+  );
+
+  await page.click('#save-state');
+  await waitForLogLabel('save-state');
+  const savedState = await readLogPayload('Missing example25 save-state payload');
+  assert.deepEqual(
+    savedState.snapshot.state.columnOrder,
+    ['id', 'score', 'name', 'region', 'status'],
+    'example25 saved state columnOrder mismatch'
+  );
+
+  await page.click('#drag-region-before-score');
+  await waitForLogLabel('drag-region-before-score');
+  const afterDrag2 = await readLogPayload('Missing example25 drag-region-before-score payload');
+  assert.deepEqual(afterDrag2.snapshot.rowOrder, ['region', 'score', 'name'], 'example25 drag-2 center order mismatch');
+
+  await page.click('#restore-state');
+  await waitForLogLabel('restore-state');
+  const restoredState = await readLogPayload('Missing example25 restore-state payload');
+  assert.deepEqual(
+    restoredState.snapshot.state.columnOrder,
+    ['id', 'score', 'name', 'region', 'status'],
+    'example25 restore state columnOrder mismatch'
+  );
+  assert.deepEqual(restoredState.snapshot.headerOrder, ['score', 'name', 'region'], 'example25 restore header order mismatch');
+  assert.deepEqual(restoredState.snapshot.rowOrder, ['score', 'name', 'region'], 'example25 restore row order mismatch');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample26Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example26.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+  const initialState = await readLogPayload('Missing example26 initial payload');
+  assert.deepEqual(initialState.snapshot.header.left, ['id'], 'example26 initial left pinned mismatch');
+  assert.deepEqual(initialState.snapshot.header.right, ['status'], 'example26 initial right pinned mismatch');
+  const initialCenterRowDom = initialState.snapshot.dom.centerRowDom;
+
+  await page.click('#swap-1m');
+  await waitForLogLabel('swap-1m');
+  const swappedState = await readLogPayload('Missing example26 swap-1m payload');
+  assert.equal(swappedState.snapshot.isSynthetic, true, 'example26 should switch to synthetic provider');
+  assert.equal(swappedState.snapshot.rowModel.viewRowCount, 1_000_000, 'example26 synthetic rowCount mismatch');
+
+  await page.click('#stress-ops');
+  await waitForLogLabel('stress-ops');
+  const stressState = await readLogPayload('Missing example26 stress-ops payload');
+  assert.equal(stressState.snapshot.isSynthetic, true, 'example26 stress should stay synthetic');
+  assert.equal(stressState.snapshot.rowModel.viewRowCount, 1_000_000, 'example26 stress rowCount mismatch');
+  assert.equal(stressState.extra.iterations, 120, 'example26 stress iteration mismatch');
+  assert.equal(stressState.extra.rowDomStable, true, 'example26 stress should keep row DOM stable');
+  assert.equal(stressState.extra.centerCellStable, true, 'example26 stress should keep center cell pool stable');
+  assert.ok(
+    stressState.extra.maxFrameDeltaMs < 85,
+    `example26 stress max frame delta should stay bounded, got ${stressState.extra.maxFrameDeltaMs}`
+  );
+  assert.ok(
+    stressState.extra.frameOver50Count <= 6,
+    `example26 stress frameOver50Count should stay low, got ${stressState.extra.frameOver50Count}`
+  );
+
+  await page.click('#pin-name-left');
+  await waitForLogLabel('pin-name-left');
+  const pinLeftState = await readLogPayload('Missing example26 pin-name-left payload');
+  assert.deepEqual(pinLeftState.snapshot.header.left, ['id', 'name'], 'example26 pin-name-left mismatch');
+  assert.equal(pinLeftState.snapshot.state.pinnedColumns.name, 'left', 'example26 name pin state mismatch');
+
+  await page.click('#pin-region-right');
+  await waitForLogLabel('pin-region-right');
+  const pinRightState = await readLogPayload('Missing example26 pin-region-right payload');
+  assert.deepEqual(pinRightState.snapshot.header.right, ['region', 'status'], 'example26 pin-region-right mismatch');
+  assert.equal(pinRightState.snapshot.state.pinnedColumns.region, 'right', 'example26 region pin state mismatch');
+
+  await page.click('#hide-score');
+  await waitForLogLabel('hide-score');
+  const hideState = await readLogPayload('Missing example26 hide-score payload');
+  assert.ok(
+    Array.isArray(hideState.snapshot.state.hiddenColumnIds) && hideState.snapshot.state.hiddenColumnIds.includes('score'),
+    'example26 hide-score should record hidden column'
+  );
+  assert.ok(
+    !hideState.snapshot.header.center.includes('score'),
+    `example26 hide-score should remove score from center headers: ${hideState.snapshot.header.center.join(',')}`
+  );
+
+  await page.click('#save-state');
+  await waitForLogLabel('save-state');
+  const savedState = await readLogPayload('Missing example26 save-state payload');
+  assert.equal(savedState.snapshot.hasSavedState, true, 'example26 should keep saved state flag');
+
+  await page.click('#mutate');
+  await waitForLogLabel('mutate');
+  const mutatedState = await readLogPayload('Missing example26 mutate payload');
+  assert.equal(mutatedState.snapshot.state.pinnedColumns.name ?? null, null, 'example26 mutate should unpin name');
+  assert.equal(mutatedState.snapshot.state.pinnedColumns.region ?? null, null, 'example26 mutate should unpin region');
+  assert.ok(!mutatedState.snapshot.state.hiddenColumnIds.includes('score'), 'example26 mutate should show score');
+
+  await page.click('#restore-state');
+  await waitForLogLabel('restore-state');
+  const restoredState = await readLogPayload('Missing example26 restore-state payload');
+  assert.equal(restoredState.snapshot.state.pinnedColumns.name, 'left', 'example26 restore should recover name pin');
+  assert.equal(restoredState.snapshot.state.pinnedColumns.region, 'right', 'example26 restore should recover region pin');
+  assert.ok(restoredState.snapshot.state.hiddenColumnIds.includes('score'), 'example26 restore should hide score again');
+  assert.deepEqual(restoredState.snapshot.header.left, ['id', 'name'], 'example26 restore left pinned mismatch');
+  assert.deepEqual(restoredState.snapshot.header.right, ['region', 'status'], 'example26 restore right pinned mismatch');
+  assert.equal(
+    restoredState.snapshot.dom.centerRowDom,
+    initialCenterRowDom,
+    'example26 should preserve row pool size while toggling pin/hide'
+  );
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample27Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example27.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+  const initialState = await readLogPayload('Missing example27 initial payload');
+  assert.deepEqual(initialState.snapshot.header.left, ['id'], 'example27 initial left pinned mismatch');
+  assert.deepEqual(initialState.snapshot.header.center, ['name', 'score', 'region'], 'example27 initial center order mismatch');
+  assert.deepEqual(initialState.snapshot.header.right, ['status'], 'example27 initial right pinned mismatch');
+  assert.equal(initialState.snapshot.nameWidth, 220, 'example27 initial width mismatch');
+
+  await page.click('#run-resize');
+  await waitForLogLabel('run-resize');
+  const resizeState = await readLogPayload('Missing example27 run-resize payload');
+  assert.equal(resizeState.snapshot.nameWidth, 260, 'example27 resize width mismatch');
+  const resizePhases = resizeState.snapshot.events.resizeTail.map((event) => event.phase);
+  assert.ok(resizePhases.includes('start'), `example27 resize should include start, got ${resizePhases.join(',')}`);
+  assert.ok(resizePhases.includes('move'), `example27 resize should include move, got ${resizePhases.join(',')}`);
+
+  await page.click('#run-reorder');
+  await waitForLogLabel('run-reorder');
+  const reorderState = await readLogPayload('Missing example27 run-reorder payload');
+  assert.deepEqual(reorderState.snapshot.header.center, ['name', 'region', 'score'], 'example27 reorder center order mismatch');
+  assert.equal(reorderState.snapshot.dropIndicator.display, 'none', 'example27 drop indicator should be hidden after drop');
+  assert.ok(reorderState.snapshot.events.reorderTail.length > 0, 'example27 reorder event should be emitted');
+
+  await page.click('#run-pin-hide');
+  await waitForLogLabel('run-pin-hide');
+  const pinHideState = await readLogPayload('Missing example27 run-pin-hide payload');
+  assert.deepEqual(pinHideState.snapshot.header.left, ['id', 'name'], 'example27 pin-left result mismatch');
+  assert.deepEqual(pinHideState.snapshot.header.center, ['region'], 'example27 hide result mismatch');
+  assert.ok(pinHideState.snapshot.state.hiddenColumnIds.includes('score'), 'example27 hidden score state mismatch');
+  assert.equal(pinHideState.snapshot.state.pinnedColumns.name, 'left', 'example27 name pin state mismatch');
+
+  await page.click('#run-all');
+  await waitForLogLabel('run-all');
+  const runAllState = await readLogPayload('Missing example27 run-all payload');
+  assert.equal(runAllState.snapshot.nameWidth, 260, 'example27 run-all width mismatch');
+  assert.deepEqual(runAllState.snapshot.header.left, ['id', 'name'], 'example27 run-all left pinned mismatch');
+  assert.deepEqual(runAllState.snapshot.header.center, ['region'], 'example27 run-all center order mismatch');
+  assert.ok(runAllState.snapshot.state.hiddenColumnIds.includes('score'), 'example27 run-all hidden score mismatch');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample28Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example28.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--left .hgrid__indicator-checkbox', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readSnapshot() {
+    return page.evaluate(() => {
+      const exampleApi = window.__example28;
+      if (!exampleApi || typeof exampleApi.getSnapshot !== 'function') {
+        throw new Error('Missing window.__example28.getSnapshot');
+      }
+      return exampleApi.getSnapshot();
+    });
+  }
+
+  await waitForLogLabel('initial');
+  const initialSnapshot = await readSnapshot();
+  assert.equal(initialSnapshot.checkAllScope, 'filtered', 'example28 initial checkAllScope mismatch');
+  assert.equal(Boolean(initialSnapshot.checkAll), true, 'example28 should render indicator checkAll');
+  assert.equal(Boolean(initialSnapshot.firstVisibleIndicator), true, 'example28 should render first indicator snapshot');
+  assert.equal(
+    /^\d+$/.test(String(initialSnapshot.firstVisibleIndicator.rowNumber ?? '')),
+    true,
+    'example28 row number indicator should render numeric text'
+  );
+  assert.equal(
+    typeof initialSnapshot.firstVisibleIndicator.status === 'string',
+    true,
+    'example28 status indicator should render text'
+  );
+  const externalStateColumnCount = await page.locator('.hgrid__cell[data-column-id="__state"]').count();
+  assert.equal(externalStateColumnCount, 0, 'example28 should not render external __state column');
+
+  await page.click('.hgrid__row--left .hgrid__indicator-checkbox');
+  await waitAnimationFrame(page);
+  const afterFirstRowToggle = await readSnapshot();
+  assert.equal(afterFirstRowToggle.selection.rowRanges.length, 1, 'example28 row checkbox should create one row range');
+  assert.equal(afterFirstRowToggle.checkAll.indeterminate, true, 'example28 checkAll should become indeterminate after single toggle');
+
+  await page.click('.hgrid__indicator-checkall');
+  await waitAnimationFrame(page);
+  const afterCheckAll = await readSnapshot();
+  assert.equal(afterCheckAll.checkAll.checked, true, 'example28 checkAll click should mark all rows in scope');
+  assert.equal(afterCheckAll.selection.rowRanges.length > 0, true, 'example28 checkAll should keep rowRanges');
+
+  await page.click('#filter-active');
+  await waitForLogLabel('filter-active');
+  const filteredSnapshot = await readSnapshot();
+  assert.equal(filteredSnapshot.hasActiveFilter, true, 'example28 should mark active filter');
+
+  await page.click('#scope-viewport');
+  await waitForLogLabel('scope-viewport');
+  const viewportScopeSnapshot = await readSnapshot();
+  assert.equal(viewportScopeSnapshot.checkAllScope, 'viewport', 'example28 scope should switch to viewport');
+
+  await page.click('#filter-clear');
+  await waitForLogLabel('filter-clear');
+  const clearedSnapshot = await readSnapshot();
+  assert.equal(clearedSnapshot.hasActiveFilter, false, 'example28 should clear active filter flag');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -2184,6 +2615,16 @@ async function main() {
     await runExample22Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample23Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample24Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample25Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample26Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample27Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample28Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

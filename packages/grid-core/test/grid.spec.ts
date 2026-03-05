@@ -736,6 +736,357 @@ describe('Grid DOM pooling', () => {
     grid.destroy();
   });
 
+  it('resizes columns by header-edge drag with min/max clamp and rAF-coalesced updates', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 110, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, minWidth: 120, maxWidth: 260, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' }
+      ],
+      rowData: Array.from({ length: 200 }, (_, index) => ({
+        id: index + 1,
+        name: `User-${index + 1}`,
+        score: (index * 13) % 1000
+      })),
+      height: 180,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    const resizeEvents: Array<{ phase: string; width: number }> = [];
+    grid.on('columnResize', (event) => {
+      resizeEvents.push({
+        phase: event.phase,
+        width: event.width
+      });
+    });
+
+    function createPointerLikeEvent(
+      type: 'pointerdown' | 'pointermove' | 'pointerup',
+      init: { pointerId: number; clientX: number; clientY: number; button?: number }
+    ): MouseEvent {
+      const event = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: init.button ?? 0,
+        clientX: init.clientX,
+        clientY: init.clientY
+      });
+
+      Object.defineProperty(event, 'pointerId', {
+        configurable: true,
+        value: init.pointerId
+      });
+      return event;
+    }
+
+    const dispatchResizeSequence = async (moveXValues: number[]): Promise<void> => {
+      const headerCell = container.querySelector('.hgrid__header-cell[data-column-id="name"]') as HTMLDivElement;
+      expect(headerCell).toBeTruthy();
+
+      const rect = {
+        left: 100,
+        top: 8,
+        right: 280,
+        bottom: 40,
+        width: 180,
+        height: 32,
+        x: 100,
+        y: 8,
+        toJSON: () => ''
+      };
+
+      Object.defineProperty(headerCell, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => rect
+      });
+
+      const pointerId = 77;
+      const startX = rect.right - 1;
+      const startY = rect.top + rect.height * 0.5;
+
+      headerCell.dispatchEvent(
+        createPointerLikeEvent('pointerdown', {
+          pointerId,
+          clientX: startX,
+          clientY: startY,
+          button: 0
+        })
+      );
+
+      for (let moveIndex = 0; moveIndex < moveXValues.length; moveIndex += 1) {
+        window.dispatchEvent(
+          createPointerLikeEvent('pointermove', {
+            pointerId,
+            clientX: moveXValues[moveIndex],
+            clientY: startY
+          })
+        );
+      }
+
+      await waitForFrame();
+      const endX = moveXValues[moveXValues.length - 1] ?? startX;
+      window.dispatchEvent(
+        createPointerLikeEvent('pointerup', {
+          pointerId,
+          clientX: endX,
+          clientY: startY
+        })
+      );
+      await waitForFrame();
+    };
+
+    await dispatchResizeSequence([240, 230, 210]);
+
+    const nameHeaderAfterMin = container.querySelector('.hgrid__header-cell[data-column-id="name"]') as HTMLDivElement;
+    expect(nameHeaderAfterMin.style.width).toBe('120px');
+
+    const firstMoveEvent = resizeEvents.find((event) => event.phase === 'move');
+    expect(firstMoveEvent?.width).toBe(120);
+    expect(resizeEvents.filter((event) => event.phase === 'move').length).toBe(1);
+    expect(resizeEvents[0]).toMatchObject({ phase: 'start', width: 180 });
+    expect(resizeEvents[2]).toMatchObject({ phase: 'end', width: 120 });
+
+    resizeEvents.length = 0;
+    await dispatchResizeSequence([420, 520]);
+
+    const nameHeaderAfterMax = container.querySelector('.hgrid__header-cell[data-column-id="name"]') as HTMLDivElement;
+    expect(nameHeaderAfterMax.style.width).toBe('260px');
+    expect(resizeEvents[0]).toMatchObject({ phase: 'start', width: 120 });
+    expect(resizeEvents[1]).toMatchObject({ phase: 'move', width: 260 });
+    expect(resizeEvents[2]).toMatchObject({ phase: 'end', width: 260 });
+
+    grid.destroy();
+  });
+
+  it('reorders columns by header drag and shows drop indicator while dragging', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: Array.from({ length: 100 }, (_, index) => ({
+        id: index + 1,
+        name: `User-${index + 1}`,
+        score: (index * 11) % 1000,
+        status: index % 2 === 0 ? 'active' : 'idle'
+      })),
+      height: 180,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    function createPointerLikeEvent(
+      type: 'pointerdown' | 'pointermove' | 'pointerup',
+      init: { pointerId: number; clientX: number; clientY: number; button?: number }
+    ): MouseEvent {
+      const event = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: init.button ?? 0,
+        clientX: init.clientX,
+        clientY: init.clientY
+      });
+      Object.defineProperty(event, 'pointerId', {
+        configurable: true,
+        value: init.pointerId
+      });
+      return event;
+    }
+
+    const headerElement = container.querySelector('.hgrid__header') as HTMLDivElement;
+    const idHeaderCell = container.querySelector('.hgrid__header-cell[data-column-id="id"]') as HTMLDivElement;
+    const nameHeaderCell = container.querySelector('.hgrid__header-cell[data-column-id="name"]') as HTMLDivElement;
+    const scoreHeaderCell = container.querySelector('.hgrid__header-cell[data-column-id="score"]') as HTMLDivElement;
+    const statusHeaderCell = container.querySelector('.hgrid__header-cell[data-column-id="status"]') as HTMLDivElement;
+    const dropIndicator = container.querySelector('.hgrid__header-drop-indicator') as HTMLDivElement;
+
+    const top = 8;
+    const bottom = 40;
+    const headerRect = {
+      left: 100,
+      top,
+      right: 660,
+      bottom,
+      width: 560,
+      height: 32,
+      x: 100,
+      y: top,
+      toJSON: () => ''
+    };
+    Object.defineProperty(headerElement, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => headerRect
+    });
+    Object.defineProperty(idHeaderCell, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ ...headerRect, left: 100, right: 200, width: 100, x: 100, toJSON: () => '' })
+    });
+    Object.defineProperty(nameHeaderCell, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ ...headerRect, left: 200, right: 380, width: 180, x: 200, toJSON: () => '' })
+    });
+    Object.defineProperty(scoreHeaderCell, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ ...headerRect, left: 380, right: 520, width: 140, x: 380, toJSON: () => '' })
+    });
+    Object.defineProperty(statusHeaderCell, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ ...headerRect, left: 520, right: 660, width: 140, x: 520, toJSON: () => '' })
+    });
+
+    const reorderEvents: Array<{ fromIndex: number; toIndex: number; columnOrder: string[] }> = [];
+    grid.on('columnReorder', (event) => {
+      reorderEvents.push({
+        fromIndex: event.fromIndex,
+        toIndex: event.toIndex,
+        columnOrder: [...event.columnOrder]
+      });
+    });
+
+    const pointerId = 91;
+    const centerY = top + 16;
+    nameHeaderCell.dispatchEvent(
+      createPointerLikeEvent('pointerdown', {
+        pointerId,
+        clientX: 220,
+        clientY: centerY,
+        button: 0
+      })
+    );
+    scoreHeaderCell.dispatchEvent(
+      createPointerLikeEvent('pointermove', {
+        pointerId,
+        clientX: 514,
+        clientY: centerY
+      })
+    );
+
+    await waitForFrame();
+    expect(dropIndicator.style.display).toBe('block');
+
+    scoreHeaderCell.dispatchEvent(
+      createPointerLikeEvent('pointerup', {
+        pointerId,
+        clientX: 514,
+        clientY: centerY
+      })
+    );
+    await waitForFrame();
+
+    expect(dropIndicator.style.display).toBe('none');
+    expect(reorderEvents.length).toBe(1);
+    expect(reorderEvents[0]).toMatchObject({
+      fromIndex: 1,
+      toIndex: 2,
+      columnOrder: ['id', 'score', 'name', 'status']
+    });
+
+    const firstRow = container.querySelector('.hgrid__row--center') as HTMLDivElement;
+    const cells = firstRow.querySelectorAll('.hgrid__cell');
+    expect((cells[0] as HTMLDivElement).dataset.columnId).toBe('id');
+    expect((cells[1] as HTMLDivElement).dataset.columnId).toBe('score');
+    expect((cells[2] as HTMLDivElement).dataset.columnId).toBe('name');
+
+    grid.destroy();
+  });
+
+  it('restores column order through getState/setState', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'alpha', status: 'active' },
+        { id: 2, name: 'beta', status: 'idle' }
+      ],
+      height: 120,
+      rowHeight: 30,
+      overscan: 2
+    });
+
+    grid.setColumnOrder(['status', 'id', 'name']);
+    const savedState = grid.getState();
+    expect(savedState.columnOrder).toEqual(['status', 'id', 'name']);
+
+    grid.setColumnOrder(['id', 'name', 'status']);
+    const beforeRestore = container.querySelector('.hgrid__row--center') as HTMLDivElement;
+    expect(((beforeRestore.querySelectorAll('.hgrid__cell')[0] as HTMLDivElement).dataset.columnId)).toBe('id');
+
+    grid.setState(savedState);
+
+    const afterRestore = container.querySelector('.hgrid__row--center') as HTMLDivElement;
+    const restoredCells = afterRestore.querySelectorAll('.hgrid__cell');
+    expect((restoredCells[0] as HTMLDivElement).dataset.columnId).toBe('status');
+    expect((restoredCells[1] as HTMLDivElement).dataset.columnId).toBe('id');
+    expect((restoredCells[2] as HTMLDivElement).dataset.columnId).toBe('name');
+
+    grid.destroy();
+  });
+
+  it('updates pin/visibility at runtime and restores them from state', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 200, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'status', header: 'Status', width: 140, type: 'text', pinned: 'right' }
+      ],
+      rowData: [
+        { id: 1, name: 'alpha', score: 10, status: 'active' },
+        { id: 2, name: 'beta', score: 20, status: 'idle' }
+      ],
+      height: 120,
+      rowHeight: 30,
+      overscan: 2
+    });
+
+    grid.setColumnPin('name', 'left');
+    grid.setColumnPin('score', 'right');
+    grid.setColumnVisibility('score', false);
+
+    expect(container.querySelectorAll('.hgrid__header-left .hgrid__header-cell[data-column-id="name"]').length).toBe(1);
+    expect(container.querySelectorAll('.hgrid__header-right .hgrid__header-cell[data-column-id="score"]').length).toBe(0);
+
+    const savedState = grid.getState();
+    expect(savedState.hiddenColumnIds).toEqual(['score']);
+    expect(savedState.pinnedColumns).toMatchObject({
+      id: 'left',
+      name: 'left',
+      status: 'right',
+      score: 'right'
+    });
+
+    grid.setColumnPin('name', undefined);
+    grid.setColumnPin('score', undefined);
+    grid.setColumnVisibility('score', true);
+    expect(container.querySelectorAll('.hgrid__header-left .hgrid__header-cell[data-column-id="name"]').length).toBe(0);
+    expect(container.querySelectorAll('.hgrid__header-center .hgrid__header-cell[data-column-id="score"]').length).toBe(1);
+
+    grid.setState(savedState);
+    expect(container.querySelectorAll('.hgrid__header-left .hgrid__header-cell[data-column-id="name"]').length).toBe(1);
+    expect(container.querySelectorAll('.hgrid__header-right .hgrid__header-cell[data-column-id="status"]').length).toBe(1);
+    expect(container.querySelectorAll('.hgrid__header-cell[data-column-id="score"]').length).toBe(0);
+
+    grid.destroy();
+  });
+
   it('swaps data providers without changing Grid API', () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -1345,6 +1696,203 @@ describe('Grid DOM pooling', () => {
     await waitForFrame();
     const homeSelection = grid.getSelection();
     expect(homeSelection.activeCell).toEqual({ rowIndex: 0, colIndex: 0 });
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('supports indicator checkbox/checkAll interactions and Space toggle', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 980, configurable: true });
+    document.body.append(container);
+
+    const rowData = Array.from({ length: 160 }, (_value, index) => ({
+      id: index + 100,
+      name: `Customer-${index + 1}`,
+      status: index % 2 === 0 ? 'active' : 'idle',
+      __rowStatus: index % 3 === 0 ? 'updated' : index % 5 === 0 ? 'error' : 'clean'
+    }));
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: '__indicatorRowNumber', header: '#', width: 64, type: 'number' },
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: '__indicatorStatus', header: 'State', width: 104, type: 'text' },
+        { id: 'id', header: 'ID', width: 110, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData,
+      height: 260,
+      rowHeight: 28,
+      overscan: 4,
+      rowIndicator: {
+        width: 56,
+        checkAllScope: 'filtered',
+        getRowStatus(context) {
+          return context.row.__rowStatus as 'clean' | 'updated' | 'error';
+        }
+      }
+    });
+
+    await waitForFrame();
+
+    const checkAll = container.querySelector('.hgrid__indicator-checkall') as HTMLInputElement | null;
+    const firstRowCheckbox = container.querySelector('.hgrid__row--left .hgrid__indicator-checkbox') as HTMLInputElement | null;
+    const firstRowNumberCell = container.querySelector(
+      '.hgrid__row--left .hgrid__cell[data-column-id="__indicatorRowNumber"]'
+    ) as HTMLDivElement | null;
+    const firstStatusCell = container.querySelector(
+      '.hgrid__row--left .hgrid__cell[data-column-id="__indicatorStatus"]'
+    ) as HTMLDivElement | null;
+    expect(checkAll).not.toBeNull();
+    expect(firstRowCheckbox).not.toBeNull();
+    expect(firstRowNumberCell?.textContent).toBe('1');
+    expect(['updated', 'clean', 'error']).toContain(firstStatusCell?.textContent ?? '');
+
+    firstRowCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const selectionAfterSingleToggle = grid.getSelection();
+    expect(selectionAfterSingleToggle.rowRanges.length).toBe(1);
+    expect(selectionAfterSingleToggle.rowRanges[0].r1).toBe(selectionAfterSingleToggle.rowRanges[0].r2);
+    expect(checkAll?.indeterminate).toBe(true);
+
+    const secondRowCheckbox = container.querySelector(
+      '.hgrid__row--left[data-row-index="1"] .hgrid__indicator-checkbox'
+    ) as HTMLInputElement | null;
+    expect(secondRowCheckbox).not.toBeNull();
+    secondRowCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    const selectionAfterMultiToggle = grid.getSelection();
+    expect(selectionAfterMultiToggle.rowRanges).toEqual([{ r1: 0, r2: 1, rowKeyStart: 100, rowKeyEnd: 101 }]);
+
+    checkAll?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    const selectionAfterCheckAll = grid.getSelection();
+    expect(selectionAfterCheckAll.rowRanges).toEqual([{ r1: 0, r2: 159, rowKeyStart: 100, rowKeyEnd: 259 }]);
+    expect(checkAll?.checked).toBe(true);
+
+    grid.setSelection({
+      activeCell: { rowIndex: 3, colIndex: 1 },
+      cellRanges: [],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const selectionAfterSpace = grid.getSelection();
+    expect(selectionAfterSpace.rowRanges).toEqual([{ r1: 3, r2: 3, rowKeyStart: 103, rowKeyEnd: 103 }]);
+
+    const externalStateColumnCount = container.querySelectorAll('.hgrid__cell[data-column-id="__state"]').length;
+    expect(externalStateColumnCount).toBe(0);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('keeps checkAll/clearAll range-based at 1M rows', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 980, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: 'id', header: 'ID', width: 110, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' }
+      ],
+      dataProvider: new SyntheticLargeDataProvider(1_000_000),
+      height: 260,
+      rowHeight: 28,
+      overscan: 4,
+      rowIndicator: {
+        checkAllScope: 'filtered'
+      }
+    });
+
+    await waitForFrame();
+
+    const checkAll = container.querySelector('.hgrid__indicator-checkall') as HTMLInputElement | null;
+    expect(checkAll).not.toBeNull();
+
+    checkAll?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(grid.getSelection().rowRanges).toEqual([{ r1: 0, r2: 999_999, rowKeyStart: 0, rowKeyEnd: 999_999 }]);
+
+    checkAll?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(grid.getSelection().rowRanges).toEqual([]);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('keeps indicator checkbox DOM pooled while scrolling', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 980, configurable: true });
+    document.body.append(container);
+
+    const rowData = Array.from({ length: 5000 }, (_value, index) => ({
+      id: index + 1,
+      name: `Customer-${index + 1}`,
+      status: index % 2 === 0 ? 'active' : 'idle'
+    }));
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: 'id', header: 'ID', width: 110, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData,
+      height: 260,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    await waitForFrame();
+
+    const leftLayer = container.querySelector('.hgrid__rows-layer--left') as HTMLDivElement;
+    const indicatorCheckboxesBefore = Array.from(
+      container.querySelectorAll('.hgrid__row--left .hgrid__indicator-checkbox')
+    ) as HTMLInputElement[];
+
+    const childListRecords: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => {
+      for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+        const record = records[recordIndex];
+        if (record.type === 'childList') {
+          childListRecords.push(record);
+        }
+      }
+    });
+    observer.observe(leftLayer, { childList: true, subtree: false });
+
+    const verticalScrollElement = getVerticalScrollElement(container);
+    for (let index = 0; index < 60; index += 1) {
+      verticalScrollElement.scrollTop = index * 140;
+      verticalScrollElement.dispatchEvent(new Event('scroll'));
+      await waitForFrame();
+    }
+
+    observer.disconnect();
+
+    const indicatorCheckboxesAfter = Array.from(
+      container.querySelectorAll('.hgrid__row--left .hgrid__indicator-checkbox')
+    ) as HTMLInputElement[];
+    expect(indicatorCheckboxesAfter.length).toBe(indicatorCheckboxesBefore.length);
+    for (let index = 0; index < indicatorCheckboxesBefore.length; index += 1) {
+      expect(indicatorCheckboxesAfter[index]).toBe(indicatorCheckboxesBefore[index]);
+    }
+
+    const hasChildListMutation = childListRecords.some((record) => record.addedNodes.length > 0 || record.removedNodes.length > 0);
+    expect(hasChildListMutation).toBe(false);
 
     grid.destroy();
     container.remove();

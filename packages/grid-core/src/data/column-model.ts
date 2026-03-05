@@ -1,4 +1,4 @@
-import type { ColumnDef } from '../core/grid-options';
+import type { ColumnDef, ColumnPinPosition } from '../core/grid-options';
 import type { GridRowData } from './data-provider';
 
 const DEFAULT_MIN_WIDTH = 40;
@@ -137,6 +137,18 @@ export class ColumnModel {
     this.columnsById.set(columnId, {
       ...column,
       width: clampColumnWidth(safeWidth, column.minWidth, column.maxWidth)
+    });
+  }
+
+  public setColumnPin(columnId: string, pinned?: ColumnPinPosition): void {
+    const column = this.columnsById.get(columnId);
+    if (!column) {
+      throw new Error(`Unknown column id: ${columnId}`);
+    }
+
+    this.columnsById.set(columnId, {
+      ...column,
+      pinned
     });
   }
 }

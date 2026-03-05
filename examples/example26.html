@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 26 - Column Pin Hide</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1040px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 26 - Column Pin Hide</h1>
+    <div class="controls">
+      <button id="swap-1m" type="button">swap synthetic 1M</button>
+      <button id="stress-ops" type="button">stress column ops</button>
+      <button id="pin-name-left" type="button">pin name left</button>
+      <button id="pin-region-right" type="button">pin region right</button>
+      <button id="unpin-name" type="button">unpin name</button>
+      <button id="hide-score" type="button">hide score</button>
+      <button id="show-score" type="button">show score</button>
+      <button id="save-state" type="button">save state</button>
+      <button id="mutate" type="button">mutate</button>
+      <button id="restore-state" type="button">restore state</button>
+      <button id="reset" type="button">reset</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const baseColumns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'region', header: 'Region', width: 160, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text', pinned: 'right' }
+      ];
+
+      const rowData = Array.from({ length: 10000 }, (_, index) => ({
+        id: index + 1,
+        name: 'User-' + (index + 1),
+        score: (index * 13) % 1000,
+        region: ['KR', 'US', 'JP', 'DE'][index % 4],
+        status: index % 2 === 0 ? 'active' : 'idle'
+      }));
+
+      class SyntheticLargeDataProvider {
+        constructor(rowCount) {
+          this.rowCount = rowCount;
+        }
+
+        getRowCount() {
+          return this.rowCount;
+        }
+
+        getRowKey(dataIndex) {
+          return dataIndex;
+        }
+
+        getValue(dataIndex, columnId) {
+          if (columnId === 'id') {
+            return dataIndex + 1;
+          }
+          if (columnId === 'name') {
+            return 'User-' + (dataIndex + 1);
+          }
+          if (columnId === 'score') {
+            return (dataIndex * 13) % 1000;
+          }
+          if (columnId === 'region') {
+            return ['KR', 'US', 'JP', 'DE'][dataIndex % 4];
+          }
+          if (columnId === 'status') {
+            return dataIndex % 2 === 0 ? 'active' : 'idle';
+          }
+          return null;
+        }
+
+        setValue() {}
+        applyTransactions() {}
+      }
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: baseColumns.map((column) => Object.assign({}, column)),
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        overscanCols: 2
+      });
+
+      const logElement = document.getElementById('log');
+      const buttons = Array.from(document.querySelectorAll('.controls button'));
+      let savedState = null;
+      let isSynthetic = false;
+      let running = false;
+
+      function collectZoneColumnIds(selector) {
+        return Array.from(document.querySelectorAll(selector))
+          .map((cell) => cell.dataset.columnId)
+          .filter(Boolean);
+      }
+
+      function getSnapshot() {
+        const state = grid.getState();
+        const firstVisibleCenterRow = Array.from(document.querySelectorAll('.hgrid__row--center')).find(
+          (row) => row.style.display !== 'none'
+        );
+        const centerRowOrder = firstVisibleCenterRow
+          ? Array.from(firstVisibleCenterRow.querySelectorAll('.hgrid__cell'))
+              .filter((cell) => cell.style.display !== 'none')
+              .map((cell) => cell.dataset.columnId)
+              .filter(Boolean)
+          : [];
+        const rowModelState = grid.getRowModelState();
+
+        return {
+          state,
+          hasSavedState: savedState !== null,
+          isSynthetic,
+          running,
+          rowModel: {
+            viewRowCount: rowModelState.viewRowCount
+          },
+          header: {
+            left: collectZoneColumnIds('.hgrid__header-left .hgrid__header-cell'),
+            center: collectZoneColumnIds('.hgrid__header-center .hgrid__header-cell').filter((id, index, array) =>
+              array.indexOf(id) === index
+            ),
+            right: collectZoneColumnIds('.hgrid__header-right .hgrid__header-cell')
+          },
+          firstVisibleCenterRowOrder: centerRowOrder,
+          dom: {
+            centerRowDom: document.querySelectorAll('.hgrid__row--center').length,
+            centerCellDom: document.querySelectorAll('.hgrid__row--center .hgrid__cell--center').length
+          }
+        };
+      }
+
+      function writeLog(label, extra) {
+        logElement.textContent = JSON.stringify({
+          label,
+          snapshot: getSnapshot(),
+          extra: extra || null
+        });
+      }
+
+      function setBusy(isBusy) {
+        running = isBusy;
+        for (const button of buttons) {
+          if (button.id === 'inspect') {
+            continue;
+          }
+          button.disabled = isBusy;
+        }
+      }
+
+      function applyStressMutation(stepIndex) {
+        const variant = stepIndex % 6;
+        if (variant === 0) {
+          grid.setColumnWidth('name', stepIndex % 12 < 6 ? 220 : 260);
+          return;
+        }
+        if (variant === 1) {
+          grid.setColumnPin('region', stepIndex % 4 < 2 ? 'right' : undefined);
+          return;
+        }
+        if (variant === 2) {
+          grid.setColumnVisibility('score', stepIndex % 3 !== 0);
+          return;
+        }
+        if (variant === 3) {
+          const nextOrder =
+            stepIndex % 2 === 0 ? ['id', 'name', 'score', 'region', 'status'] : ['id', 'region', 'name', 'score', 'status'];
+          grid.setColumnOrder(nextOrder);
+          return;
+        }
+        if (variant === 4) {
+          grid.setColumnPin('name', stepIndex % 4 < 2 ? 'left' : undefined);
+          return;
+        }
+        grid.setColumnWidth('region', stepIndex % 12 < 6 ? 160 : 200);
+      }
+
+      async function runColumnMutationStress(iterations) {
+        const beforeSnapshot = getSnapshot();
+        let maxFrameDeltaMs = 0;
+        let frameOver50Count = 0;
+        let lastTimestamp = 0;
+        let stepIndex = 0;
+
+        await new Promise((resolve) => {
+          function step(timestamp) {
+            if (lastTimestamp !== 0) {
+              const delta = timestamp - lastTimestamp;
+              maxFrameDeltaMs = Math.max(maxFrameDeltaMs, delta);
+              if (delta > 50) {
+                frameOver50Count += 1;
+              }
+            }
+
+            lastTimestamp = timestamp;
+            applyStressMutation(stepIndex);
+            stepIndex += 1;
+
+            if (stepIndex < iterations) {
+              requestAnimationFrame(step);
+              return;
+            }
+
+            requestAnimationFrame((tailTimestamp) => {
+              const tailDelta = tailTimestamp - lastTimestamp;
+              maxFrameDeltaMs = Math.max(maxFrameDeltaMs, tailDelta);
+              if (tailDelta > 50) {
+                frameOver50Count += 1;
+              }
+              resolve();
+            });
+          }
+
+          requestAnimationFrame(step);
+        });
+
+        const afterSnapshot = getSnapshot();
+        return {
+          iterations,
+          maxFrameDeltaMs: Math.round(maxFrameDeltaMs * 10) / 10,
+          frameOver50Count,
+          rowDomStable: beforeSnapshot.dom.centerRowDom === afterSnapshot.dom.centerRowDom,
+          centerCellStable: beforeSnapshot.dom.centerCellDom === afterSnapshot.dom.centerCellDom,
+          viewRowCount: afterSnapshot.rowModel.viewRowCount
+        };
+      }
+
+      function applyResetColumns() {
+        isSynthetic = false;
+        grid.setOptions({ rowData });
+        grid.setColumns(baseColumns.map((column) => Object.assign({}, column)));
+      }
+
+      async function runAction(label, action) {
+        setBusy(true);
+        const startedAt = performance.now();
+        try {
+          const extra = await action();
+          writeLog(label, Object.assign({ elapsedMs: Math.round(performance.now() - startedAt) }, extra || {}));
+        } catch (error) {
+          writeLog(label + '-error', {
+            message: error && error.message ? error.message : String(error)
+          });
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      document.getElementById('swap-1m').addEventListener('click', () => {
+        runAction('swap-1m', async () => {
+          grid.setOptions({ dataProvider: new SyntheticLargeDataProvider(1_000_000) });
+          isSynthetic = true;
+        });
+      });
+
+      document.getElementById('stress-ops').addEventListener('click', () => {
+        runAction('stress-ops', async () => {
+          if (!isSynthetic) {
+            grid.setOptions({ dataProvider: new SyntheticLargeDataProvider(1_000_000) });
+            isSynthetic = true;
+          }
+          return runColumnMutationStress(120);
+        });
+      });
+
+      document.getElementById('pin-name-left').addEventListener('click', () => {
+        runAction('pin-name-left', async () => {
+          grid.setColumnPin('name', 'left');
+        });
+      });
+
+      document.getElementById('pin-region-right').addEventListener('click', () => {
+        runAction('pin-region-right', async () => {
+          grid.setColumnPin('region', 'right');
+        });
+      });
+
+      document.getElementById('unpin-name').addEventListener('click', () => {
+        runAction('unpin-name', async () => {
+          grid.setColumnPin('name', undefined);
+        });
+      });
+
+      document.getElementById('hide-score').addEventListener('click', () => {
+        runAction('hide-score', async () => {
+          grid.setColumnVisibility('score', false);
+        });
+      });
+
+      document.getElementById('show-score').addEventListener('click', () => {
+        runAction('show-score', async () => {
+          grid.setColumnVisibility('score', true);
+        });
+      });
+
+      document.getElementById('save-state').addEventListener('click', () => {
+        runAction('save-state', async () => {
+          savedState = grid.getState();
+        });
+      });
+
+      document.getElementById('mutate').addEventListener('click', () => {
+        runAction('mutate', async () => {
+          grid.setColumnPin('name', undefined);
+          grid.setColumnPin('region', undefined);
+          grid.setColumnVisibility('score', true);
+          grid.setColumnOrder(['id', 'name', 'score', 'region', 'status']);
+        });
+      });
+
+      document.getElementById('restore-state').addEventListener('click', () => {
+        runAction('restore-state', async () => {
+          if (!savedState) {
+            throw new Error('no-saved-state');
+          }
+          grid.setState(savedState);
+        });
+      });
+
+      document.getElementById('reset').addEventListener('click', () => {
+        runAction('reset', async () => {
+          savedState = null;
+          applyResetColumns();
+        });
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect');
+      });
+
+      writeLog('initial');
+    </script>
+  </body>
+</html>

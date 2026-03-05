@@ -1,6 +1,13 @@
 import type { SelectionChangeEvent } from '../interaction/selection-model';
 
-export type GridEventName = 'cellClick' | 'selectionChange' | 'editStart' | 'editCommit' | 'editCancel';
+export type GridEventName =
+  | 'cellClick'
+  | 'selectionChange'
+  | 'editStart'
+  | 'editCommit'
+  | 'editCancel'
+  | 'columnResize'
+  | 'columnReorder';
 
 export interface CellClickEvent {
   rowIndex: number;
@@ -15,6 +22,8 @@ export interface GridEventMap {
   editStart: EditStartEvent;
   editCommit: EditCommitEvent;
   editCancel: EditCancelEvent;
+  columnResize: ColumnResizeEvent;
+  columnReorder: ColumnReorderEvent;
 }
 
 export interface EditStartEvent {
@@ -38,6 +47,20 @@ export interface EditCancelEvent {
   columnId: string;
   value: unknown;
   reason: 'escape' | 'reconcile' | 'detached';
+}
+
+export interface ColumnResizeEvent {
+  columnId: string;
+  width: number;
+  phase: 'start' | 'move' | 'end';
+}
+
+export interface ColumnReorderEvent {
+  sourceColumnId: string;
+  targetColumnId: string | null;
+  fromIndex: number;
+  toIndex: number;
+  columnOrder: string[];
 }
 
 type EventHandler<T> = (payload: T) => void;

@@ -535,24 +535,102 @@
 
 # Phase 7 — Column Features: Resize/Reorder/Pin/Hide
 ## 7.1 Resize
-- [ ] drag 리사이저(헤더)
-- [ ] min/max width
-- [ ] 리사이즈 중 렌더 업데이트 최적화
+- [x] drag 리사이저(헤더)
+- [x] min/max width
+- [x] 리사이즈 중 렌더 업데이트 최적화
+
+### 코어 변경 코멘트 (7.1 반영, 2026-03-05)
+- 헤더 셀 우측 경계(`6px`) hit-test 기반 column resize drag를 추가했다.
+- resize 세션은 `pointermove` 입력을 rAF로 coalescing 하여 폭 변경 이벤트를 프레임 단위로 반영한다.
+- `minWidth/maxWidth` clamp를 drag 계산에 강제하고, `columnResize(start/move/end)` 이벤트를 Grid에 연결해 ColumnModel 폭 상태를 동기화했다.
+- 검증: `packages/grid-core/test/grid.spec.ts`, `examples/example24.html`, `scripts/run-e2e.mjs` Example24 시나리오.
 
 ## 7.2 Reorder
-- [ ] drag header reorder
-- [ ] drop indicator
-- [ ] state 저장/복원 포함
+- [x] drag header reorder
+- [x] drop indicator
+- [x] state 저장/복원 포함
+
+### 코어 변경 코멘트 (7.2 반영, 2026-03-05)
+- 헤더 셀 drag 기반 reorder 세션을 추가하고 pointermove는 rAF로 coalescing 처리했다.
+- header 레이어에 drop indicator를 추가해 before/after drop 경계를 시각화했다.
+- `columnReorder` 이벤트를 Grid에 연결해 `ColumnModel.setColumnOrder`로 반영한다.
+- `GridState`에 `columnOrder`(optional)를 포함해 `getState()/setState()`에서 순서 저장/복원이 가능하다.
+- 검증: `packages/grid-core/test/grid.spec.ts`, `examples/example25.html`, `scripts/run-e2e.mjs` Example25 시나리오.
 
 ## 7.3 Pin/Hide
-- [ ] pinned left/right
-- [ ] column visibility toggle
+- [x] pinned left/right
+- [x] column visibility toggle
+
+### 코어 변경 코멘트 (7.3 반영, 2026-03-05)
+- `Grid.setColumnPin(columnId, pinned)` API를 추가해 런타임 pin left/right/unpin을 지원한다.
+- `setColumnVisibility`와 결합해 pin/hide를 독립적으로 제어할 수 있다.
+- `GridState`에 `hiddenColumnIds`/`pinnedColumns`를 추가해 state 저장/복원 시 pin/hide가 함께 복원된다.
+- Example26 스트레스(1M rows, 120회 column mutation)에서 pool DOM 고정 및 frame gap 상한(<=85ms) 기준을 e2e로 검증했다.
+- 검증: `packages/grid-core/test/grid.spec.ts`, `examples/example26.html`, `scripts/run-e2e.mjs` Example26 시나리오.
 
 ### 수용 기준
-- [ ] 컬럼 변경이 대용량에서도 stutter 없이 동작
+- [x] 컬럼 변경이 대용량에서도 stutter 없이 동작
 
 ## 7.4 예제
-- [ ] `example{N}.html`: column resize/reorder/pin/hide
+- [x] `example{N}.html`: column resize/reorder/pin/hide
+
+### 코어 변경 코멘트 (7.4 반영, 2026-03-05)
+- 개별 예제:
+  - `example24`: resize
+  - `example25`: reorder
+  - `example26`: pin/hide + 1M stress
+- 통합 예제:
+  - `example27`: resize+reorder+pin+hide 패키지 시나리오
+- 검증: `scripts/run-e2e.mjs`에 Example24~27 시나리오를 포함해 자동 검증한다.
+
+## 7.5 Selection/Indicator Columns (신규)
+- [x] row indicator 영역 3컬럼 분리
+  - [x] `__indicatorRowNumber` (행 번호)
+  - [x] `__indicatorCheckbox` (행 선택 체크박스)
+  - [x] `__indicatorStatus` (행 상태)
+  - [x] `__indicator` legacy alias 유지(`__indicatorCheckbox` 동작)
+  - [x] 헤더 `checkAll` 체크박스(all/none/indeterminate)
+  - [x] `checkAllScope: "all" | "filtered" | "viewport"` 정책 확정
+  - [x] Shift/Meta 보조키 + 키보드 Space 토글 동작
+  - [x] pin-left 고정 및 width/token 정책
+  - [x] 대용량 선택 상태는 range/sparse set 기반 유지(전체 비트맵 할당 금지)
+- [x] state 컬럼(`__state`) + 렌더 훅
+  - [x] dirty/commit/validation/error 상태 표시
+  - [x] aria-label/tooltip 정책
+
+### 수용 기준
+- [x] 헤더 checkAll이 filtered view와 일관되게 동작
+- [x] rowCount=1,000,000에서 checkAll/clearAll 후 UI freeze 없음
+- [x] 스크롤 중 indicator/checkbox DOM churn 0 (pool 재사용)
+
+### 코어 변경 코멘트 (7.5 반영, 2026-03-05)
+- `GridOptions`에 `rowIndicator`/`stateColumn` 옵션을 추가하고, row indicator reserved id(`__indicatorRowNumber`/`__indicatorCheckbox`/`__indicatorStatus`)를 pin-left 정책으로 정규화했다.
+- indicator 영역은 행번호/체크박스/상태 3개를 독립 컬럼으로 렌더링하며, `__indicator`는 legacy checkbox alias로 유지한다.
+- 행 선택은 `rowRanges` 기반으로 유지해 checkAll/clearAll을 대용량에서도 상수 크기 상태로 처리한다.
+- 키보드 `Space`(active indicator cell)와 Shift/Meta 보조키 토글을 지원한다.
+- `__state` 컬럼은 필요 시 `stateColumn.render` 훅으로 외부 상태 컬럼을 구성할 수 있다.
+- 검증:
+  - `packages/grid-core/test/grid.spec.ts` (indicator checkAll/Space/1M/checkbox pooling)
+  - `examples/example28.html`, `scripts/run-e2e.mjs` Example28 시나리오.
+
+## 7.6 Column Group Header (신규)
+- [ ] `ColumnGroupDef` 스키마 확정:
+  - [ ] `groupId`, `header`, `children`, `collapsed?`
+- [ ] 멀티라인 header row(2-depth+) 레이아웃 엔진
+- [ ] group leaf와 resize/reorder/pin/hide 연동
+- [ ] center 가로 가상화에서 group clipping/label 정합 보장
+- [ ] header a11y:
+  - [ ] group/leaf role 매핑
+  - [ ] `aria-colspan` 매핑
+
+### 수용 기준
+- [ ] pinned left/center/right 혼합에서도 group header 경계 깨짐 없음
+- [ ] 고속 가로 스크롤 시 group header/body misalign 0
+
+## 7.7 예제 (신규)
+- [x] `example{N}.html`: row indicator checkbox + header checkAll(indeterminate)
+- [x] `example{N}.html`: row indicator + state 컬럼
+- [ ] `example{N}.html`: multi-level column group header
 
 ---
 

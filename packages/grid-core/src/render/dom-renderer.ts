@@ -1,5 +1,16 @@
 import { EventBus } from '../core/event-bus';
-import type { ColumnDef, GridOptions, GridState, RowHeightMode, ScrollbarPolicy, ScrollbarVisibility } from '../core/grid-options';
+import type {
+  ColumnDef,
+  GridOptions,
+  GridState,
+  RowHeightMode,
+  RowIndicatorCheckAllScope,
+  RowIndicatorOptions,
+  RowStatusTone,
+  ScrollbarPolicy,
+  ScrollbarVisibility,
+  StateColumnRenderResult
+} from '../core/grid-options';
 import { formatColumnValue, getColumnValue } from '../data/column-model';
 import type { GridRowData, RowKey } from '../data/data-provider';
 import {
@@ -7,7 +18,8 @@ import {
   type GridSelection,
   type GridSelectionInput,
   type SelectionCellPosition,
-  type SelectionChangeSource
+  type SelectionChangeSource,
+  type SelectionRowRangeInput
 } from '../interaction/selection-model';
 import {
   MAX_SCROLL_PX,
@@ -33,6 +45,13 @@ interface CellRenderState {
   width: number;
   isSelected: boolean;
   isActive: boolean;
+  extraClassName: string;
+  titleText: string;
+  ariaLabel: string;
+}
+
+interface IndicatorCellElements {
+  checkbox: HTMLInputElement;
 }
 
 interface ZoneRowRenderState {
@@ -47,6 +66,7 @@ interface ZoneRowRenderState {
 interface ZoneRowItem {
   element: HTMLDivElement;
   cells: HTMLDivElement[];
+  indicatorCells: Array<IndicatorCellElements | null>;
   visibleDisplay: '' | 'block';
   rowState: ZoneRowRenderState;
   cellStates: CellRenderState[];
@@ -66,6 +86,15 @@ interface ScrollbarSize {
 interface HorizontalWindow {
   start: number;
   end: number;
+}
+
+type StateColumnTone = RowStatusTone | 'dirty' | 'commit';
+
+interface NormalizedStateColumnResult {
+  textContent: string;
+  ariaLabel: string;
+  tooltip: string;
+  tone: StateColumnTone | null;
 }
 
 interface CellHitTestResult {
@@ -90,6 +119,40 @@ interface EditSession {
   originalValue: unknown;
 }
 
+interface HeaderResizeHit {
+  columnId: string;
+  column: ColumnDef;
+  headerCell: HTMLDivElement;
+}
+
+interface ColumnResizeSession {
+  pointerId: number;
+  columnId: string;
+  startClientX: number;
+  startWidth: number;
+  minWidth: number;
+  maxWidth: number;
+  pendingClientX: number;
+  lastEmittedWidth: number;
+}
+
+interface HeaderDropTarget {
+  dropIndex: number;
+  targetColumnId: string | null;
+  indicatorClientX: number;
+}
+
+interface ColumnReorderSession {
+  pointerId: number;
+  sourceColumnId: string;
+  sourceIndex: number;
+  pendingClientX: number;
+  pendingClientY: number;
+  pendingTarget: EventTarget | null;
+  currentDropIndex: number;
+  currentTargetColumnId: string | null;
+}
+
 const DEFAULT_HEIGHT = 360;
 const DEFAULT_ROW_HEIGHT = 28;
 const DEFAULT_ESTIMATED_ROW_HEIGHT = 28;
@@ -98,6 +161,20 @@ const DEFAULT_COLUMN_OVERSCAN = 2;
 const VARIABLE_POOL_EXTRA_ROWS = 12;
 const MIN_SCROLLBAR_SIZE = 0;
 const INVISIBLE_SCROLLBAR_FALLBACK_SIZE = 16;
+const HEADER_RESIZE_HIT_SLOP_PX = 6;
+const LEGACY_INDICATOR_COLUMN_ID = '__indicator';
+const INDICATOR_ROW_NUMBER_COLUMN_ID = '__indicatorRowNumber';
+const INDICATOR_CHECKBOX_COLUMN_ID = '__indicatorCheckbox';
+const INDICATOR_STATUS_COLUMN_ID = '__indicatorStatus';
+const STATE_COLUMN_ID = '__state';
+const DEFAULT_INDICATOR_CHECKBOX_WIDTH = 56;
+const DEFAULT_INDICATOR_ROW_NUMBER_WIDTH = 64;
+const DEFAULT_INDICATOR_STATUS_WIDTH = 96;
+const MIN_INDICATOR_WIDTH = 44;
+const MAX_INDICATOR_WIDTH = 180;
+const DEFAULT_STATE_COLUMN_WIDTH = 104;
+const STATE_TONE_DIRTY = 'dirty';
+const STATE_TONE_COMMIT = 'commit';
 const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
   vertical: 'auto',
   horizontal: 'auto'
@@ -117,6 +194,7 @@ export class DomRenderer {
   private headerRowCenterElement: HTMLDivElement;
   private headerRightElement: HTMLDivElement;
   private headerRowRightElement: HTMLDivElement;
+  private headerDropIndicatorElement: HTMLDivElement;
 
   private bodyElement: HTMLDivElement;
   private bodyLeftElement: HTMLDivElement;
@@ -193,6 +271,14 @@ export class DomRenderer {
   private isEditValidationPending = false;
   private measurementFrameId: number | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  private columnResizeSession: ColumnResizeSession | null = null;
+  private columnResizeFrameId: number | null = null;
+  private headerResizeHoverCell: HTMLDivElement | null = null;
+  private columnReorderSession: ColumnReorderSession | null = null;
+  private columnReorderFrameId: number | null = null;
+  private headerReorderDraggingCell: HTMLDivElement | null = null;
+  private indicatorHeaderCheckAllElement: HTMLInputElement | null = null;
+  private rowCheckboxAnchorRowIndex: number | null = null;
 
   public constructor(container: HTMLElement, options: GridOptions, eventBus: EventBus) {
     this.container = container;
@@ -209,6 +295,7 @@ export class DomRenderer {
     this.headerRowCenterElement = document.createElement('div');
     this.headerRightElement = document.createElement('div');
     this.headerRowRightElement = document.createElement('div');
+    this.headerDropIndicatorElement = document.createElement('div');
 
     this.bodyElement = document.createElement('div');
     this.bodyLeftElement = document.createElement('div');
@@ -247,6 +334,7 @@ export class DomRenderer {
 
   public setOptions(nextOptions: GridOptions): void {
     this.teardownPointerSelectionSession();
+    this.teardownColumnReorderSession();
     this.stopEditing('reconcile');
     this.options = nextOptions;
     this.columnsByZone = this.splitColumns(this.options.columns);
@@ -287,6 +375,7 @@ export class DomRenderer {
 
     const nextSelection = this.selectionModel.getSelection();
     this.keyboardRangeAnchor = nextSelection.activeCell ? { ...nextSelection.activeCell } : null;
+    this.rowCheckboxAnchorRowIndex = nextSelection.activeCell ? nextSelection.activeCell.rowIndex : null;
     this.commitSelectionChange('api');
   }
 
@@ -297,6 +386,7 @@ export class DomRenderer {
     }
 
     this.keyboardRangeAnchor = null;
+    this.rowCheckboxAnchorRowIndex = null;
     this.commitSelectionChange('clear');
   }
 
@@ -327,15 +417,20 @@ export class DomRenderer {
 
   public destroy(): void {
     this.teardownPointerSelectionSession();
+    this.teardownColumnResizeSession();
+    this.teardownColumnReorderSession();
     this.stopEditing('reconcile');
     this.viewportElement.removeEventListener('scroll', this.handleViewportScroll);
     this.verticalScrollElement.removeEventListener('scroll', this.handleVerticalScroll);
     this.horizontalScrollElement.removeEventListener('scroll', this.handleHorizontalScroll);
     this.horizontalScrollElement.removeEventListener('wheel', this.handleAuxiliaryWheel);
     this.headerElement.removeEventListener('wheel', this.handleAuxiliaryWheel);
+    this.headerElement.removeEventListener('pointermove', this.handleHeaderPointerMove);
+    this.headerElement.removeEventListener('pointerleave', this.handleHeaderPointerLeave);
     this.bodyElement.removeEventListener('wheel', this.handleBodyWheel);
     this.rootElement.removeEventListener('keydown', this.handleRootKeyDown);
     this.rootElement.removeEventListener('pointerdown', this.handleRootPointerDown);
+    this.rootElement.removeEventListener('click', this.handleRootClick);
     this.rootElement.removeEventListener('dblclick', this.handleRootDoubleClick);
     this.editorInputElement.removeEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorInputElement.removeEventListener('blur', this.handleEditorInputBlur);
@@ -370,12 +465,14 @@ export class DomRenderer {
     this.headerRowLeftElement.className = 'hgrid__header-row hgrid__header-row--left';
     this.headerRowCenterElement.className = 'hgrid__header-row hgrid__header-row--center';
     this.headerRowRightElement.className = 'hgrid__header-row hgrid__header-row--right';
+    this.headerDropIndicatorElement.className = 'hgrid__header-drop-indicator';
+    this.headerDropIndicatorElement.style.display = 'none';
 
     this.headerLeftElement.append(this.headerRowLeftElement);
     this.headerCenterViewportElement.append(this.headerRowCenterElement);
     this.headerCenterElement.append(this.headerCenterViewportElement);
     this.headerRightElement.append(this.headerRowRightElement);
-    this.headerElement.append(this.headerLeftElement, this.headerCenterElement, this.headerRightElement);
+    this.headerElement.append(this.headerLeftElement, this.headerCenterElement, this.headerRightElement, this.headerDropIndicatorElement);
 
     this.bodyElement.className = 'hgrid__body';
     this.bodyLeftElement.className = 'hgrid__body-left';
@@ -436,9 +533,12 @@ export class DomRenderer {
     this.horizontalScrollElement.addEventListener('scroll', this.handleHorizontalScroll, { passive: true });
     this.horizontalScrollElement.addEventListener('wheel', this.handleAuxiliaryWheel, { passive: false });
     this.headerElement.addEventListener('wheel', this.handleAuxiliaryWheel, { passive: false });
+    this.headerElement.addEventListener('pointermove', this.handleHeaderPointerMove, { passive: true });
+    this.headerElement.addEventListener('pointerleave', this.handleHeaderPointerLeave, { passive: true });
     this.bodyElement.addEventListener('wheel', this.handleBodyWheel, { passive: false });
     this.rootElement.addEventListener('keydown', this.handleRootKeyDown);
     this.rootElement.addEventListener('pointerdown', this.handleRootPointerDown);
+    this.rootElement.addEventListener('click', this.handleRootClick);
     this.rootElement.addEventListener('dblclick', this.handleRootDoubleClick);
     this.editorInputElement.addEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorInputElement.addEventListener('blur', this.handleEditorInputBlur);
@@ -446,6 +546,467 @@ export class DomRenderer {
 
     this.container.replaceChildren(this.rootElement);
     this.setupResizeObserver();
+  }
+
+  private getResolvedRowIndicatorOptions(): Required<
+    Pick<RowIndicatorOptions, 'showCheckbox' | 'checkAllScope'>
+  > &
+    Pick<RowIndicatorOptions, 'getRowStatus'> {
+    const rowIndicatorOptions = this.options.rowIndicator;
+
+    return {
+      showCheckbox: rowIndicatorOptions?.showCheckbox !== false,
+      checkAllScope: rowIndicatorOptions?.checkAllScope ?? 'filtered',
+      getRowStatus: rowIndicatorOptions?.getRowStatus
+    };
+  }
+
+  private isIndicatorCheckboxColumnId(columnId: string): boolean {
+    return columnId === INDICATOR_CHECKBOX_COLUMN_ID || columnId === LEGACY_INDICATOR_COLUMN_ID;
+  }
+
+  private clampIndicatorColumnWidth(width: number): number {
+    return Math.max(MIN_INDICATOR_WIDTH, Math.min(MAX_INDICATOR_WIDTH, Math.round(width)));
+  }
+
+  private resolveIndicatorColumnWidth(optionWidth: number | undefined, fallbackWidth: number): number {
+    const resolvedOptionWidth = Number(optionWidth);
+    if (Number.isFinite(resolvedOptionWidth)) {
+      return this.clampIndicatorColumnWidth(resolvedOptionWidth);
+    }
+
+    return this.clampIndicatorColumnWidth(fallbackWidth);
+  }
+
+  private getResolvedIndicatorCheckboxColumnWidth(fallbackWidth: number): number {
+    const optionWidth = Number(this.options.rowIndicator?.width);
+    return this.resolveIndicatorColumnWidth(optionWidth, fallbackWidth);
+  }
+
+  private normalizeRowStatusTone(value: unknown): RowStatusTone | null {
+    if (value === 'inserted' || value === 'updated' || value === 'deleted' || value === 'invalid' || value === 'error' || value === 'clean') {
+      return value;
+    }
+
+    return null;
+  }
+
+  private resolveRowStatusTone(row: GridRowData, rowIndex: number, dataIndex: number, isSelected: boolean): RowStatusTone | null {
+    const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
+    if (rowIndicatorOptions.getRowStatus) {
+      const resolvedStatus = rowIndicatorOptions.getRowStatus({
+        rowIndex,
+        dataIndex,
+        row,
+        isSelected
+      });
+      return this.normalizeRowStatusTone(resolvedStatus);
+    }
+
+    return this.normalizeRowStatusTone(row.__rowStatus ?? row.rowStatus);
+  }
+
+  private resolveIndicatorStatusText(row: GridRowData, rowIndex: number, dataIndex: number, isSelected: boolean): string {
+    const statusTone = this.resolveRowStatusTone(row, rowIndex, dataIndex, isSelected);
+    if (statusTone) {
+      return statusTone;
+    }
+
+    const fallbackValue = row.__indicatorStatus ?? row.__state ?? row.state ?? row.status;
+    return typeof fallbackValue === 'string' ? fallbackValue : '';
+  }
+
+  private normalizeStateTone(value: unknown): StateColumnTone | null {
+    if (
+      value === 'inserted' ||
+      value === 'updated' ||
+      value === 'deleted' ||
+      value === 'invalid' ||
+      value === 'error' ||
+      value === 'clean' ||
+      value === STATE_TONE_DIRTY ||
+      value === STATE_TONE_COMMIT
+    ) {
+      return value;
+    }
+
+    return null;
+  }
+
+  private getDefaultStateTextFromStatus(status: RowStatusTone | null): { text: string; tone: StateColumnTone | null } {
+    if (status === 'updated') {
+      return {
+        text: STATE_TONE_DIRTY,
+        tone: STATE_TONE_DIRTY
+      };
+    }
+
+    if (status === 'clean') {
+      return {
+        text: STATE_TONE_COMMIT,
+        tone: STATE_TONE_COMMIT
+      };
+    }
+
+    if (status === 'inserted' || status === 'deleted' || status === 'invalid' || status === 'error') {
+      return {
+        text: status,
+        tone: status
+      };
+    }
+
+    return {
+      text: '',
+      tone: null
+    };
+  }
+
+  private resolveStateColumnResult(
+    row: GridRowData,
+    rowIndex: number,
+    dataIndex: number,
+    status: RowStatusTone | null
+  ): NormalizedStateColumnResult {
+    const renderer = this.options.stateColumn?.render;
+    if (renderer) {
+      const rendered = renderer({
+        rowIndex,
+        dataIndex,
+        row,
+        status
+      });
+      if (typeof rendered === 'string') {
+        return {
+          textContent: rendered,
+          ariaLabel: rendered,
+          tooltip: rendered,
+          tone: null
+        };
+      }
+
+      if (rendered && typeof rendered === 'object') {
+        const stateResult = rendered as StateColumnRenderResult;
+        const text = stateResult.text ? String(stateResult.text) : '';
+        const ariaLabel = stateResult.ariaLabel ? String(stateResult.ariaLabel) : text;
+        const tooltip = stateResult.tooltip ? String(stateResult.tooltip) : text;
+        const tone = this.normalizeStateTone(stateResult.tone);
+        return {
+          textContent: text,
+          ariaLabel,
+          tooltip,
+          tone
+        };
+      }
+    }
+
+    const rowStateText = typeof row.__state === 'string' ? row.__state : typeof row.state === 'string' ? row.state : '';
+    if (rowStateText.length > 0) {
+      return {
+        textContent: rowStateText,
+        ariaLabel: rowStateText,
+        tooltip: rowStateText,
+        tone: this.normalizeStateTone(rowStateText)
+      };
+    }
+
+    const fallback = this.getDefaultStateTextFromStatus(status);
+    return {
+      textContent: fallback.text,
+      ariaLabel: fallback.text,
+      tooltip: fallback.text,
+      tone: fallback.tone
+    };
+  }
+
+  private getIndicatorCheckboxGlobalColumnIndex(): number {
+    const leftColumns = this.columnsByZone.left;
+    let legacyColumnIndex = -1;
+    for (let columnIndex = 0; columnIndex < leftColumns.length; columnIndex += 1) {
+      const columnId = leftColumns[columnIndex].id;
+      if (columnId === INDICATOR_CHECKBOX_COLUMN_ID) {
+        return columnIndex;
+      }
+
+      if (columnId === LEGACY_INDICATOR_COLUMN_ID && legacyColumnIndex === -1) {
+        legacyColumnIndex = columnIndex;
+      }
+    }
+
+    return legacyColumnIndex;
+  }
+
+  private getSelectionRowRangeInputs(): SelectionRowRangeInput[] {
+    const selection = this.selectionModel.getSelection();
+    return selection.rowRanges.map((range) => ({
+      r1: range.r1,
+      r2: range.r2
+    }));
+  }
+
+  private mergeRowRangeInputs(ranges: SelectionRowRangeInput[]): SelectionRowRangeInput[] {
+    if (ranges.length === 0) {
+      return [];
+    }
+
+    const sorted = ranges
+      .map((range) => ({
+        r1: Math.min(range.r1, range.r2),
+        r2: Math.max(range.r1, range.r2)
+      }))
+      .sort((left, right) => {
+        if (left.r1 !== right.r1) {
+          return left.r1 - right.r1;
+        }
+        return left.r2 - right.r2;
+      });
+
+    const merged: SelectionRowRangeInput[] = [];
+    for (let rangeIndex = 0; rangeIndex < sorted.length; rangeIndex += 1) {
+      const current = sorted[rangeIndex];
+      const previous = merged[merged.length - 1];
+      if (!previous) {
+        merged.push({ ...current });
+        continue;
+      }
+
+      if (current.r1 <= previous.r2 + 1) {
+        previous.r2 = Math.max(previous.r2, current.r2);
+        continue;
+      }
+
+      merged.push({ ...current });
+    }
+
+    return merged;
+  }
+
+  private addRowRange(
+    ranges: SelectionRowRangeInput[],
+    rowStart: number,
+    rowEnd: number
+  ): SelectionRowRangeInput[] {
+    return this.mergeRowRangeInputs(
+      ranges.concat({
+        r1: Math.min(rowStart, rowEnd),
+        r2: Math.max(rowStart, rowEnd)
+      })
+    );
+  }
+
+  private removeRowRange(
+    ranges: SelectionRowRangeInput[],
+    rowStart: number,
+    rowEnd: number
+  ): SelectionRowRangeInput[] {
+    const start = Math.min(rowStart, rowEnd);
+    const end = Math.max(rowStart, rowEnd);
+    const nextRanges: SelectionRowRangeInput[] = [];
+
+    for (let rangeIndex = 0; rangeIndex < ranges.length; rangeIndex += 1) {
+      const range = ranges[rangeIndex];
+      const rangeStart = Math.min(range.r1, range.r2);
+      const rangeEnd = Math.max(range.r1, range.r2);
+
+      if (rangeEnd < start || rangeStart > end) {
+        nextRanges.push({
+          r1: rangeStart,
+          r2: rangeEnd
+        });
+        continue;
+      }
+
+      if (rangeStart < start) {
+        nextRanges.push({
+          r1: rangeStart,
+          r2: start - 1
+        });
+      }
+
+      if (rangeEnd > end) {
+        nextRanges.push({
+          r1: end + 1,
+          r2: rangeEnd
+        });
+      }
+    }
+
+    return this.mergeRowRangeInputs(nextRanges);
+  }
+
+  private applyIndicatorSelection(
+    rowRanges: SelectionRowRangeInput[],
+    focusRowIndex: number,
+    source: SelectionChangeSource
+  ): void {
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0) {
+      return;
+    }
+
+    const indicatorColIndex = this.getIndicatorCheckboxGlobalColumnIndex();
+    const clampedRowIndex = Math.max(0, Math.min(bounds.rowCount - 1, focusRowIndex));
+    const activeCell =
+      indicatorColIndex >= 0
+        ? {
+            rowIndex: clampedRowIndex,
+            colIndex: indicatorColIndex
+          }
+        : null;
+    const hasChanged = this.selectionModel.setSelection(
+      {
+        activeCell,
+        cellRanges: [],
+        rowRanges
+      },
+      bounds,
+      this.resolveRowKeyByRowIndex
+    );
+    if (!hasChanged) {
+      return;
+    }
+
+    this.keyboardRangeAnchor = activeCell ? { ...activeCell } : null;
+    this.commitSelectionChange(source);
+  }
+
+  private toggleRowSelectionByIndicator(
+    rowIndex: number,
+    modifiers: { isShift: boolean; isMeta: boolean },
+    source: SelectionChangeSource
+  ): void {
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0) {
+      return;
+    }
+
+    const normalizedRowIndex = Math.max(0, Math.min(bounds.rowCount - 1, rowIndex));
+    const currentRanges = this.getSelectionRowRangeInputs();
+    const isSelected = this.selectionModel.isRowSelected(normalizedRowIndex);
+    let nextRanges = currentRanges;
+
+    if (modifiers.isShift && this.rowCheckboxAnchorRowIndex !== null) {
+      const rangeStart = Math.min(this.rowCheckboxAnchorRowIndex, normalizedRowIndex);
+      const rangeEnd = Math.max(this.rowCheckboxAnchorRowIndex, normalizedRowIndex);
+      nextRanges = this.addRowRange(nextRanges, rangeStart, rangeEnd);
+    } else if (modifiers.isMeta) {
+      nextRanges = isSelected
+        ? this.removeRowRange(nextRanges, normalizedRowIndex, normalizedRowIndex)
+        : this.addRowRange(nextRanges, normalizedRowIndex, normalizedRowIndex);
+      this.rowCheckboxAnchorRowIndex = normalizedRowIndex;
+    } else {
+      // Checkbox UX: plain click toggles row and preserves existing multi-selection.
+      nextRanges = isSelected
+        ? this.removeRowRange(nextRanges, normalizedRowIndex, normalizedRowIndex)
+        : this.addRowRange(nextRanges, normalizedRowIndex, normalizedRowIndex);
+      this.rowCheckboxAnchorRowIndex = normalizedRowIndex;
+    }
+
+    this.applyIndicatorSelection(nextRanges, normalizedRowIndex, source);
+  }
+
+  private getViewportVisibleRowRange(): { startRow: number; endRow: number } | null {
+    let startRow = Number.POSITIVE_INFINITY;
+    let endRow = Number.NEGATIVE_INFINITY;
+
+    for (let poolIndex = 0; poolIndex < this.rowPool.length; poolIndex += 1) {
+      const rowState = this.rowPool[poolIndex].center.rowState;
+      if (!rowState.isVisible || rowState.rowIndex < 0) {
+        continue;
+      }
+
+      startRow = Math.min(startRow, rowState.rowIndex);
+      endRow = Math.max(endRow, rowState.rowIndex);
+    }
+
+    if (!Number.isFinite(startRow) || !Number.isFinite(endRow) || endRow < startRow) {
+      return null;
+    }
+
+    return {
+      startRow,
+      endRow
+    };
+  }
+
+  private resolveCheckAllRowRange(scope: RowIndicatorCheckAllScope): { startRow: number; endRow: number } | null {
+    const viewRowCount = this.options.rowModel.getViewRowCount();
+    if (viewRowCount <= 0) {
+      return null;
+    }
+
+    if (scope === 'viewport') {
+      return this.getViewportVisibleRowRange();
+    }
+
+    return {
+      startRow: 0,
+      endRow: viewRowCount - 1
+    };
+  }
+
+  private countSelectedRowsInRange(startRow: number, endRow: number): number {
+    const selection = this.selectionModel.getSelection();
+    let selectedCount = 0;
+
+    for (let rangeIndex = 0; rangeIndex < selection.rowRanges.length; rangeIndex += 1) {
+      const range = selection.rowRanges[rangeIndex];
+      const overlapStart = Math.max(startRow, range.r1);
+      const overlapEnd = Math.min(endRow, range.r2);
+      if (overlapStart > overlapEnd) {
+        continue;
+      }
+
+      selectedCount += overlapEnd - overlapStart + 1;
+      if (selectedCount >= endRow - startRow + 1) {
+        return endRow - startRow + 1;
+      }
+    }
+
+    return selectedCount;
+  }
+
+  private syncIndicatorHeaderCheckAllState(): void {
+    if (!this.indicatorHeaderCheckAllElement) {
+      return;
+    }
+
+    const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
+    if (!rowIndicatorOptions.showCheckbox) {
+      this.indicatorHeaderCheckAllElement.checked = false;
+      this.indicatorHeaderCheckAllElement.indeterminate = false;
+      this.indicatorHeaderCheckAllElement.disabled = true;
+      return;
+    }
+
+    const rowRange = this.resolveCheckAllRowRange(rowIndicatorOptions.checkAllScope);
+    if (!rowRange) {
+      this.indicatorHeaderCheckAllElement.checked = false;
+      this.indicatorHeaderCheckAllElement.indeterminate = false;
+      this.indicatorHeaderCheckAllElement.disabled = true;
+      return;
+    }
+
+    const totalRows = rowRange.endRow - rowRange.startRow + 1;
+    const selectedRows = this.countSelectedRowsInRange(rowRange.startRow, rowRange.endRow);
+    this.indicatorHeaderCheckAllElement.disabled = false;
+    this.indicatorHeaderCheckAllElement.checked = totalRows > 0 && selectedRows === totalRows;
+    this.indicatorHeaderCheckAllElement.indeterminate = selectedRows > 0 && selectedRows < totalRows;
+  }
+
+  private toggleCheckAllByIndicator(checked: boolean, source: SelectionChangeSource): void {
+    const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
+    const targetRange = this.resolveCheckAllRowRange(rowIndicatorOptions.checkAllScope);
+    if (!targetRange) {
+      return;
+    }
+
+    const currentRanges = this.getSelectionRowRangeInputs();
+    const nextRanges = checked
+      ? this.addRowRange(currentRanges, targetRange.startRow, targetRange.endRow)
+      : this.removeRowRange(currentRanges, targetRange.startRow, targetRange.endRow);
+    const focusRowIndex = checked ? targetRange.startRow : Math.max(0, targetRange.startRow);
+    this.rowCheckboxAnchorRowIndex = focusRowIndex;
+    this.applyIndicatorSelection(nextRanges, focusRowIndex, source);
   }
 
   private refreshLayout(forcePoolRebuild: boolean): void {
@@ -477,9 +1038,11 @@ export class DomRenderer {
   }
 
   private rebuildHeader(): void {
+    this.indicatorHeaderCheckAllElement = null;
     this.buildHeaderRow(this.headerRowLeftElement, this.columnsByZone.left, 'left');
     this.buildHeaderRow(this.headerRowCenterElement, this.columnsByZone.center, 'center');
     this.buildHeaderRow(this.headerRowRightElement, this.columnsByZone.right, 'right');
+    this.syncIndicatorHeaderCheckAllState();
   }
 
   private buildHeaderRow(rowElement: HTMLDivElement, columns: ColumnDef[], zoneName: ColumnZoneName): void {
@@ -496,7 +1059,22 @@ export class DomRenderer {
       headerCellElement.className = 'hgrid__header-cell';
       headerCellElement.dataset.columnId = column.id;
       headerCellElement.style.width = `${column.width}px`;
-      headerCellElement.textContent = column.header;
+      if (this.isIndicatorCheckboxColumnId(column.id)) {
+        const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
+        headerCellElement.classList.add('hgrid__header-cell--indicator', 'hgrid__header-cell--indicator-checkbox');
+        const checkbox = document.createElement('input');
+        checkbox.className = 'hgrid__indicator-checkall';
+        checkbox.type = 'checkbox';
+        checkbox.tabIndex = -1;
+        checkbox.checked = false;
+        checkbox.style.display = rowIndicatorOptions.showCheckbox ? '' : 'none';
+        checkbox.disabled = !rowIndicatorOptions.showCheckbox;
+        checkbox.setAttribute('aria-label', `Select all rows (${rowIndicatorOptions.checkAllScope})`);
+        headerCellElement.append(checkbox);
+        this.indicatorHeaderCheckAllElement = checkbox;
+      } else {
+        headerCellElement.textContent = column.header;
+      }
       rowElement.append(headerCellElement);
     }
   }
@@ -524,7 +1102,10 @@ export class DomRenderer {
         left: 0,
         width: 0,
         isSelected: false,
-        isActive: false
+        isActive: false,
+        extraClassName: '',
+        titleText: '',
+        ariaLabel: ''
       });
     }
   }
@@ -575,11 +1156,13 @@ export class DomRenderer {
     }
 
     const cells: HTMLDivElement[] = [];
+    const indicatorCells: Array<IndicatorCellElements | null> = [];
     const cellStates: CellRenderState[] = [];
     const loopCount = zoneName === 'center' ? Math.max(0, cellCapacity ?? 0) : columns.length;
     for (let colIndex = 0; colIndex < loopCount; colIndex += 1) {
       const column = columns[colIndex];
       const cellElement = document.createElement('div');
+      let indicatorCell: IndicatorCellElements | null = null;
       cellElement.className = zoneName === 'center' ? 'hgrid__cell hgrid__cell--center' : 'hgrid__cell';
       if (zoneName === 'center') {
         cellElement.style.position = 'absolute';
@@ -588,9 +1171,14 @@ export class DomRenderer {
       } else {
         cellElement.style.width = `${column.width}px`;
         cellElement.dataset.columnId = column.id;
+        if (this.isIndicatorCheckboxColumnId(column.id)) {
+          cellElement.classList.add('hgrid__cell--indicator', 'hgrid__cell--indicator-checkbox');
+          indicatorCell = this.createIndicatorCellElements(cellElement);
+        }
       }
       rowElement.append(cellElement);
       cells.push(cellElement);
+      indicatorCells.push(indicatorCell);
       cellStates.push({
         isVisible: zoneName !== 'center',
         columnId: zoneName === 'center' ? '' : column.id,
@@ -598,13 +1186,17 @@ export class DomRenderer {
         left: Number.NaN,
         width: zoneName === 'center' ? Number.NaN : column.width,
         isSelected: false,
-        isActive: false
+        isActive: false,
+        extraClassName: '',
+        titleText: '',
+        ariaLabel: ''
       });
     }
 
     return {
       element: rowElement,
       cells,
+      indicatorCells,
       visibleDisplay,
       rowState: {
         isVisible: true,
@@ -615,6 +1207,24 @@ export class DomRenderer {
         isSelected: false
       },
       cellStates
+    };
+  }
+
+  private createIndicatorCellElements(cellElement: HTMLDivElement): IndicatorCellElements {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'hgrid__indicator-cell';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'hgrid__indicator-checkbox';
+    checkbox.tabIndex = -1;
+    checkbox.setAttribute('aria-label', 'Select row');
+
+    wrapper.append(checkbox);
+    cellElement.append(wrapper);
+
+    return {
+      checkbox
     };
   }
 
@@ -789,6 +1399,7 @@ export class DomRenderer {
       this.renderZoneRow('right', poolItem.right, this.columnsByZone.right, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
     }
 
+    this.syncIndicatorHeaderCheckAllState();
     this.scheduleMeasuredRowHeightPass();
     if (this.editSession) {
       const canKeepEditing = this.syncEditorOverlayPosition();
@@ -819,13 +1430,66 @@ export class DomRenderer {
       const column = columns[colIndex];
       const cell = zoneRow.cells[colIndex];
       const cellState = zoneRow.cellStates[colIndex];
+      const indicatorCell = zoneRow.indicatorCells[colIndex];
       const globalColumnIndex = this.getGlobalColumnIndex(zoneName, colIndex);
+      const isCellSelected = this.selectionModel.isCellSelected(rowIndex, globalColumnIndex);
+      const isCellActive = this.selectionModel.isCellActive(rowIndex, globalColumnIndex);
+      if (this.isIndicatorCheckboxColumnId(column.id) && indicatorCell) {
+        this.bindIndicatorCheckboxCell(cell, cellState, indicatorCell, column.id, rowIndex, globalColumnIndex);
+        continue;
+      }
+
+      if (column.id === INDICATOR_ROW_NUMBER_COLUMN_ID) {
+        this.bindCell(cell, cellState, {
+          isVisible: true,
+          columnId: column.id,
+          textContent: String(rowIndex + 1),
+          isSelected: isCellSelected,
+          isActive: isCellActive,
+          extraClassName: 'hgrid__cell--indicator hgrid__cell--indicator-row-number',
+          ariaLabel: `Row ${rowIndex + 1} number`
+        });
+        continue;
+      }
+
+      if (column.id === INDICATOR_STATUS_COLUMN_ID) {
+        const isRowSelected = this.selectionModel.isRowSelected(rowIndex);
+        const statusText = this.resolveIndicatorStatusText(row, rowIndex, dataIndex, isRowSelected);
+        this.bindCell(cell, cellState, {
+          isVisible: true,
+          columnId: column.id,
+          textContent: statusText,
+          isSelected: isCellSelected,
+          isActive: isCellActive,
+          extraClassName: 'hgrid__cell--indicator hgrid__cell--indicator-status',
+          titleText: statusText,
+          ariaLabel: statusText.length > 0 ? `Row ${rowIndex + 1} status ${statusText}` : `Row ${rowIndex + 1} status`
+        });
+        continue;
+      }
+
+      let textContent = formatColumnValue(column, row);
+      let extraClassName = '';
+      let titleText = '';
+      let ariaLabel = '';
+      if (column.id === STATE_COLUMN_ID) {
+        const rowStatus = this.resolveRowStatusTone(row, rowIndex, dataIndex, this.selectionModel.isRowSelected(rowIndex));
+        const stateColumnResult = this.resolveStateColumnResult(row, rowIndex, dataIndex, rowStatus);
+        textContent = stateColumnResult.textContent;
+        extraClassName = `hgrid__cell--state${stateColumnResult.tone ? ` hgrid__cell--state-${stateColumnResult.tone}` : ''}`;
+        titleText = stateColumnResult.tooltip;
+        ariaLabel = stateColumnResult.ariaLabel;
+      }
+
       this.bindCell(cell, cellState, {
         isVisible: true,
         columnId: column.id,
-        textContent: formatColumnValue(column, row),
-        isSelected: this.selectionModel.isCellSelected(rowIndex, globalColumnIndex),
-        isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex)
+        textContent,
+        isSelected: isCellSelected,
+        isActive: isCellActive,
+        extraClassName,
+        titleText,
+        ariaLabel
       });
     }
   }
@@ -858,14 +1522,30 @@ export class DomRenderer {
         break;
       }
 
+      let textContent = formatColumnValue(column, row);
+      let extraClassName = '';
+      let titleText = '';
+      let ariaLabel = '';
+      if (column.id === STATE_COLUMN_ID) {
+        const rowStatus = this.resolveRowStatusTone(row, rowIndex, dataIndex, this.selectionModel.isRowSelected(rowIndex));
+        const stateColumnResult = this.resolveStateColumnResult(row, rowIndex, dataIndex, rowStatus);
+        textContent = stateColumnResult.textContent;
+        extraClassName = `hgrid__cell--state${stateColumnResult.tone ? ` hgrid__cell--state-${stateColumnResult.tone}` : ''}`;
+        titleText = stateColumnResult.tooltip;
+        ariaLabel = stateColumnResult.ariaLabel;
+      }
+
       this.bindCell(cell, cellState, {
         isVisible: true,
         columnId: column.id,
-        textContent: formatColumnValue(column, row),
+        textContent,
         left: this.centerColumnLeft[colIndex],
         width: column.width,
         isSelected: this.selectionModel.isCellSelected(rowIndex, globalColumnIndex),
-        isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex)
+        isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex),
+        extraClassName,
+        titleText,
+        ariaLabel
       });
       slotIndex += 1;
     }
@@ -950,10 +1630,16 @@ export class DomRenderer {
       width?: number;
       isSelected?: boolean;
       isActive?: boolean;
+      extraClassName?: string;
+      titleText?: string;
+      ariaLabel?: string;
     }
   ): void {
     const isSelected = nextState.isSelected ?? false;
     const isActive = nextState.isActive ?? false;
+    const extraClassName = nextState.extraClassName ?? '';
+    const titleText = nextState.titleText ?? '';
+    const ariaLabel = nextState.ariaLabel ?? '';
 
     if (cellState.isVisible !== nextState.isVisible) {
       cell.style.display = nextState.isVisible ? '' : 'none';
@@ -980,6 +1666,48 @@ export class DomRenderer {
       cellState.textContent = nextState.textContent;
     }
 
+    if (cellState.extraClassName !== extraClassName) {
+      if (cellState.extraClassName.length > 0) {
+        const previousClasses = cellState.extraClassName.split(' ');
+        for (let classIndex = 0; classIndex < previousClasses.length; classIndex += 1) {
+          const previousClassName = previousClasses[classIndex];
+          if (previousClassName) {
+            cell.classList.remove(previousClassName);
+          }
+        }
+      }
+
+      if (extraClassName.length > 0) {
+        const nextClasses = extraClassName.split(' ');
+        for (let classIndex = 0; classIndex < nextClasses.length; classIndex += 1) {
+          const nextClassName = nextClasses[classIndex];
+          if (nextClassName) {
+            cell.classList.add(nextClassName);
+          }
+        }
+      }
+
+      cellState.extraClassName = extraClassName;
+    }
+
+    if (cellState.titleText !== titleText) {
+      if (titleText.length > 0) {
+        cell.title = titleText;
+      } else {
+        cell.removeAttribute('title');
+      }
+      cellState.titleText = titleText;
+    }
+
+    if (cellState.ariaLabel !== ariaLabel) {
+      if (ariaLabel.length > 0) {
+        cell.setAttribute('aria-label', ariaLabel);
+      } else {
+        cell.removeAttribute('aria-label');
+      }
+      cellState.ariaLabel = ariaLabel;
+    }
+
     if (cellState.isSelected !== isSelected) {
       cell.classList.toggle('hgrid__cell--selected', isSelected);
       cellState.isSelected = isSelected;
@@ -989,6 +1717,34 @@ export class DomRenderer {
       cell.classList.toggle('hgrid__cell--active', isActive);
       cellState.isActive = isActive;
     }
+  }
+
+  private bindIndicatorCheckboxCell(
+    cell: HTMLDivElement,
+    cellState: CellRenderState,
+    indicatorCell: IndicatorCellElements,
+    columnId: string,
+    rowIndex: number,
+    globalColumnIndex: number
+  ): void {
+    const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
+    const isRowSelected = this.selectionModel.isRowSelected(rowIndex);
+    const extraClassName = 'hgrid__cell--indicator hgrid__cell--indicator-checkbox';
+
+    this.bindCell(cell, cellState, {
+      isVisible: true,
+      columnId,
+      textContent: '',
+      isSelected: this.selectionModel.isCellSelected(rowIndex, globalColumnIndex),
+      isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex),
+      extraClassName,
+      ariaLabel: `Row ${rowIndex + 1} selection checkbox`
+    });
+
+    indicatorCell.checkbox.style.display = rowIndicatorOptions.showCheckbox ? '' : 'none';
+    indicatorCell.checkbox.checked = isRowSelected;
+    indicatorCell.checkbox.indeterminate = false;
+    indicatorCell.checkbox.setAttribute('aria-label', `Select row ${rowIndex + 1}`);
   }
 
   private getColumnsWidth(columns: ColumnDef[]): number {
@@ -1010,12 +1766,50 @@ export class DomRenderer {
 
     for (let index = 0; index < columns.length; index += 1) {
       const column = columns[index];
-      if (column.pinned === 'left') {
-        byZone.left.push(column);
-      } else if (column.pinned === 'right') {
-        byZone.right.push(column);
+      let normalizedColumn = column;
+
+      if (this.isIndicatorCheckboxColumnId(column.id)) {
+        const fallbackWidth = Number.isFinite(column.width) ? column.width : DEFAULT_INDICATOR_CHECKBOX_WIDTH;
+        const indicatorWidth = this.getResolvedIndicatorCheckboxColumnWidth(fallbackWidth);
+        normalizedColumn = {
+          ...column,
+          pinned: 'left',
+          width: indicatorWidth,
+          minWidth: indicatorWidth,
+          maxWidth: indicatorWidth
+        };
+      } else if (column.id === INDICATOR_ROW_NUMBER_COLUMN_ID) {
+        const fallbackWidth = Number.isFinite(column.width) ? column.width : DEFAULT_INDICATOR_ROW_NUMBER_WIDTH;
+        const indicatorWidth = this.resolveIndicatorColumnWidth(undefined, fallbackWidth);
+        normalizedColumn = {
+          ...column,
+          pinned: 'left',
+          width: indicatorWidth,
+          minWidth: indicatorWidth,
+          maxWidth: indicatorWidth
+        };
+      } else if (column.id === INDICATOR_STATUS_COLUMN_ID) {
+        const fallbackWidth = Number.isFinite(column.width) ? column.width : DEFAULT_INDICATOR_STATUS_WIDTH;
+        normalizedColumn = {
+          ...column,
+          pinned: 'left',
+          width: this.resolveIndicatorColumnWidth(undefined, fallbackWidth)
+        };
+      } else if (column.id === STATE_COLUMN_ID) {
+        const stateWidth = Number.isFinite(column.width) ? column.width : DEFAULT_STATE_COLUMN_WIDTH;
+        normalizedColumn = {
+          ...column,
+          pinned: 'left',
+          width: stateWidth
+        };
+      }
+
+      if (normalizedColumn.pinned === 'left') {
+        byZone.left.push(normalizedColumn);
+      } else if (normalizedColumn.pinned === 'right') {
+        byZone.right.push(normalizedColumn);
       } else {
-        byZone.center.push(column);
+        byZone.center.push(normalizedColumn);
       }
     }
 
@@ -1066,6 +1860,7 @@ export class DomRenderer {
 
     const nextSelection = this.selectionModel.getSelection();
     this.keyboardRangeAnchor = nextSelection.activeCell ? { ...nextSelection.activeCell } : null;
+    this.rowCheckboxAnchorRowIndex = nextSelection.activeCell ? nextSelection.activeCell.rowIndex : null;
     this.commitSelectionChange(source);
   }
 
@@ -2009,6 +2804,495 @@ export class DomRenderer {
     }
   };
 
+  private handleHeaderPointerMove = (event: PointerEvent): void => {
+    if (this.columnResizeSession || this.columnReorderSession) {
+      return;
+    }
+
+    const resizeHit = this.hitTestHeaderResize(event.clientX, event.clientY, event.target as HTMLElement | null);
+    this.setHeaderResizeHoverCell(resizeHit?.headerCell ?? null);
+  };
+
+  private handleHeaderPointerLeave = (): void => {
+    if (this.columnResizeSession || this.columnReorderSession) {
+      return;
+    }
+
+    this.setHeaderResizeHoverCell(null);
+  };
+
+  private hitTestHeaderResize(clientX: number, clientY: number, target: HTMLElement | null): HeaderResizeHit | null {
+    if (!target) {
+      return null;
+    }
+
+    const headerCell = target.closest('.hgrid__header-cell') as HTMLDivElement | null;
+    if (!headerCell || !this.headerElement.contains(headerCell)) {
+      return null;
+    }
+
+    if (headerCell.style.display === 'none') {
+      return null;
+    }
+
+    const cellRect = headerCell.getBoundingClientRect();
+    if (clientY < cellRect.top || clientY > cellRect.bottom) {
+      return null;
+    }
+
+    if (clientX < cellRect.left || clientX > cellRect.right + HEADER_RESIZE_HIT_SLOP_PX) {
+      return null;
+    }
+
+    if (cellRect.right - clientX > HEADER_RESIZE_HIT_SLOP_PX) {
+      return null;
+    }
+
+    const columnId = headerCell.dataset.columnId;
+    if (!columnId) {
+      return null;
+    }
+
+    const column = this.findVisibleColumnById(columnId);
+    if (!column) {
+      return null;
+    }
+
+    return {
+      columnId,
+      column,
+      headerCell
+    };
+  }
+
+  private findVisibleColumnById(columnId: string): ColumnDef | null {
+    for (let columnIndex = 0; columnIndex < this.options.columns.length; columnIndex += 1) {
+      const column = this.options.columns[columnIndex];
+      if (column.id === columnId) {
+        return column;
+      }
+    }
+
+    return null;
+  }
+
+  private resolveColumnWidthBounds(column: ColumnDef): { minWidth: number; maxWidth: number } {
+    const rawMinWidth = Number(column.minWidth);
+    const minWidth = Number.isFinite(rawMinWidth) ? Math.max(1, rawMinWidth) : 1;
+    const rawMaxWidth = Number(column.maxWidth);
+    const maxWidth = Number.isFinite(rawMaxWidth) ? Math.max(minWidth, rawMaxWidth) : Number.POSITIVE_INFINITY;
+
+    return {
+      minWidth,
+      maxWidth
+    };
+  }
+
+  private clampColumnWidth(width: number, minWidth: number, maxWidth: number): number {
+    return Math.min(maxWidth, Math.max(minWidth, width));
+  }
+
+  private setHeaderResizeHoverCell(nextCell: HTMLDivElement | null): void {
+    if (this.headerResizeHoverCell === nextCell) {
+      return;
+    }
+
+    if (this.headerResizeHoverCell) {
+      this.headerResizeHoverCell.classList.remove('hgrid__header-cell--resize-hover');
+    }
+
+    this.headerResizeHoverCell = nextCell;
+
+    if (this.headerResizeHoverCell) {
+      this.headerResizeHoverCell.classList.add('hgrid__header-cell--resize-hover');
+    }
+  }
+
+  private resolveHeaderCellFromTarget(target: HTMLElement | null): HTMLDivElement | null {
+    if (!target) {
+      return null;
+    }
+
+    const headerCell = target.closest('.hgrid__header-cell') as HTMLDivElement | null;
+    if (!headerCell || !this.headerElement.contains(headerCell)) {
+      return null;
+    }
+
+    if (headerCell.style.display === 'none') {
+      return null;
+    }
+
+    const columnId = headerCell.dataset.columnId;
+    if (!columnId) {
+      return null;
+    }
+
+    return headerCell;
+  }
+
+  private getVisibleColumnIndexById(columnId: string): number {
+    for (let columnIndex = 0; columnIndex < this.options.columns.length; columnIndex += 1) {
+      if (this.options.columns[columnIndex].id === columnId) {
+        return columnIndex;
+      }
+    }
+
+    return -1;
+  }
+
+  private findHeaderCellAtPoint(clientX: number, clientY: number): HTMLDivElement | null {
+    if (typeof document.elementFromPoint === 'function') {
+      const elementAtPoint = document.elementFromPoint(clientX, clientY);
+      if (elementAtPoint instanceof HTMLElement) {
+        const resolvedByPoint = this.resolveHeaderCellFromTarget(elementAtPoint);
+        if (resolvedByPoint) {
+          return resolvedByPoint;
+        }
+      }
+    }
+
+    const headerCells = this.headerElement.querySelectorAll('.hgrid__header-cell');
+    for (let cellIndex = 0; cellIndex < headerCells.length; cellIndex += 1) {
+      const headerCell = headerCells[cellIndex] as HTMLDivElement;
+      if (headerCell.style.display === 'none') {
+        continue;
+      }
+
+      const cellRect = headerCell.getBoundingClientRect();
+      if (clientX >= cellRect.left && clientX <= cellRect.right && clientY >= cellRect.top && clientY <= cellRect.bottom) {
+        return headerCell;
+      }
+    }
+
+    return null;
+  }
+
+  private resolveHeaderDropTarget(clientX: number, clientY: number, target: EventTarget | null): HeaderDropTarget | null {
+    let headerCell: HTMLDivElement | null = null;
+    if (target instanceof HTMLElement) {
+      headerCell = this.resolveHeaderCellFromTarget(target);
+    }
+
+    if (!headerCell) {
+      headerCell = this.findHeaderCellAtPoint(clientX, clientY);
+    }
+
+    if (!headerCell) {
+      return null;
+    }
+
+    const columnId = headerCell.dataset.columnId;
+    if (!columnId) {
+      return null;
+    }
+
+    const columnIndex = this.getVisibleColumnIndexById(columnId);
+    if (columnIndex === -1) {
+      return null;
+    }
+
+    const cellRect = headerCell.getBoundingClientRect();
+    const dropAfter = clientX > cellRect.left + cellRect.width * 0.5;
+    return {
+      dropIndex: columnIndex + (dropAfter ? 1 : 0),
+      targetColumnId: columnId,
+      indicatorClientX: dropAfter ? cellRect.right : cellRect.left
+    };
+  }
+
+  private showHeaderDropIndicator(indicatorClientX: number): void {
+    const headerRect = this.headerElement.getBoundingClientRect();
+    const clampedLeft = Math.max(0, Math.min(headerRect.width, indicatorClientX - headerRect.left));
+    this.headerDropIndicatorElement.style.display = 'block';
+    this.headerDropIndicatorElement.style.transform = `translateX(${clampedLeft}px)`;
+  }
+
+  private hideHeaderDropIndicator(): void {
+    this.headerDropIndicatorElement.style.display = 'none';
+  }
+
+  private normalizeDropIndexForSource(dropIndex: number, sourceIndex: number): number {
+    if (dropIndex > sourceIndex) {
+      return dropIndex - 1;
+    }
+
+    return dropIndex;
+  }
+
+  private buildReorderedColumnOrder(sourceIndex: number, targetIndex: number): string[] {
+    const nextOrder = this.options.columns.map((column) => column.id);
+    if (sourceIndex < 0 || sourceIndex >= nextOrder.length) {
+      return nextOrder;
+    }
+
+    const [movedColumnId] = nextOrder.splice(sourceIndex, 1);
+    const boundedTargetIndex = Math.max(0, Math.min(nextOrder.length, targetIndex));
+    nextOrder.splice(boundedTargetIndex, 0, movedColumnId);
+    return nextOrder;
+  }
+
+  private startColumnReorderSession(
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+    sourceHeaderCell: HTMLDivElement
+  ): void {
+    const sourceColumnId = sourceHeaderCell.dataset.columnId;
+    if (!sourceColumnId) {
+      return;
+    }
+
+    const sourceIndex = this.getVisibleColumnIndexById(sourceColumnId);
+    if (sourceIndex === -1) {
+      return;
+    }
+
+    this.teardownColumnReorderSession();
+    this.teardownPointerSelectionSession();
+    this.setHeaderResizeHoverCell(null);
+
+    this.columnReorderSession = {
+      pointerId,
+      sourceColumnId,
+      sourceIndex,
+      pendingClientX: clientX,
+      pendingClientY: clientY,
+      pendingTarget: sourceHeaderCell,
+      currentDropIndex: sourceIndex + 1,
+      currentTargetColumnId: sourceColumnId
+    };
+
+    this.headerReorderDraggingCell = sourceHeaderCell;
+    this.headerReorderDraggingCell.classList.add('hgrid__header-cell--dragging');
+    this.rootElement.classList.add('hgrid--column-reordering');
+
+    const initialDropTarget = this.resolveHeaderDropTarget(clientX, clientY, sourceHeaderCell);
+    if (initialDropTarget) {
+      this.columnReorderSession.currentDropIndex = initialDropTarget.dropIndex;
+      this.columnReorderSession.currentTargetColumnId = initialDropTarget.targetColumnId;
+      this.showHeaderDropIndicator(initialDropTarget.indicatorClientX);
+    } else {
+      this.hideHeaderDropIndicator();
+    }
+
+    window.addEventListener('pointermove', this.handleWindowColumnReorderMove, { passive: true });
+    window.addEventListener('pointerup', this.handleWindowColumnReorderEnd);
+    window.addEventListener('pointercancel', this.handleWindowColumnReorderEnd);
+  }
+
+  private teardownColumnReorderSession(): void {
+    if (this.columnReorderFrameId !== null) {
+      cancelAnimationFrame(this.columnReorderFrameId);
+      this.columnReorderFrameId = null;
+    }
+
+    window.removeEventListener('pointermove', this.handleWindowColumnReorderMove);
+    window.removeEventListener('pointerup', this.handleWindowColumnReorderEnd);
+    window.removeEventListener('pointercancel', this.handleWindowColumnReorderEnd);
+
+    if (this.headerReorderDraggingCell) {
+      this.headerReorderDraggingCell.classList.remove('hgrid__header-cell--dragging');
+      this.headerReorderDraggingCell = null;
+    }
+
+    this.hideHeaderDropIndicator();
+    this.rootElement.classList.remove('hgrid--column-reordering');
+    this.columnReorderSession = null;
+  }
+
+  private handleWindowColumnReorderMove = (event: PointerEvent): void => {
+    const session = this.columnReorderSession;
+    if (!session || session.pointerId !== event.pointerId) {
+      return;
+    }
+
+    session.pendingClientX = event.clientX;
+    session.pendingClientY = event.clientY;
+    session.pendingTarget = event.target;
+
+    if (this.columnReorderFrameId !== null) {
+      return;
+    }
+
+    this.columnReorderFrameId = requestAnimationFrame(() => {
+      this.columnReorderFrameId = null;
+      this.flushColumnReorderFrame();
+    });
+  };
+
+  private handleWindowColumnReorderEnd = (event: PointerEvent): void => {
+    const session = this.columnReorderSession;
+    if (!session || session.pointerId !== event.pointerId) {
+      return;
+    }
+
+    session.pendingClientX = event.clientX;
+    session.pendingClientY = event.clientY;
+    session.pendingTarget = event.target;
+
+    if (this.columnReorderFrameId !== null) {
+      cancelAnimationFrame(this.columnReorderFrameId);
+      this.columnReorderFrameId = null;
+    }
+
+    this.flushColumnReorderFrame();
+    this.commitColumnReorderSession();
+    this.teardownColumnReorderSession();
+  };
+
+  private flushColumnReorderFrame(): void {
+    const session = this.columnReorderSession;
+    if (!session) {
+      return;
+    }
+
+    const dropTarget = this.resolveHeaderDropTarget(session.pendingClientX, session.pendingClientY, session.pendingTarget);
+    if (!dropTarget) {
+      this.hideHeaderDropIndicator();
+      return;
+    }
+
+    session.currentDropIndex = dropTarget.dropIndex;
+    session.currentTargetColumnId = dropTarget.targetColumnId;
+    this.showHeaderDropIndicator(dropTarget.indicatorClientX);
+  }
+
+  private commitColumnReorderSession(): void {
+    const session = this.columnReorderSession;
+    if (!session) {
+      return;
+    }
+
+    const normalizedTargetIndex = this.normalizeDropIndexForSource(session.currentDropIndex, session.sourceIndex);
+    if (normalizedTargetIndex === session.sourceIndex) {
+      return;
+    }
+
+    const nextOrder = this.buildReorderedColumnOrder(session.sourceIndex, normalizedTargetIndex);
+    this.eventBus.emit('columnReorder', {
+      sourceColumnId: session.sourceColumnId,
+      targetColumnId: session.currentTargetColumnId,
+      fromIndex: session.sourceIndex,
+      toIndex: normalizedTargetIndex,
+      columnOrder: nextOrder
+    });
+  }
+
+  private startColumnResizeSession(pointerId: number, clientX: number, resizeHit: HeaderResizeHit): void {
+    this.teardownColumnResizeSession();
+    this.teardownColumnReorderSession();
+    this.teardownPointerSelectionSession();
+
+    const { minWidth, maxWidth } = this.resolveColumnWidthBounds(resizeHit.column);
+    const startWidth = this.clampColumnWidth(resizeHit.column.width, minWidth, maxWidth);
+    this.columnResizeSession = {
+      pointerId,
+      columnId: resizeHit.columnId,
+      startClientX: clientX,
+      startWidth,
+      minWidth,
+      maxWidth,
+      pendingClientX: clientX,
+      lastEmittedWidth: startWidth
+    };
+
+    this.rootElement.classList.add('hgrid--column-resizing');
+    this.setHeaderResizeHoverCell(null);
+    this.eventBus.emit('columnResize', {
+      columnId: resizeHit.columnId,
+      width: startWidth,
+      phase: 'start'
+    });
+
+    window.addEventListener('pointermove', this.handleWindowColumnResizeMove, { passive: true });
+    window.addEventListener('pointerup', this.handleWindowColumnResizeEnd);
+    window.addEventListener('pointercancel', this.handleWindowColumnResizeEnd);
+  }
+
+  private teardownColumnResizeSession(): void {
+    this.setHeaderResizeHoverCell(null);
+
+    if (this.columnResizeFrameId !== null) {
+      cancelAnimationFrame(this.columnResizeFrameId);
+      this.columnResizeFrameId = null;
+    }
+
+    window.removeEventListener('pointermove', this.handleWindowColumnResizeMove);
+    window.removeEventListener('pointerup', this.handleWindowColumnResizeEnd);
+    window.removeEventListener('pointercancel', this.handleWindowColumnResizeEnd);
+
+    if (!this.columnResizeSession) {
+      this.rootElement.classList.remove('hgrid--column-resizing');
+      return;
+    }
+
+    this.columnResizeSession = null;
+    this.rootElement.classList.remove('hgrid--column-resizing');
+  }
+
+  private handleWindowColumnResizeMove = (event: PointerEvent): void => {
+    const session = this.columnResizeSession;
+    if (!session || session.pointerId !== event.pointerId) {
+      return;
+    }
+
+    session.pendingClientX = event.clientX;
+
+    if (this.columnResizeFrameId !== null) {
+      return;
+    }
+
+    this.columnResizeFrameId = requestAnimationFrame(() => {
+      this.columnResizeFrameId = null;
+      this.flushColumnResizeFrame('move');
+    });
+  };
+
+  private handleWindowColumnResizeEnd = (event: PointerEvent): void => {
+    const session = this.columnResizeSession;
+    if (!session || session.pointerId !== event.pointerId) {
+      return;
+    }
+
+    session.pendingClientX = event.clientX;
+
+    if (this.columnResizeFrameId !== null) {
+      cancelAnimationFrame(this.columnResizeFrameId);
+      this.columnResizeFrameId = null;
+    }
+
+    this.flushColumnResizeFrame('end');
+    this.teardownColumnResizeSession();
+  };
+
+  private flushColumnResizeFrame(phase: 'move' | 'end'): void {
+    const session = this.columnResizeSession;
+    if (!session) {
+      return;
+    }
+
+    const deltaX = session.pendingClientX - session.startClientX;
+    const nextWidth = this.clampColumnWidth(session.startWidth + deltaX, session.minWidth, session.maxWidth);
+    if (phase === 'move' && nextWidth === session.lastEmittedWidth) {
+      return;
+    }
+
+    session.lastEmittedWidth = nextWidth;
+    this.eventBus.emit('columnResize', {
+      columnId: session.columnId,
+      width: nextWidth,
+      phase
+    });
+  }
+
+  private isIndicatorControlTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    return Boolean(target.closest('.hgrid__indicator-checkbox, .hgrid__indicator-checkall'));
+  }
+
   private handleRootPointerDown = (event: PointerEvent): void => {
     if (this.editSession) {
       return;
@@ -2022,8 +3306,46 @@ export class DomRenderer {
       return;
     }
 
+    if (this.isIndicatorControlTarget(event.target)) {
+      return;
+    }
+
+    const resizeHit = this.hitTestHeaderResize(event.clientX, event.clientY, event.target as HTMLElement | null);
+    if (resizeHit) {
+      this.startColumnResizeSession(event.pointerId, event.clientX, resizeHit);
+      event.preventDefault();
+      return;
+    }
+
+    const headerCell = this.resolveHeaderCellFromTarget(event.target as HTMLElement | null);
+    if (headerCell && this.options.columns.length > 1) {
+      this.startColumnReorderSession(event.pointerId, event.clientX, event.clientY, headerCell);
+      event.preventDefault();
+      return;
+    }
+
     const hit = this.hitTestCellAtPoint(event.clientX, event.clientY);
     if (!hit) {
+      return;
+    }
+
+    if (this.isIndicatorCheckboxColumnId(hit.column.id)) {
+      this.rootElement.focus();
+      this.toggleRowSelectionByIndicator(
+        hit.rowIndex,
+        {
+          isShift: event.shiftKey,
+          isMeta: event.metaKey || event.ctrlKey
+        },
+        'pointer'
+      );
+      this.eventBus.emit('cellClick', {
+        rowIndex: hit.rowIndex,
+        dataIndex: hit.dataIndex,
+        columnId: hit.column.id,
+        value: this.selectionModel.isRowSelected(hit.rowIndex)
+      });
+      event.preventDefault();
       return;
     }
 
@@ -2049,6 +3371,59 @@ export class DomRenderer {
       columnId: hit.column.id,
       value: getColumnValue(hit.column, row)
     });
+  };
+
+  private handleRootClick = (event: MouseEvent): void => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const checkAllElement = target.closest('.hgrid__indicator-checkall');
+    if (checkAllElement instanceof HTMLInputElement) {
+      this.rootElement.focus();
+      this.toggleCheckAllByIndicator(checkAllElement.checked, 'pointer');
+      event.preventDefault();
+      return;
+    }
+
+    const rowCheckboxElement = target.closest('.hgrid__indicator-checkbox');
+    if (!(rowCheckboxElement instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const rowElement = rowCheckboxElement.closest('.hgrid__row');
+    if (!(rowElement instanceof HTMLDivElement)) {
+      return;
+    }
+
+    const rowIndex = Number.parseInt(rowElement.dataset.rowIndex ?? '-1', 10);
+    const dataIndex = Number.parseInt(rowElement.dataset.dataIndex ?? '-1', 10);
+    if (!Number.isFinite(rowIndex) || rowIndex < 0 || !Number.isFinite(dataIndex) || dataIndex < 0) {
+      return;
+    }
+
+    this.rootElement.focus();
+    this.toggleRowSelectionByIndicator(
+      rowIndex,
+      {
+        isShift: event.shiftKey,
+        isMeta: event.metaKey || event.ctrlKey
+      },
+      'pointer'
+    );
+    const indicatorCell = rowCheckboxElement.closest('.hgrid__cell');
+    const indicatorColumnId =
+      indicatorCell instanceof HTMLDivElement && indicatorCell.dataset.columnId
+        ? indicatorCell.dataset.columnId
+        : INDICATOR_CHECKBOX_COLUMN_ID;
+    this.eventBus.emit('cellClick', {
+      rowIndex,
+      dataIndex,
+      columnId: indicatorColumnId,
+      value: rowCheckboxElement.checked
+    });
+    event.preventDefault();
   };
 
   private handleRootDoubleClick = (event: MouseEvent): void => {
@@ -2474,6 +3849,30 @@ export class DomRenderer {
     }
 
     if (this.editSession) {
+      return;
+    }
+
+    if (event.key === ' ' || event.key === 'Spacebar' || event.key === 'Space') {
+      const currentSelection = this.selectionModel.getSelection();
+      const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
+      if (!activeCell) {
+        return;
+      }
+
+      const activeColumn = this.resolveColumnByGlobalIndex(activeCell.colIndex);
+      if (!activeColumn || !this.isIndicatorCheckboxColumnId(activeColumn.column.id)) {
+        return;
+      }
+
+      this.toggleRowSelectionByIndicator(
+        activeCell.rowIndex,
+        {
+          isShift: event.shiftKey,
+          isMeta: event.ctrlKey || event.metaKey
+        },
+        'keyboard'
+      );
+      event.preventDefault();
       return;
     }
 

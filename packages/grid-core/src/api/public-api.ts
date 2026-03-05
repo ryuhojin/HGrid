@@ -3,6 +3,7 @@ export type {
   ColumnComparator,
   ColumnDef,
   ColumnFormatter,
+  ColumnPinPosition,
   ColumnValueGetter,
   ColumnValueSetter,
   EditValidationContext,
@@ -12,12 +13,30 @@ export type {
   GridOptions,
   RowHeightGetter,
   RowHeightMode,
+  RowIndicatorCheckAllScope,
+  RowIndicatorOptions,
+  RowIndicatorStatusContext,
+  RowIndicatorStatusGetter,
+  RowStatusTone,
+  StateColumnOptions,
+  StateColumnRenderContext,
+  StateColumnRenderer,
+  StateColumnRenderResult,
   GridState,
   GridTheme,
   ScrollbarPolicy,
   ScrollbarVisibility
 } from '../core/grid-options';
-export type { CellClickEvent, EditCancelEvent, EditCommitEvent, EditStartEvent, GridEventMap, GridEventName } from '../core/event-bus';
+export type {
+  CellClickEvent,
+  ColumnReorderEvent,
+  ColumnResizeEvent,
+  EditCancelEvent,
+  EditCommitEvent,
+  EditStartEvent,
+  GridEventMap,
+  GridEventName
+} from '../core/event-bus';
 export { LocalDataProvider } from '../data/local-data-provider';
 export { ColumnarDataProvider } from '../data/columnar-data-provider';
 export { CooperativeFilterExecutor } from '../data/filter-executor';

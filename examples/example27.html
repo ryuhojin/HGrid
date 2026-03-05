@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 27 - Column Feature Pack</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .controls button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1060px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 27 - Column Feature Pack</h1>
+    <div class="controls">
+      <button id="run-resize" type="button">run resize</button>
+      <button id="run-reorder" type="button">run reorder</button>
+      <button id="run-pin-hide" type="button">run pin + hide</button>
+      <button id="run-all" type="button">run all</button>
+      <button id="reset" type="button">reset</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const baseColumns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, minWidth: 140, maxWidth: 320, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'region', header: 'Region', width: 160, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text', pinned: 'right' }
+      ];
+
+      const rowData = Array.from({ length: 12000 }, (_, index) => ({
+        id: index + 1,
+        name: 'User-' + (index + 1),
+        score: (index * 17) % 1000,
+        region: ['KR', 'US', 'JP', 'DE'][index % 4],
+        status: index % 2 === 0 ? 'active' : 'idle'
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: baseColumns.map((column) => Object.assign({}, column)),
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        overscanCols: 2
+      });
+
+      const buttons = Array.from(document.querySelectorAll('.controls button'));
+      const logElement = document.getElementById('log');
+      let pointerSeed = 700;
+      const resizeEvents = [];
+      const reorderEvents = [];
+
+      grid.on('columnResize', (event) => {
+        resizeEvents.push({ phase: event.phase, columnId: event.columnId, width: event.width });
+        if (resizeEvents.length > 20) {
+          resizeEvents.shift();
+        }
+      });
+
+      grid.on('columnReorder', (event) => {
+        reorderEvents.push({
+          sourceColumnId: event.sourceColumnId,
+          targetColumnId: event.targetColumnId,
+          fromIndex: event.fromIndex,
+          toIndex: event.toIndex,
+          columnOrder: event.columnOrder.slice()
+        });
+        if (reorderEvents.length > 20) {
+          reorderEvents.shift();
+        }
+      });
+
+      function setBusy(isBusy) {
+        for (const button of buttons) {
+          if (button.id === 'inspect') {
+            continue;
+          }
+          button.disabled = isBusy;
+        }
+      }
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function createPointerLikeEvent(type, pointerId, clientX, clientY, button) {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          button: button || 0,
+          clientX,
+          clientY
+        });
+
+        Object.defineProperty(event, 'pointerId', {
+          configurable: true,
+          value: pointerId
+        });
+
+        return event;
+      }
+
+      function getVisibleHeaderCell(columnId) {
+        const cells = Array.from(document.querySelectorAll('.hgrid__header-cell[data-column-id="' + columnId + '"]'));
+        return cells.find((cell) => cell.style.display !== 'none') || cells[0] || null;
+      }
+
+      async function simulateResize(columnId, deltaXValues) {
+        const headerCell = getVisibleHeaderCell(columnId);
+        if (!headerCell) {
+          throw new Error('Missing header cell: ' + columnId);
+        }
+
+        const rect = headerCell.getBoundingClientRect();
+        const pointerId = pointerSeed++;
+        const startX = rect.right - 2;
+        const centerY = rect.top + rect.height * 0.5;
+        headerCell.dispatchEvent(createPointerLikeEvent('pointerdown', pointerId, startX, centerY, 0));
+
+        for (let index = 0; index < deltaXValues.length; index += 1) {
+          const nextX = startX + deltaXValues[index];
+          headerCell.dispatchEvent(createPointerLikeEvent('pointermove', pointerId, nextX, centerY, 0));
+        }
+
+        await waitFrame();
+
+        const finalDelta = deltaXValues.length > 0 ? deltaXValues[deltaXValues.length - 1] : 0;
+        const finalX = startX + finalDelta;
+        headerCell.dispatchEvent(createPointerLikeEvent('pointerup', pointerId, finalX, centerY, 0));
+        await waitFrame();
+      }
+
+      async function simulateReorder(sourceColumnId, targetColumnId, place) {
+        const sourceCell = getVisibleHeaderCell(sourceColumnId);
+        const targetCell = getVisibleHeaderCell(targetColumnId);
+        if (!sourceCell || !targetCell) {
+          throw new Error('Missing source/target header cell');
+        }
+
+        const sourceRect = sourceCell.getBoundingClientRect();
+        const targetRect = targetCell.getBoundingClientRect();
+        const pointerId = pointerSeed++;
+        const centerY = sourceRect.top + sourceRect.height * 0.5;
+        const startX = sourceRect.left + sourceRect.width * 0.5;
+
+        sourceCell.dispatchEvent(createPointerLikeEvent('pointerdown', pointerId, startX, centerY, 0));
+
+        const targetX = place === 'before' ? targetRect.left + 4 : targetRect.right - 4;
+        targetCell.dispatchEvent(createPointerLikeEvent('pointermove', pointerId, targetX, centerY, 0));
+        await waitFrame();
+
+        targetCell.dispatchEvent(createPointerLikeEvent('pointerup', pointerId, targetX, centerY, 0));
+        await waitFrame();
+      }
+
+      function collectZoneColumnIds(selector) {
+        return Array.from(document.querySelectorAll(selector))
+          .map((cell) => cell.dataset.columnId)
+          .filter(Boolean);
+      }
+
+      function getCenterHeaderOrder() {
+        const cells = Array.from(document.querySelectorAll('.hgrid__header-center .hgrid__header-cell'));
+        const result = [];
+        for (const cell of cells) {
+          if (cell.style.display === 'none') {
+            continue;
+          }
+          const columnId = cell.dataset.columnId;
+          if (!columnId || result.includes(columnId)) {
+            continue;
+          }
+          result.push(columnId);
+        }
+        return result;
+      }
+
+      function getVisibleCenterRowOrder() {
+        const row = Array.from(document.querySelectorAll('.hgrid__row--center')).find((item) => item.style.display !== 'none');
+        if (!row) {
+          return [];
+        }
+
+        return Array.from(row.querySelectorAll('.hgrid__cell'))
+          .filter((cell) => cell.style.display !== 'none')
+          .map((cell) => cell.dataset.columnId)
+          .filter(Boolean);
+      }
+
+      function getSnapshot() {
+        const state = grid.getState();
+        const nameHeaderCell = getVisibleHeaderCell('name');
+        const nameWidth = nameHeaderCell ? Math.round(Number.parseFloat(nameHeaderCell.style.width || '0')) : null;
+        const dropIndicator = document.querySelector('.hgrid__header-drop-indicator');
+
+        return {
+          state,
+          nameWidth,
+          header: {
+            left: collectZoneColumnIds('.hgrid__header-left .hgrid__header-cell'),
+            center: getCenterHeaderOrder(),
+            right: collectZoneColumnIds('.hgrid__header-right .hgrid__header-cell')
+          },
+          firstVisibleCenterRowOrder: getVisibleCenterRowOrder(),
+          events: {
+            resizeTail: resizeEvents.slice(-4),
+            reorderTail: reorderEvents.slice(-4)
+          },
+          dropIndicator: {
+            display: dropIndicator ? dropIndicator.style.display : null
+          }
+        };
+      }
+
+      function writeLog(label, extra) {
+        logElement.textContent = JSON.stringify({
+          label,
+          snapshot: getSnapshot(),
+          extra: extra || null
+        });
+      }
+
+      function resetGridColumns() {
+        grid.setColumns(baseColumns.map((column) => Object.assign({}, column)));
+        resizeEvents.length = 0;
+        reorderEvents.length = 0;
+      }
+
+      async function runAction(label, task) {
+        setBusy(true);
+        const startedAt = performance.now();
+        try {
+          const result = await task();
+          writeLog(label, Object.assign({ elapsedMs: Math.round(performance.now() - startedAt) }, result || {}));
+        } catch (error) {
+          writeLog(label + '-error', {
+            message: error && error.message ? error.message : String(error)
+          });
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      document.getElementById('run-resize').addEventListener('click', () => {
+        runAction('run-resize', async () => {
+          await simulateResize('name', [18, 34, 40]);
+        });
+      });
+
+      document.getElementById('run-reorder').addEventListener('click', () => {
+        runAction('run-reorder', async () => {
+          await simulateReorder('region', 'score', 'before');
+        });
+      });
+
+      document.getElementById('run-pin-hide').addEventListener('click', () => {
+        runAction('run-pin-hide', async () => {
+          grid.setColumnPin('name', 'left');
+          grid.setColumnVisibility('score', false);
+          await waitFrame();
+        });
+      });
+
+      document.getElementById('run-all').addEventListener('click', () => {
+        runAction('run-all', async () => {
+          resetGridColumns();
+          await waitFrame();
+          await simulateResize('name', [18, 34, 40]);
+          await simulateReorder('region', 'score', 'before');
+          grid.setColumnPin('name', 'left');
+          grid.setColumnVisibility('score', false);
+          await waitFrame();
+        });
+      });
+
+      document.getElementById('reset').addEventListener('click', () => {
+        runAction('reset', async () => {
+          resetGridColumns();
+          await waitFrame();
+        });
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect');
+      });
+
+      writeLog('initial');
+    </script>
+  </body>
+</html>

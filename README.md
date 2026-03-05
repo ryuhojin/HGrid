@@ -6,7 +6,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 ## 프로젝트 상태 (2026-03-05)
 
 - 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.3`, `Phase 5.1~5.2`, `Phase 6.1~6.4`
-- 다음 범위: `Phase 7` (컬럼 리사이즈/리오더/pin/hide 고도화)
+- 다음 범위: `Phase 7.6+` (group header/indicator 고도화)
 - 상세 기준: `checklist.md`
 
 구현 완료 핵심:
@@ -128,7 +128,7 @@ await grid.clearSortModel();
 - `pnpm bench`
 - `pnpm ci:phase0`
 
-## Examples (현재 1~23)
+## Examples (현재 1~28)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -144,6 +144,11 @@ await grid.clearSortModel();
 - `example21`: worker-first sorting
 - `example22`: worker-first filtering
 - `example23`: worker-first sort + filter 통합
+- `example24`: column resize
+- `example25`: column reorder
+- `example26`: column pin/hide + stress
+- `example27`: column feature pack integration
+- `example28`: selection indicator + state column
 
 기능 추가 시 규칙:
 
@@ -174,6 +179,10 @@ await grid.clearSortModel();
 - `docs/worker-protocol-phase6.md`
 - `docs/sorting-phase6.md`
 - `docs/filtering-phase6.md`
+- `docs/column-resize-phase7.md`
+- `docs/column-reorder-phase7.md`
+- `docs/column-pin-hide-phase7.md`
+- `docs/selection-indicator-columns-phase7.md`
 
 ## 라이선스
 

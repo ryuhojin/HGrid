@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 24 - Column Resize</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1040px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 24 - Column Resize</h1>
+    <div class="controls">
+      <button id="run-min" type="button">drag to min</button>
+      <button id="run-max" type="button">drag to max</button>
+      <button id="run-mid" type="button">drag to mid</button>
+      <button id="reset" type="button">reset columns</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      function createColumns() {
+        return [
+          { id: 'id', header: 'ID', width: 110, type: 'number', pinned: 'left' },
+          { id: 'name', header: 'Name', width: 180, minWidth: 120, maxWidth: 280, type: 'text' },
+          { id: 'country', header: 'Country', width: 180, type: 'text' },
+          { id: 'score', header: 'Score', width: 140, type: 'number' },
+          { id: 'status', header: 'Status', width: 130, type: 'text', pinned: 'right' }
+        ];
+      }
+
+      const rowData = Array.from({ length: 8000 }, (_, index) => ({
+        id: index + 1,
+        name: 'User-' + (index + 1),
+        country: ['KR', 'US', 'JP', 'DE'][index % 4],
+        score: (index * 17) % 1000,
+        status: index % 2 === 0 ? 'active' : 'idle'
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: createColumns(),
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        overscanCols: 2
+      });
+
+      const logElement = document.getElementById('log');
+      const buttons = Array.from(document.querySelectorAll('.controls button'));
+      const resizeEvents = [];
+      let pointerSeed = 100;
+
+      grid.on('columnResize', (event) => {
+        resizeEvents.push({
+          phase: event.phase,
+          columnId: event.columnId,
+          width: event.width
+        });
+        if (resizeEvents.length > 24) {
+          resizeEvents.shift();
+        }
+      });
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function getVisibleHeaderCell(columnId) {
+        const cells = Array.from(document.querySelectorAll('.hgrid__header-cell[data-column-id="' + columnId + '"]'));
+        return cells.find((cell) => cell.style.display !== 'none') || cells[0] || null;
+      }
+
+      function getVisibleBodyCell(columnId) {
+        const rows = Array.from(document.querySelectorAll('.hgrid__row--center'));
+        for (const row of rows) {
+          if (row.style.display === 'none') {
+            continue;
+          }
+
+          const cell = row.querySelector('.hgrid__cell[data-column-id="' + columnId + '"]');
+          if (cell && cell.style.display !== 'none') {
+            return cell;
+          }
+        }
+
+        return null;
+      }
+
+      function readColumnWidth(columnId) {
+        const headerCell = getVisibleHeaderCell(columnId);
+        if (!headerCell) {
+          return null;
+        }
+
+        const numericWidth = Number.parseFloat(headerCell.style.width || '0');
+        return Number.isFinite(numericWidth) ? Math.round(numericWidth) : null;
+      }
+
+      function getSnapshot(label) {
+        const hScroll = document.querySelector('.hgrid__h-scroll');
+        const headerWidth = readColumnWidth('name');
+        const bodyCell = getVisibleBodyCell('name');
+        const bodyWidthValue = bodyCell ? Number.parseFloat(bodyCell.style.width || '0') : Number.NaN;
+
+        return {
+          label,
+          width: {
+            header: headerWidth,
+            body: Number.isFinite(bodyWidthValue) ? Math.round(bodyWidthValue) : null
+          },
+          events: {
+            total: resizeEvents.length,
+            moveCount: resizeEvents.filter((event) => event.phase === 'move').length,
+            tail: resizeEvents.slice(-6)
+          },
+          dom: {
+            centerRowDom: document.querySelectorAll('.hgrid__row--center').length,
+            centerCellDom: document.querySelectorAll('.hgrid__row--center .hgrid__cell--center').length
+          },
+          scroll: {
+            horizontalLeft: hScroll ? Math.round(hScroll.scrollLeft) : 0,
+            virtualTop: Math.round(grid.getState().scrollTop)
+          }
+        };
+      }
+
+      function writeLog(label, extra) {
+        logElement.textContent = JSON.stringify({
+          label,
+          snapshot: getSnapshot(label),
+          extra: extra || null
+        });
+      }
+
+      async function dispatchResize(columnId, deltaXValues) {
+        const headerCell = getVisibleHeaderCell(columnId);
+        if (!headerCell) {
+          throw new Error('Missing header cell for column: ' + columnId);
+        }
+
+        const rect = headerCell.getBoundingClientRect();
+        const startX = rect.right - 1;
+        const startY = rect.top + rect.height * 0.5;
+        const pointerId = pointerSeed++;
+
+        headerCell.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            pointerId,
+            clientX: startX,
+            clientY: startY
+          })
+        );
+
+        for (let index = 0; index < deltaXValues.length; index += 1) {
+          window.dispatchEvent(
+            new PointerEvent('pointermove', {
+              bubbles: true,
+              cancelable: true,
+              pointerId,
+              clientX: startX + deltaXValues[index],
+              clientY: startY
+            })
+          );
+        }
+
+        await waitFrame();
+
+        const finalDelta = deltaXValues.length > 0 ? deltaXValues[deltaXValues.length - 1] : 0;
+        window.dispatchEvent(
+          new PointerEvent('pointerup', {
+            bubbles: true,
+            cancelable: true,
+            pointerId,
+            clientX: startX + finalDelta,
+            clientY: startY
+          })
+        );
+
+        await waitFrame();
+      }
+
+      async function runAction(label, task) {
+        for (const button of buttons) {
+          if (button.id !== 'inspect') {
+            button.disabled = true;
+          }
+        }
+
+        try {
+          await task();
+          writeLog(label);
+        } catch (error) {
+          writeLog(label + '-error', {
+            message: error && error.message ? error.message : String(error)
+          });
+        } finally {
+          for (const button of buttons) {
+            button.disabled = false;
+          }
+        }
+      }
+
+      document.getElementById('run-min').addEventListener('click', () => {
+        runAction('run-min', async () => {
+          await dispatchResize('name', [-24, -48, -320]);
+        });
+      });
+
+      document.getElementById('run-max').addEventListener('click', () => {
+        runAction('run-max', async () => {
+          await dispatchResize('name', [56, 120, 420]);
+        });
+      });
+
+      document.getElementById('run-mid').addEventListener('click', () => {
+        runAction('run-mid', async () => {
+          await dispatchResize('name', [-10, 12, 40]);
+        });
+      });
+
+      document.getElementById('reset').addEventListener('click', () => {
+        grid.setColumns(createColumns());
+        resizeEvents.length = 0;
+        writeLog('reset');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect');
+      });
+
+      writeLog('initial');
+    </script>
+  </body>
+</html>

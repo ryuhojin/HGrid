@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 25 - Column Reorder</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .controls button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1040px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 25 - Column Reorder</h1>
+    <div class="controls">
+      <button id="drag-name-after-score" type="button">drag name -> after score</button>
+      <button id="drag-region-before-score" type="button">drag region -> before score</button>
+      <button id="reset-order" type="button">reset order</button>
+      <button id="save-state" type="button">save state</button>
+      <button id="restore-state" type="button">restore state</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const baseColumns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 200, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'region', header: 'Region', width: 160, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text', pinned: 'right' }
+      ];
+
+      const rowData = Array.from({ length: 12000 }, (_, index) => ({
+        id: index + 1,
+        name: 'User-' + (index + 1),
+        score: (index * 17) % 1000,
+        region: ['KR', 'US', 'JP', 'DE'][index % 4],
+        status: index % 2 === 0 ? 'active' : 'idle'
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: baseColumns.map((column) => Object.assign({}, column)),
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        overscanCols: 2
+      });
+
+      const logElement = document.getElementById('log');
+      const buttons = Array.from(document.querySelectorAll('.controls button'));
+      let pointerSeed = 400;
+      let savedState = null;
+      const reorderEvents = [];
+
+      grid.on('columnReorder', (event) => {
+        reorderEvents.push({
+          sourceColumnId: event.sourceColumnId,
+          targetColumnId: event.targetColumnId,
+          fromIndex: event.fromIndex,
+          toIndex: event.toIndex,
+          columnOrder: event.columnOrder.slice()
+        });
+        if (reorderEvents.length > 20) {
+          reorderEvents.shift();
+        }
+      });
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function getVisibleHeaderCell(columnId) {
+        const cells = Array.from(document.querySelectorAll('.hgrid__header-cell[data-column-id="' + columnId + '"]'));
+        return cells.find((cell) => cell.style.display !== 'none') || cells[0] || null;
+      }
+
+      function getHeaderCenterOrder() {
+        const cells = Array.from(document.querySelectorAll('.hgrid__header-center .hgrid__header-cell'));
+        const result = [];
+        for (const cell of cells) {
+          if (cell.style.display === 'none') {
+            continue;
+          }
+          if (cell.dataset.columnId) {
+            result.push(cell.dataset.columnId);
+          }
+        }
+        return result;
+      }
+
+      function getFirstVisibleCenterRowOrder() {
+        const rows = Array.from(document.querySelectorAll('.hgrid__row--center'));
+        const row = rows.find((item) => item.style.display !== 'none');
+        if (!row) {
+          return [];
+        }
+
+        const cells = Array.from(row.querySelectorAll('.hgrid__cell'));
+        return cells
+          .filter((cell) => cell.style.display !== 'none')
+          .map((cell) => cell.dataset.columnId)
+          .filter(Boolean);
+      }
+
+      function getSnapshot() {
+        const dropIndicator = document.querySelector('.hgrid__header-drop-indicator');
+        const state = grid.getState();
+        return {
+          state,
+          hasSavedState: savedState !== null,
+          headerOrder: getHeaderCenterOrder(),
+          rowOrder: getFirstVisibleCenterRowOrder(),
+          reorderEvents: reorderEvents.slice(-6),
+          dropIndicator: {
+            display: dropIndicator ? dropIndicator.style.display : null,
+            transform: dropIndicator ? dropIndicator.style.transform : null
+          }
+        };
+      }
+
+      function writeLog(label, extra) {
+        logElement.textContent = JSON.stringify({
+          label,
+          snapshot: getSnapshot(),
+          extra: extra || null
+        });
+      }
+
+      function createPointerLikeEvent(type, pointerId, clientX, clientY, button) {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          button: button || 0,
+          clientX,
+          clientY
+        });
+
+        Object.defineProperty(event, 'pointerId', {
+          configurable: true,
+          value: pointerId
+        });
+
+        return event;
+      }
+
+      async function simulateHeaderDrag(sourceColumnId, targetColumnId, place) {
+        const sourceCell = getVisibleHeaderCell(sourceColumnId);
+        const targetCell = getVisibleHeaderCell(targetColumnId);
+        if (!sourceCell || !targetCell) {
+          throw new Error('source/target header cell not found');
+        }
+
+        const sourceRect = sourceCell.getBoundingClientRect();
+        const targetRect = targetCell.getBoundingClientRect();
+        const pointerId = pointerSeed++;
+        const centerY = sourceRect.top + sourceRect.height * 0.5;
+        const startX = sourceRect.left + sourceRect.width * 0.5;
+
+        sourceCell.dispatchEvent(createPointerLikeEvent('pointerdown', pointerId, startX, centerY, 0));
+
+        const targetX = place === 'before' ? targetRect.left + 3 : targetRect.right - 3;
+        targetCell.dispatchEvent(createPointerLikeEvent('pointermove', pointerId, targetX, centerY, 0));
+        await waitFrame();
+
+        targetCell.dispatchEvent(createPointerLikeEvent('pointerup', pointerId, targetX, centerY, 0));
+        await waitFrame();
+      }
+
+      async function runAction(label, callback) {
+        for (const button of buttons) {
+          if (button.id !== 'inspect') {
+            button.disabled = true;
+          }
+        }
+
+        try {
+          await callback();
+          writeLog(label);
+        } catch (error) {
+          writeLog(label + '-error', {
+            message: error && error.message ? error.message : String(error)
+          });
+        } finally {
+          for (const button of buttons) {
+            button.disabled = false;
+          }
+        }
+      }
+
+      document.getElementById('drag-name-after-score').addEventListener('click', () => {
+        runAction('drag-name-after-score', async () => {
+          await simulateHeaderDrag('name', 'score', 'after');
+        });
+      });
+
+      document.getElementById('drag-region-before-score').addEventListener('click', () => {
+        runAction('drag-region-before-score', async () => {
+          await simulateHeaderDrag('region', 'score', 'before');
+        });
+      });
+
+      document.getElementById('reset-order').addEventListener('click', () => {
+        grid.setColumnOrder(baseColumns.map((column) => column.id));
+        reorderEvents.length = 0;
+        writeLog('reset-order');
+      });
+
+      document.getElementById('save-state').addEventListener('click', () => {
+        savedState = grid.getState();
+        writeLog('save-state');
+      });
+
+      document.getElementById('restore-state').addEventListener('click', () => {
+        if (!savedState) {
+          writeLog('restore-state-skip', { reason: 'no-saved-state' });
+          return;
+        }
+
+        grid.setState(savedState);
+        writeLog('restore-state');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect');
+      });
+
+      writeLog('initial');
+    </script>
+  </body>
+</html>

@@ -8,6 +8,7 @@
 - `setColumnOrder(columnIds)`
 - `setColumnVisibility(columnId, isVisible)`
 - `setColumnWidth(columnId, width)`
+- `setColumnPin(columnId, pinned)`
 - `setRowOrder(viewToData)`
 - `setFilteredRowOrder(viewToData | null)`
 - `resetRowOrder()`
@@ -28,6 +29,9 @@
 - `GridOptions`: normalized runtime option shape.
 - `GridState`: serializable view state.
   - `scrollTop` is logical (virtual) vertical offset, not raw native scrollbar offset.
+  - `columnOrder?` stores ordered column ids for state restore.
+  - `hiddenColumnIds?` stores hidden column ids.
+  - `pinnedColumns?` stores per-column pin state (`left`/`right`).
 - `ColumnDef`: includes formatter/comparator/valueGetter/valueSetter hooks.
 - `DataProvider`: pluggable row access abstraction (`LocalDataProvider` default).
 - `RowModelOptions`: row-model runtime options (`enableDataToViewIndex` can be toggled at runtime).
@@ -40,11 +44,22 @@
 - `ScrollbarPolicy`: scrollbar visibility contract for each axis.
   - `vertical: "auto" | "always" | "hidden"`
   - `horizontal: "auto" | "always" | "hidden"`
+- `rowIndicator` (Phase 7.5):
+  - `width?`
+  - `showCheckbox?`
+  - `checkAllScope?: "all" | "filtered" | "viewport"`
+  - `getRowStatus?(context)`
+  - reserved indicator columns:
+    - `__indicatorRowNumber` / `__indicatorCheckbox` / `__indicatorStatus`
+    - `__indicator` (legacy alias of `__indicatorCheckbox`)
+- `stateColumn` (Phase 7.5):
+  - `render?(context) => string | { text?, ariaLabel?, tooltip?, tone? }`
 
 ## Wrapper Contract
 `@hgrid/grid-react` and `@hgrid/grid-vue` expose thin adapters with the same control API:
 - `new ReactGridAdapter(container, config)` / `new VueGridAdapter(container, config)`
 - `setColumns`, `setOptions`, `setColumnOrder`, `setColumnVisibility`, `setColumnWidth`
+- `setColumnPin`
 - `setRowOrder`, `setFilteredRowOrder`, `resetRowOrder`, `setRowModelOptions`, `getRowModelState`, `resetRowHeights`
 - `setTheme`, `getState`, `setState`, `getSelection`, `setSelection`, `clearSelection`, `on`, `off`, `destroy`
 

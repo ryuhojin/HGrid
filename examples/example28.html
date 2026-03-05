@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 28 - Selection Indicator Columns</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .controls button.active {
+        border-color: #2563eb;
+        background: #dbeafe;
+        color: #1e3a8a;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1140px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 28 - Selection Indicator Columns</h1>
+    <div class="controls">
+      <button id="scope-filtered" type="button" class="active">scope: filtered</button>
+      <button id="scope-viewport" type="button">scope: viewport</button>
+      <button id="scope-all" type="button">scope: all</button>
+      <button id="filter-active" type="button">filter: active only</button>
+      <button id="filter-clear" type="button">filter: clear</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const ROW_COUNT = 50000;
+      const ROW_STATUS_VALUES = ['clean', 'updated', 'inserted', 'invalid', 'error', 'deleted'];
+
+      const columns = [
+        { id: '__indicatorRowNumber', header: '#', width: 64, type: 'number' },
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: '__indicatorStatus', header: 'State', width: 104, type: 'text' },
+        { id: 'id', header: 'ID', width: 110, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 130, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date', pinned: 'right' }
+      ];
+
+      const rowData = Array.from({ length: ROW_COUNT }, (_, index) => {
+        const rowStatus = ROW_STATUS_VALUES[index % ROW_STATUS_VALUES.length];
+        const region = ['KR', 'US', 'JP', 'DE'][index % 4];
+
+        return {
+          __rowStatus: rowStatus,
+          id: index + 1,
+          name: 'Customer-' + (index + 1),
+          region,
+          score: (index * 17) % 1000,
+          updatedAt: new Date(Date.now() - index * 45000).toISOString()
+        };
+      });
+
+      const logElement = document.getElementById('log');
+      let selectionEventCount = 0;
+      let lastSelectionSource = 'none';
+      let checkAllScope = 'filtered';
+      let hasActiveFilter = false;
+
+      function writeLog(payload) {
+        logElement.textContent = JSON.stringify(payload);
+      }
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function resolveStatusTone(statusValue) {
+        if (
+          statusValue === 'clean' ||
+          statusValue === 'updated' ||
+          statusValue === 'inserted' ||
+          statusValue === 'invalid' ||
+          statusValue === 'error' ||
+          statusValue === 'deleted'
+        ) {
+          return statusValue;
+        }
+
+        return 'clean';
+      }
+
+      function getSnapshot() {
+        const checkAllElement = document.querySelector('.hgrid__indicator-checkall');
+        const firstIndicatorRow = Array.from(document.querySelectorAll('.hgrid__row--left')).find((rowElement) => {
+          return rowElement.style.display !== 'none';
+        });
+        const firstIndicatorCell = firstIndicatorRow
+          ? firstIndicatorRow.querySelector('.hgrid__cell[data-column-id="__indicatorCheckbox"]')
+          : null;
+        const firstCheckbox = firstIndicatorCell ? firstIndicatorCell.querySelector('.hgrid__indicator-checkbox') : null;
+        const firstRowNumberCell = firstIndicatorRow
+          ? firstIndicatorRow.querySelector('.hgrid__cell[data-column-id="__indicatorRowNumber"]')
+          : null;
+        const firstStatusCell = firstIndicatorRow
+          ? firstIndicatorRow.querySelector('.hgrid__cell[data-column-id="__indicatorStatus"]')
+          : null;
+
+        return {
+          rowCount: ROW_COUNT,
+          checkAllScope,
+          hasActiveFilter,
+          selection: grid.getSelection(),
+          selectionEventCount,
+          lastSelectionSource,
+          selectedRowDom: document.querySelectorAll('.hgrid__row--selected').length,
+          checkAll: checkAllElement
+            ? {
+                checked: checkAllElement.checked,
+                indeterminate: checkAllElement.indeterminate,
+                disabled: checkAllElement.disabled
+              }
+            : null,
+          firstVisibleIndicator: firstIndicatorRow
+            ? {
+                rowIndex: Number(firstIndicatorRow.dataset.rowIndex),
+                dataIndex: Number(firstIndicatorRow.dataset.dataIndex),
+                rowNumber: firstRowNumberCell ? firstRowNumberCell.textContent : null,
+                checked: firstCheckbox ? firstCheckbox.checked : null,
+                status: firstStatusCell ? firstStatusCell.textContent : null
+              }
+            : null
+        };
+      }
+
+      function setActiveButton(group, activeId) {
+        const ids = group;
+        for (let index = 0; index < ids.length; index += 1) {
+          const id = ids[index];
+          const button = document.getElementById(id);
+          if (!button) {
+            continue;
+          }
+          button.classList.toggle('active', id === activeId);
+        }
+      }
+
+      function applyIndicatorOptions() {
+        grid.setOptions({
+          rowIndicator: {
+            width: 56,
+            showCheckbox: true,
+            checkAllScope,
+            getRowStatus(context) {
+              return resolveStatusTone(context.row.__rowStatus);
+            }
+          }
+        });
+      }
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        overscanCols: 2,
+        rowIndicator: {
+          width: 56,
+          showCheckbox: true,
+          checkAllScope,
+          getRowStatus(context) {
+            return resolveStatusTone(context.row.__rowStatus);
+          }
+        }
+      });
+
+      grid.on('selectionChange', (event) => {
+        selectionEventCount += 1;
+        lastSelectionSource = event.source;
+      });
+
+      document.getElementById('scope-filtered').addEventListener('click', async () => {
+        checkAllScope = 'filtered';
+        setActiveButton(['scope-filtered', 'scope-viewport', 'scope-all'], 'scope-filtered');
+        applyIndicatorOptions();
+        await waitFrame();
+        writeLog({
+          label: 'scope-filtered',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('scope-viewport').addEventListener('click', async () => {
+        checkAllScope = 'viewport';
+        setActiveButton(['scope-filtered', 'scope-viewport', 'scope-all'], 'scope-viewport');
+        applyIndicatorOptions();
+        await waitFrame();
+        writeLog({
+          label: 'scope-viewport',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('scope-all').addEventListener('click', async () => {
+        checkAllScope = 'all';
+        setActiveButton(['scope-filtered', 'scope-viewport', 'scope-all'], 'scope-all');
+        applyIndicatorOptions();
+        await waitFrame();
+        writeLog({
+          label: 'scope-all',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('filter-active').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          region: {
+            type: 'set',
+            values: ['KR']
+          }
+        });
+        hasActiveFilter = true;
+        await waitFrame();
+        await waitFrame();
+        writeLog({
+          label: 'filter-active',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('filter-clear').addEventListener('click', async () => {
+        await grid.clearFilterModel();
+        hasActiveFilter = false;
+        await waitFrame();
+        await waitFrame();
+        writeLog({
+          label: 'filter-clear',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog({
+          label: 'inspect',
+          snapshot: getSnapshot()
+        });
+      });
+
+      window.__example28 = {
+        getSnapshot() {
+          return getSnapshot();
+        }
+      };
+
+      writeLog({
+        label: 'initial',
+        snapshot: getSnapshot()
+      });
+    </script>
+  </body>
+</html>

@@ -256,6 +256,65 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 24,
+      "file": "example24.html",
+      "title": "Example 24 - Column Resize",
+      "tags": [
+        "phase7",
+        "resize",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 25,
+      "file": "example25.html",
+      "title": "Example 25 - Column Reorder",
+      "tags": [
+        "phase7",
+        "reorder",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 26,
+      "file": "example26.html",
+      "title": "Example 26 - Column Pin Hide",
+      "tags": [
+        "phase7",
+        "pin-hide",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 27,
+      "file": "example27.html",
+      "title": "Example 27 - Column Feature Pack",
+      "tags": [
+        "phase7",
+        "column-features",
+        "resize",
+        "reorder",
+        "pin-hide",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 28,
+      "file": "example28.html",
+      "title": "Example 28 - Selection Indicator State Columns",
+      "tags": [
+        "phase7",
+        "selection-indicator",
+        "state-column",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

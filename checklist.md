@@ -112,8 +112,8 @@
 # Phase 2 — DOM Renderer 1.0: Virtualization + Pooling + Layout
 > 성능의 80%는 여기서 결정된다.
 
-## 2.0 AG-like 전환 목표(신규)
-- [x] AG-like scroll shell 채택:
+## 2.0 분리 스크롤 셸 전환 목표(신규)
+- [x] 분리 스크롤 셸 채택:
   - [x] `center viewport(overflow: hidden)` + `horizontal scroll viewport(native)` + `vertical scroll viewport(native)` 분리
   - [x] x/y 스크롤 컨테이너와 실제 렌더 뷰포트의 상태 동기화 락(`isSyncingScroll`) 도입
   - [x] pinned left/center/right는 스크롤 책임 분리(가로는 center 전용, 세로는 공통 y-source 동기화)
@@ -126,7 +126,7 @@
   - [x] resize/column pin 변경 시 스크롤 영역 재계산 안정
 
 ### 수용 기준
-- [x] AG Grid 유사 구조로 x/y 스크롤 전용 viewport가 존재하고, 렌더 레이어는 overflow hidden을 유지
+- [x] x/y 스크롤 전용 viewport가 존재하고, 렌더 레이어는 overflow hidden을 유지
 - [x] 스크롤 오케스트레이션 경로가 코드/문서/e2e로 검증됨
 
 ## 2.1 DOM 트리/레이아웃 확정
@@ -135,12 +135,12 @@
 - [x] 스크롤러 구조:
   - [x] center 전용 native x-scroll container + spacer 1개
   - [x] pinned 영역은 오버레이 고정, 세로 위치는 scrollTop 기반 transform 동기화
-  - [x] AG-like 전용 native y-scroll viewport 분리(단일 스크롤 소스)
+  - [x] 전용 native y-scroll viewport 분리(단일 스크롤 소스)
 
 ### 수용 기준
 - [x] 스크롤 시 레이아웃/리플로우 최소화(DevTools 성능에서 forced reflow 없어야 함)
 
-### 코어 변경 코멘트 (AG-like 반영, 2026-03-04)
+### 코어 변경 코멘트 (분리 스크롤 셸 반영, 2026-03-04)
 - 네이티브 스크롤 viewport 2축 분리:
   - x축: center 전용 `.hgrid__h-scroll`
   - y축: 우측 전용 `.hgrid__v-scroll` + `.hgrid__v-spacer`
@@ -148,7 +148,7 @@
 - pinned left/right는 독립 y-scroll을 만들지 않고 동일 `scrollTop` 기반 transform 동기화만 수행.
 - 휠 오케스트레이션:
   - header/aux 영역 휠 입력 -> x/y 전용 scroll source로 전달
-  - pinned 영역 입력도 x/y scroll source로 전달(AG 동작 정합)
+  - pinned 영역 입력도 x/y scroll source로 전달(동작 정합)
 - 안정성 보강 (2026-03-04, 2.0 미체크 항목 반영):
   - 즉시 transform 동기화 경로 추가(고속 입력 시 header/body x 분리 최소화)
   - `ResizeObserver`(fallback: `window.resize`) 기반 레이아웃 재계산 및 scroll clamp 적용
@@ -161,7 +161,7 @@
   - [x] overscanTop/Bottom 적용
 - [x] RowPool 크기:
   - [x] `poolSize = visibleRows + overscanTop + overscanBottom`
-- [x] AG-like scroll source 연동:
+- [x] 분리 스크롤 source 연동:
   - [x] y-scroll viewport의 `scrollTop`을 row window 계산 단일 입력으로 사용
   - [x] pinned/center row layer 모두 동일 window 사용
   - [x] y-scroll thumb 이동과 rowIndex 매핑 오차 누적 방지
@@ -180,7 +180,7 @@
 - [x] visible col range: binary search로 찾기
 - [x] overscanCols 적용
 - [x] pinned 영역은 별도 컨테이너에 고정 렌더
-- [x] AG-like center-only horizontal viewport 연동:
+- [x] center-only horizontal viewport 연동:
   - [x] `scrollLeft`는 center scroll source에서만 갱신
   - [x] header center transform과 body center transform이 동일 프레임에서 동기화
   - [x] pinned 영역은 horizontal input 비소비 정책 유지
@@ -227,7 +227,7 @@
   - [x] dataDirty
   - [x] selectionDirty
   - [x] themeDirty
-- [x] AG-like scroll 동기화 보호:
+- [x] 분리 스크롤 동기화 보호:
   - [x] `isSyncingScroll` 또는 동등한 재진입 방지 플래그
   - [x] scroll 이벤트 루프(header/body/x-scroll/y-scroll) 재귀 호출 차단
 
@@ -253,7 +253,7 @@
 - [x] `virtualMaxScrollTop = max(0, virtualHeight - viewportHeight)`
 - [x] `physicalMaxScrollTop = max(0, scrollHeight - viewportHeight)`
 - [x] `scale = virtualMaxScrollTop / physicalMaxScrollTop` (`physicalMaxScrollTop == 0`이면 `scale = 1`)
-- [x] AG-like y-scroll viewport 높이와 scaling 매핑 결합
+- [x] y-scroll viewport 높이와 scaling 매핑 결합
 
 ### 코어 변경 코멘트 (3.1 반영, 2026-03-05)
 - 스크롤 스케일 계산 유틸 분리:
@@ -397,10 +397,10 @@
 ## 4.1 이벤트 위임(Event Delegation)
 - [x] root 1~2개 리스너로 pointer/keydown 처리
 - [x] 셀/행에 리스너 금지
-- [ ] hit-test:
+- [x] hit-test:
   - [x] y → rowIndex O(1)
   - [x] x → colIndex binary search O(logN)
-- [x] AG-like wheel 오케스트레이션:
+- [x] wheel 오케스트레이션:
   - [x] header wheel -> center x/y scroll source 전달
   - [x] pinned wheel -> y-only 전달, x 차단
   - [x] inertial scroll(트랙패드)에서 프레임 드롭/역방향 튐 방지
@@ -411,29 +411,43 @@
 ### 코어 변경 코멘트 (4.1 반영, 2026-03-05)
 - root 이벤트 위임을 `pointerdown` + `keydown`으로 고정하고 셀/행 개별 리스너를 제거했다.
 - hit-test를 zone별(left/center/right)로 분리하고 row는 y 매핑, col은 binary search로 계산한다.
-- wheel 오케스트레이션을 AG-like로 통일하여 header는 x/y 전달, pinned는 y-only 전달로 고정했다.
+- wheel 오케스트레이션을 단일 정책으로 통일하여 header는 x/y 전달, pinned는 y-only 전달로 고정했다.
 - 검증: `example16` 추가 + `scripts/run-e2e.mjs` 시나리오 보강으로 pointer/wheel 회귀를 자동화했다.
 
 ## 4.2 Selection Model (대용량 친화)
-- [ ] 셀 범위 선택은 “ranges”로 저장(개별 셀 boolean 금지)
-  - [ ] 예: `{r1,c1,r2,c2}` 목록
-- [ ] row selection: rowKey 기반 + ranges 지원
-- [ ] selection change 이벤트 payload 규격 확정
+- [x] 셀 범위 선택은 “ranges”로 저장(개별 셀 boolean 금지)
+  - [x] 예: `{r1,c1,r2,c2}` 목록
+- [x] row selection: rowKey 기반 + ranges 지원
+- [x] selection change 이벤트 payload 규격 확정
 
 ### 수용 기준
-- [ ] 1M에서도 선택 드래그 시 UI 멈춤 없음
+- [x] 1M에서도 선택 드래그 시 UI 멈춤 없음
+
+### 코어 변경 코멘트 (4.2 반영, 2026-03-05)
+- `SelectionModel`을 도입해 셀 선택을 `{r1,c1,r2,c2}` range 배열로 저장하고, row 선택은 `{r1,r2,rowKeyStart,rowKeyEnd}`로 관리한다.
+- `selectionChange` 이벤트 payload를 `source + activeCell + cellRanges + rowRanges`로 고정했다.
+- `Grid`/`ReactGridAdapter`/`VueGridAdapter`에 `getSelection`, `setSelection`, `clearSelection` API를 추가했다.
+- 렌더러는 풀링된 visible row/cell에만 선택 클래스(`hgrid__row--selected`, `hgrid__cell--selected`, `hgrid__cell--active`)를 반영한다.
+- 검증: `example17` + e2e 시나리오(1M 범위 갱신 루프) + unit/integration 테스트 추가.
 
 ## 4.3 Keyboard Navigation
-- [ ] arrows / page up/down / home/end
-- [ ] shift 확장 선택
-- [ ] ctrl/cmd 이동 정책 정의
-- [ ] focus 유지 규칙(가상화 중 active cell 유지)
+- [x] arrows / page up/down / home/end
+- [x] shift 확장 선택
+- [x] ctrl/cmd 이동 정책 정의
+- [x] focus 유지 규칙(가상화 중 active cell 유지)
 
 ### 수용 기준
-- [ ] 키보드만으로 탐색/선택 가능
+- [x] 키보드만으로 탐색/선택 가능
+
+### 코어 변경 코멘트 (4.3 반영, 2026-03-05)
+- `handleRootKeyDown`에서 `Arrow/PageUp/PageDown/Home/End`를 active-cell 이동으로 통합 처리했다.
+- `Ctrl/Cmd + Home/End/Arrow` edge 이동 정책을 추가하고, `Shift` 입력 시 anchor 기반 range 확장을 적용했다.
+- active cell 이동 시 row/column 가시영역 보장을 위해 y/x 스크롤 소스를 함께 조정한다.
+- `selectionChange.source = "keyboard"`를 도입해 입력 출처를 구분한다.
+- 검증: `example18` + e2e keyboard 시나리오 + unit/integration 테스트 추가.
 
 ## 4.4 예제
-- [ ] `example{N}.html`: range selection + keyboard demo
+- [x] `example{N}.html`: range selection + keyboard demo
 
 ---
 
@@ -650,7 +664,7 @@
 - [ ] sort 1M (worker): UI freeze 없는지
 - [ ] filter 1M (worker): UI freeze 없는지
 - [ ] create/destroy 200회: 메모리 누수/이벤트 누수 없음
-- [ ] AG-like 스크롤 회귀:
+- [ ] 스크롤 회귀:
   - [ ] 고속 가로 왕복 스크롤 10초 동안 header/body transform mismatch 0
   - [ ] pinned 상태에서 휠 스크롤 5천회 입력 후 scroll source 불일치 0
   - [ ] macOS/Windows 각 1종에서 스크롤바 가시성/클릭 이동 동작 기록
@@ -681,14 +695,14 @@
 
 ---
 
-# AG-like 전환 작업 순서(실행용)
+# 분리 스크롤 셸 전환 작업 순서(실행용)
 - [ ] Step A: `2.0/2.1` scroll shell 분리 + sync lock + e2e 보강
 - [ ] Step B: `2.2` vertical virtualization 안정화(풀링/윈도우 고정)
 - [ ] Step C: `2.3` horizontal virtualization(binary search) + pinned 분리 고도화
 - [ ] Step D: `2.5` scheduler/dirty flags/scroll loop 방어
 - [ ] Step E: `3.1~3.2` 100M scroll scaling 결합
 - [x] Step F: `4.1` interaction/wheel 오케스트레이션 최종화
-- [ ] Step G: `14.2` AG-like 회귀 벤치/게이트 확정
+- [ ] Step G: `14.2` 스크롤 회귀 벤치/게이트 확정
 - [ ] Step H: `3.5` variable row height 확장(prefix-sum + anchor remeasure + e2e)
 
 ---

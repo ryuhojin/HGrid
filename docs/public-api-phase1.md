@@ -17,6 +17,9 @@
 - `setTheme(themeTokens)`
 - `getState()`
 - `setState(state)`
+- `getSelection()`
+- `setSelection(selection)`
+- `clearSelection()`
 - `on(eventName, handler)`
 - `off(eventName, handler)`
 
@@ -43,6 +46,6 @@
 - `new ReactGridAdapter(container, config)` / `new VueGridAdapter(container, config)`
 - `setColumns`, `setOptions`, `setColumnOrder`, `setColumnVisibility`, `setColumnWidth`
 - `setRowOrder`, `setFilteredRowOrder`, `resetRowOrder`, `setRowModelOptions`, `getRowModelState`, `resetRowHeights`
-- `setTheme`, `getState`, `setState`, `on`, `off`, `destroy`
+- `setTheme`, `getState`, `setState`, `getSelection`, `setSelection`, `clearSelection`, `on`, `off`, `destroy`
 
 These wrappers only delegate to `@hgrid/grid-core` and do not access core private internals.

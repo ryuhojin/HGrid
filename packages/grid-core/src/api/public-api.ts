@@ -39,3 +39,13 @@ export type {
   SortModelItem
 } from '../data/remote-data-provider';
 export type { BaseMappingMode, RowModelOptions, RowModelState, SparseRowOverride, ViewToDataMapping } from '../data/row-model';
+export type {
+  GridSelection,
+  GridSelectionInput,
+  SelectionCellPosition,
+  SelectionCellRange,
+  SelectionChangeEvent,
+  SelectionChangeSource,
+  SelectionRowRange,
+  SelectionRowRangeInput
+} from '../interaction/selection-model';

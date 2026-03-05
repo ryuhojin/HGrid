@@ -1,4 +1,6 @@
-export type GridEventName = 'cellClick';
+import type { SelectionChangeEvent } from '../interaction/selection-model';
+
+export type GridEventName = 'cellClick' | 'selectionChange';
 
 export interface CellClickEvent {
   rowIndex: number;
@@ -9,25 +11,31 @@ export interface CellClickEvent {
 
 export interface GridEventMap {
   cellClick: CellClickEvent;
+  selectionChange: SelectionChangeEvent;
 }
 
 type EventHandler<T> = (payload: T) => void;
+type AnyEventHandler = (payload: unknown) => void;
 
 export class EventBus {
-  private handlers: { [K in GridEventName]?: Set<EventHandler<GridEventMap[K]>> } = {};
+  private handlers = new Map<GridEventName, Set<AnyEventHandler>>();
 
   public on<K extends GridEventName>(eventName: K, handler: EventHandler<GridEventMap[K]>): void {
-    if (!this.handlers[eventName]) {
-      this.handlers[eventName] = new Set();
+    let handlersForEvent = this.handlers.get(eventName);
+    if (!handlersForEvent) {
+      handlersForEvent = new Set<AnyEventHandler>();
+      this.handlers.set(eventName, handlersForEvent);
     }
-    this.handlers[eventName]?.add(handler as EventHandler<GridEventMap[K]>);
+    handlersForEvent.add(handler as AnyEventHandler);
   }
 
   public off<K extends GridEventName>(eventName: K, handler: EventHandler<GridEventMap[K]>): void {
-    this.handlers[eventName]?.delete(handler as EventHandler<GridEventMap[K]>);
+    const handlersForEvent = this.handlers.get(eventName);
+    handlersForEvent?.delete(handler as AnyEventHandler);
   }
 
   public emit<K extends GridEventName>(eventName: K, payload: GridEventMap[K]): void {
-    this.handlers[eventName]?.forEach((handler) => handler(payload));
+    const handlersForEvent = this.handlers.get(eventName);
+    handlersForEvent?.forEach((handler) => handler(payload));
   }
 }

@@ -1,7 +1,14 @@
 import { EventBus } from '../core/event-bus';
 import type { ColumnDef, GridOptions, GridState, RowHeightMode, ScrollbarPolicy, ScrollbarVisibility } from '../core/grid-options';
 import { formatColumnValue, getColumnValue } from '../data/column-model';
-import type { GridRowData } from '../data/data-provider';
+import type { GridRowData, RowKey } from '../data/data-provider';
+import {
+  SelectionModel,
+  type GridSelection,
+  type GridSelectionInput,
+  type SelectionCellPosition,
+  type SelectionChangeSource
+} from '../interaction/selection-model';
 import {
   MAX_SCROLL_PX,
   createScrollScaleMetrics,
@@ -24,6 +31,8 @@ interface CellRenderState {
   textContent: string;
   left: number;
   width: number;
+  isSelected: boolean;
+  isActive: boolean;
 }
 
 interface ZoneRowRenderState {
@@ -32,6 +41,7 @@ interface ZoneRowRenderState {
   dataIndex: number;
   translateY: number;
   height: number;
+  isSelected: boolean;
 }
 
 interface ZoneRowItem {
@@ -64,6 +74,12 @@ interface CellHitTestResult {
   dataIndex: number;
   columnIndex: number;
   column: ColumnDef;
+}
+
+interface PointerSelectionSession {
+  pointerId: number;
+  anchorCell: SelectionCellPosition;
+  lastCell: SelectionCellPosition;
 }
 
 const DEFAULT_HEIGHT = 360;
@@ -158,6 +174,9 @@ export class DomRenderer {
   private centerHeaderCellPool: HTMLDivElement[] = [];
   private centerHeaderCellStates: CellRenderState[] = [];
   private readonly rowHeightMap: RowHeightMap;
+  private readonly selectionModel: SelectionModel;
+  private pointerSelectionSession: PointerSelectionSession | null = null;
+  private keyboardRangeAnchor: SelectionCellPosition | null = null;
   private measurementFrameId: number | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
@@ -202,6 +221,7 @@ export class DomRenderer {
     this.columnsByZone = this.splitColumns(this.options.columns);
     this.scrollbarSize = this.measureScrollbarSize();
     this.rowHeightMap = new RowHeightMap(this.options.rowModel.getViewRowCount(), this.getBaseRowHeight());
+    this.selectionModel = new SelectionModel();
 
     this.initializeDom();
     this.markLayoutDirty(true);
@@ -209,8 +229,10 @@ export class DomRenderer {
   }
 
   public setOptions(nextOptions: GridOptions): void {
+    this.teardownPointerSelectionSession();
     this.options = nextOptions;
     this.columnsByZone = this.splitColumns(this.options.columns);
+    this.reconcileSelection('reconcile');
     this.markLayoutDirty(true);
     this.flushRender();
   }
@@ -233,6 +255,31 @@ export class DomRenderer {
     return {
       scrollTop: this.pendingVirtualScrollTop
     };
+  }
+
+  public getSelection(): GridSelection {
+    return this.selectionModel.getSelection();
+  }
+
+  public setSelection(selection: GridSelectionInput): void {
+    const hasChanged = this.selectionModel.setSelection(selection, this.getSelectionBounds(), this.resolveRowKeyByRowIndex);
+    if (!hasChanged) {
+      return;
+    }
+
+    const nextSelection = this.selectionModel.getSelection();
+    this.keyboardRangeAnchor = nextSelection.activeCell ? { ...nextSelection.activeCell } : null;
+    this.commitSelectionChange('api');
+  }
+
+  public clearSelection(): void {
+    const hasChanged = this.selectionModel.clear();
+    if (!hasChanged) {
+      return;
+    }
+
+    this.keyboardRangeAnchor = null;
+    this.commitSelectionChange('clear');
   }
 
   public resetRowHeights(rowIndexes?: number[]): void {
@@ -261,6 +308,7 @@ export class DomRenderer {
   }
 
   public destroy(): void {
+    this.teardownPointerSelectionSession();
     this.viewportElement.removeEventListener('scroll', this.handleViewportScroll);
     this.verticalScrollElement.removeEventListener('scroll', this.handleVerticalScroll);
     this.horizontalScrollElement.removeEventListener('scroll', this.handleHorizontalScroll);
@@ -440,7 +488,9 @@ export class DomRenderer {
         columnId: '',
         textContent: '',
         left: 0,
-        width: 0
+        width: 0,
+        isSelected: false,
+        isActive: false
       });
     }
   }
@@ -512,7 +562,9 @@ export class DomRenderer {
         columnId: zoneName === 'center' ? '' : column.id,
         textContent: '',
         left: Number.NaN,
-        width: zoneName === 'center' ? Number.NaN : column.width
+        width: zoneName === 'center' ? Number.NaN : column.width,
+        isSelected: false,
+        isActive: false
       });
     }
 
@@ -525,7 +577,8 @@ export class DomRenderer {
         rowIndex: -1,
         dataIndex: -1,
         translateY: Number.NaN,
-        height: Number.NaN
+        height: Number.NaN,
+        isSelected: false
       },
       cellStates
     };
@@ -697,15 +750,16 @@ export class DomRenderer {
       const rowHeight = this.resolveRenderedRowHeight(rowIndex, dataIndex);
       const rowTranslateY = this.getRowTop(rowIndex) - viewportOffsetY;
 
-      this.renderZoneRow(poolItem.left, this.columnsByZone.left, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
+      this.renderZoneRow('left', poolItem.left, this.columnsByZone.left, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
       this.renderCenterZoneRow(poolItem.center, row, rowIndex, dataIndex, rowTranslateY, rowHeight, horizontalWindow);
-      this.renderZoneRow(poolItem.right, this.columnsByZone.right, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
+      this.renderZoneRow('right', poolItem.right, this.columnsByZone.right, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
     }
 
     this.scheduleMeasuredRowHeightPass();
   }
 
   private renderZoneRow(
+    zoneName: ColumnZoneName,
     zoneRow: ZoneRowItem,
     columns: ColumnDef[],
     row: GridRowData,
@@ -725,10 +779,13 @@ export class DomRenderer {
       const column = columns[colIndex];
       const cell = zoneRow.cells[colIndex];
       const cellState = zoneRow.cellStates[colIndex];
+      const globalColumnIndex = this.getGlobalColumnIndex(zoneName, colIndex);
       this.bindCell(cell, cellState, {
         isVisible: true,
         columnId: column.id,
-        textContent: formatColumnValue(column, row)
+        textContent: formatColumnValue(column, row),
+        isSelected: this.selectionModel.isCellSelected(rowIndex, globalColumnIndex),
+        isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex)
       });
     }
   }
@@ -756,6 +813,7 @@ export class DomRenderer {
       const column = centerColumns[colIndex];
       const cell = zoneRow.cells[slotIndex];
       const cellState = zoneRow.cellStates[slotIndex];
+      const globalColumnIndex = this.getGlobalColumnIndex('center', colIndex);
       if (!cell) {
         break;
       }
@@ -765,7 +823,9 @@ export class DomRenderer {
         columnId: column.id,
         textContent: formatColumnValue(column, row),
         left: this.centerColumnLeft[colIndex],
-        width: column.width
+        width: column.width,
+        isSelected: this.selectionModel.isCellSelected(rowIndex, globalColumnIndex),
+        isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex)
       });
       slotIndex += 1;
     }
@@ -776,7 +836,9 @@ export class DomRenderer {
       this.bindCell(hiddenCell, hiddenState, {
         isVisible: false,
         columnId: '',
-        textContent: ''
+        textContent: '',
+        isSelected: false,
+        isActive: false
       });
     }
   }
@@ -787,6 +849,10 @@ export class DomRenderer {
     }
 
     zoneRow.element.style.display = 'none';
+    if (zoneRow.rowState.isSelected) {
+      zoneRow.element.classList.remove('hgrid__row--selected');
+      zoneRow.rowState.isSelected = false;
+    }
     zoneRow.rowState.isVisible = false;
     zoneRow.rowState.rowIndex = -1;
     zoneRow.rowState.dataIndex = -1;
@@ -825,6 +891,12 @@ export class DomRenderer {
       zoneRow.element.dataset.dataIndex = String(dataIndex);
       rowState.dataIndex = dataIndex;
     }
+
+    const isSelected = this.selectionModel.isRowSelected(rowIndex);
+    if (rowState.isSelected !== isSelected) {
+      zoneRow.element.classList.toggle('hgrid__row--selected', isSelected);
+      rowState.isSelected = isSelected;
+    }
   }
 
   private bindCell(
@@ -836,8 +908,13 @@ export class DomRenderer {
       textContent: string;
       left?: number;
       width?: number;
+      isSelected?: boolean;
+      isActive?: boolean;
     }
   ): void {
+    const isSelected = nextState.isSelected ?? false;
+    const isActive = nextState.isActive ?? false;
+
     if (cellState.isVisible !== nextState.isVisible) {
       cell.style.display = nextState.isVisible ? '' : 'none';
       cellState.isVisible = nextState.isVisible;
@@ -861,6 +938,16 @@ export class DomRenderer {
     if (cellState.textContent !== nextState.textContent) {
       cell.textContent = nextState.textContent;
       cellState.textContent = nextState.textContent;
+    }
+
+    if (cellState.isSelected !== isSelected) {
+      cell.classList.toggle('hgrid__cell--selected', isSelected);
+      cellState.isSelected = isSelected;
+    }
+
+    if (cellState.isActive !== isActive) {
+      cell.classList.toggle('hgrid__cell--active', isActive);
+      cellState.isActive = isActive;
     }
   }
 
@@ -893,6 +980,63 @@ export class DomRenderer {
     }
 
     return byZone;
+  }
+
+  private getGlobalColumnCount(): number {
+    return this.columnsByZone.left.length + this.columnsByZone.center.length + this.columnsByZone.right.length;
+  }
+
+  private getGlobalColumnIndex(zone: ColumnZoneName, zoneColumnIndex: number): number {
+    if (zone === 'left') {
+      return zoneColumnIndex;
+    }
+
+    if (zone === 'center') {
+      return this.columnsByZone.left.length + zoneColumnIndex;
+    }
+
+    return this.columnsByZone.left.length + this.columnsByZone.center.length + zoneColumnIndex;
+  }
+
+  private getSelectionBounds(): { rowCount: number; columnCount: number } {
+    return {
+      rowCount: this.options.rowModel.getViewRowCount(),
+      columnCount: this.getGlobalColumnCount()
+    };
+  }
+
+  private resolveRowKeyByRowIndex = (rowIndex: number): RowKey | null => {
+    if (rowIndex < 0 || rowIndex >= this.options.rowModel.getViewRowCount()) {
+      return null;
+    }
+
+    const dataIndex = this.options.rowModel.getDataIndex(rowIndex);
+    if (dataIndex === -1) {
+      return null;
+    }
+
+    return this.options.dataProvider.getRowKey(dataIndex);
+  };
+
+  private reconcileSelection(source: SelectionChangeSource): void {
+    const hasChanged = this.selectionModel.reconcile(this.getSelectionBounds(), this.resolveRowKeyByRowIndex);
+    if (!hasChanged) {
+      return;
+    }
+
+    const nextSelection = this.selectionModel.getSelection();
+    this.keyboardRangeAnchor = nextSelection.activeCell ? { ...nextSelection.activeCell } : null;
+    this.commitSelectionChange(source);
+  }
+
+  private commitSelectionChange(source: SelectionChangeSource): void {
+    const selection = this.selectionModel.getSelection();
+    this.eventBus.emit('selectionChange', {
+      ...selection,
+      source
+    });
+    this.markSelectionDirty();
+    this.scheduleRender();
   }
 
   private buildCenterColumnMetrics(): void {
@@ -1497,6 +1641,21 @@ export class DomRenderer {
       return;
     }
 
+    const focusCell = this.toSelectionCellPosition(hit);
+    const currentSelection = this.selectionModel.getSelection();
+    const anchorCell = event.shiftKey && currentSelection.activeCell ? currentSelection.activeCell : focusCell;
+    const hasSelectionChanged = this.selectionModel.setPointerRange(
+      anchorCell,
+      focusCell,
+      this.getSelectionBounds(),
+      this.resolveRowKeyByRowIndex
+    );
+    if (hasSelectionChanged) {
+      this.commitSelectionChange('pointer');
+    }
+    this.keyboardRangeAnchor = { ...anchorCell };
+    this.startPointerSelectionSession(event.pointerId, anchorCell, focusCell);
+
     const row = this.resolveRow(hit.dataIndex);
     this.eventBus.emit('cellClick', {
       rowIndex: hit.rowIndex,
@@ -1504,6 +1663,95 @@ export class DomRenderer {
       columnId: hit.column.id,
       value: getColumnValue(hit.column, row)
     });
+  };
+
+  private toSelectionCellPosition(hit: CellHitTestResult): SelectionCellPosition {
+    return {
+      rowIndex: hit.rowIndex,
+      colIndex: this.getGlobalColumnIndex(hit.zone, hit.columnIndex)
+    };
+  }
+
+  private startPointerSelectionSession(
+    pointerId: number,
+    anchorCell: SelectionCellPosition,
+    focusCell: SelectionCellPosition
+  ): void {
+    this.teardownPointerSelectionSession();
+    this.pointerSelectionSession = {
+      pointerId,
+      anchorCell: { ...anchorCell },
+      lastCell: { ...focusCell }
+    };
+    this.keyboardRangeAnchor = { ...anchorCell };
+
+    window.addEventListener('pointermove', this.handleWindowPointerMove, { passive: true });
+    window.addEventListener('pointerup', this.handleWindowPointerUp, { passive: true });
+    window.addEventListener('pointercancel', this.handleWindowPointerUp, { passive: true });
+  }
+
+  private teardownPointerSelectionSession(): void {
+    if (!this.pointerSelectionSession) {
+      return;
+    }
+
+    this.pointerSelectionSession = null;
+    window.removeEventListener('pointermove', this.handleWindowPointerMove);
+    window.removeEventListener('pointerup', this.handleWindowPointerUp);
+    window.removeEventListener('pointercancel', this.handleWindowPointerUp);
+  }
+
+  private handleWindowPointerMove = (event: PointerEvent): void => {
+    const session = this.pointerSelectionSession;
+    if (!session) {
+      return;
+    }
+
+    const hit = this.hitTestCellAtPoint(event.clientX, event.clientY);
+    if (!hit) {
+      return;
+    }
+
+    const focusCell = this.toSelectionCellPosition(hit);
+    if (focusCell.rowIndex === session.lastCell.rowIndex && focusCell.colIndex === session.lastCell.colIndex) {
+      return;
+    }
+
+    session.lastCell = focusCell;
+    const hasSelectionChanged = this.selectionModel.setPointerRange(
+      session.anchorCell,
+      focusCell,
+      this.getSelectionBounds(),
+      this.resolveRowKeyByRowIndex
+    );
+    if (hasSelectionChanged) {
+      this.commitSelectionChange('pointer');
+    }
+  };
+
+  private handleWindowPointerUp = (event: PointerEvent): void => {
+    const session = this.pointerSelectionSession;
+    if (!session) {
+      return;
+    }
+
+    const hit = this.hitTestCellAtPoint(event.clientX, event.clientY);
+    if (hit) {
+      const focusCell = this.toSelectionCellPosition(hit);
+      if (focusCell.rowIndex !== session.lastCell.rowIndex || focusCell.colIndex !== session.lastCell.colIndex) {
+        const hasSelectionChanged = this.selectionModel.setPointerRange(
+          session.anchorCell,
+          focusCell,
+          this.getSelectionBounds(),
+          this.resolveRowKeyByRowIndex
+        );
+        if (hasSelectionChanged) {
+          this.commitSelectionChange('pointer');
+        }
+      }
+    }
+
+    this.teardownPointerSelectionSession();
   };
 
   private hitTestCellAtPoint(clientX: number, clientY: number): CellHitTestResult | null {
@@ -1623,20 +1871,212 @@ export class DomRenderer {
     return this.rowHeightMap.findRowIndexAtOffset(Math.max(0, virtualOffsetY));
   }
 
+  private getInitialActiveCell(): SelectionCellPosition | null {
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
+      return null;
+    }
+
+    return {
+      rowIndex: Math.max(0, Math.min(bounds.rowCount - 1, this.renderedStartRow)),
+      colIndex: 0
+    };
+  }
+
+  private getPageStepRows(): number {
+    return Math.max(1, Math.floor(this.getViewportHeight() / this.getBaseRowHeight()));
+  }
+
+  private clampSelectionCell(cell: SelectionCellPosition): SelectionCellPosition {
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
+      return {
+        rowIndex: 0,
+        colIndex: 0
+      };
+    }
+
+    return {
+      rowIndex: Math.max(0, Math.min(bounds.rowCount - 1, cell.rowIndex)),
+      colIndex: Math.max(0, Math.min(bounds.columnCount - 1, cell.colIndex))
+    };
+  }
+
+  private resolveNextCellByKeyboard(
+    key: string,
+    isCtrlOrMeta: boolean,
+    activeCell: SelectionCellPosition
+  ): SelectionCellPosition | null {
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
+      return null;
+    }
+
+    let nextRow = activeCell.rowIndex;
+    let nextCol = activeCell.colIndex;
+    const pageStepRows = this.getPageStepRows();
+
+    if (key === 'ArrowUp') {
+      nextRow = isCtrlOrMeta ? 0 : nextRow - 1;
+    } else if (key === 'ArrowDown') {
+      nextRow = isCtrlOrMeta ? bounds.rowCount - 1 : nextRow + 1;
+    } else if (key === 'ArrowLeft') {
+      nextCol = isCtrlOrMeta ? 0 : nextCol - 1;
+    } else if (key === 'ArrowRight') {
+      nextCol = isCtrlOrMeta ? bounds.columnCount - 1 : nextCol + 1;
+    } else if (key === 'PageUp') {
+      nextRow -= pageStepRows;
+    } else if (key === 'PageDown') {
+      nextRow += pageStepRows;
+    } else if (key === 'Home') {
+      if (isCtrlOrMeta) {
+        nextRow = 0;
+        nextCol = 0;
+      } else {
+        nextCol = 0;
+      }
+    } else if (key === 'End') {
+      if (isCtrlOrMeta) {
+        nextRow = bounds.rowCount - 1;
+        nextCol = bounds.columnCount - 1;
+      } else {
+        nextCol = bounds.columnCount - 1;
+      }
+    } else {
+      return null;
+    }
+
+    return this.clampSelectionCell({
+      rowIndex: nextRow,
+      colIndex: nextCol
+    });
+  }
+
+  private applyKeyboardSelection(nextCell: SelectionCellPosition, shouldExtendRange: boolean): boolean {
+    const bounds = this.getSelectionBounds();
+
+    if (shouldExtendRange) {
+      const currentSelection = this.selectionModel.getSelection();
+      const anchorCell = this.keyboardRangeAnchor ?? currentSelection.activeCell ?? nextCell;
+      this.keyboardRangeAnchor = { ...anchorCell };
+      return this.selectionModel.setSelection(
+        {
+          activeCell: nextCell,
+          cellRanges: [
+            {
+              r1: anchorCell.rowIndex,
+              c1: anchorCell.colIndex,
+              r2: nextCell.rowIndex,
+              c2: nextCell.colIndex
+            }
+          ],
+          rowRanges: []
+        },
+        bounds,
+        this.resolveRowKeyByRowIndex
+      );
+    }
+
+    this.keyboardRangeAnchor = { ...nextCell };
+    return this.selectionModel.setSelection(
+      {
+        activeCell: nextCell,
+        cellRanges: [
+          {
+            r1: nextCell.rowIndex,
+            c1: nextCell.colIndex,
+            r2: nextCell.rowIndex,
+            c2: nextCell.colIndex
+          }
+        ],
+        rowRanges: []
+      },
+      bounds,
+      this.resolveRowKeyByRowIndex
+    );
+  }
+
+  private getVirtualRowHeight(rowIndex: number): number {
+    if (!this.isVariableRowHeightMode()) {
+      return this.getFixedRowHeight();
+    }
+
+    return this.rowHeightMap.getRowHeight(rowIndex);
+  }
+
+  private ensureSelectionCellVisible(cell: SelectionCellPosition): boolean {
+    let hasScrolled = false;
+
+    const rowTop = this.getRowTop(cell.rowIndex);
+    const rowBottom = rowTop + this.getVirtualRowHeight(cell.rowIndex);
+    const viewportTop = this.pendingVirtualScrollTop;
+    const viewportBottom = viewportTop + this.getViewportHeight();
+
+    if (rowTop < viewportTop) {
+      this.setVirtualScrollTop(rowTop);
+      hasScrolled = true;
+    } else if (rowBottom > viewportBottom) {
+      this.setVirtualScrollTop(rowBottom - this.getViewportHeight());
+      hasScrolled = true;
+    }
+
+    const leftCount = this.columnsByZone.left.length;
+    const centerCount = this.columnsByZone.center.length;
+    if (cell.colIndex >= leftCount && cell.colIndex < leftCount + centerCount) {
+      const centerColIndex = cell.colIndex - leftCount;
+      const columnLeft = this.centerColumnLeft[centerColIndex] ?? 0;
+      const columnRight = columnLeft + (this.centerColumnWidth[centerColIndex] ?? 0);
+      const viewportLeft = this.pendingScrollLeft;
+      const viewportRight = viewportLeft + Math.max(1, this.centerVisibleWidth);
+
+      if (columnLeft < viewportLeft) {
+        this.setHorizontalScrollLeft(columnLeft);
+        hasScrolled = true;
+      } else if (columnRight > viewportRight) {
+        this.setHorizontalScrollLeft(columnRight - Math.max(1, this.centerVisibleWidth));
+        hasScrolled = true;
+      }
+    }
+
+    return hasScrolled;
+  }
+
   private handleRootKeyDown = (event: KeyboardEvent): void => {
     if (event.defaultPrevented) {
       return;
     }
 
-    if (event.key !== 'PageDown' && event.key !== 'PageUp') {
+    const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+    const currentSelection = this.selectionModel.getSelection();
+    const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
+    if (!activeCell) {
       return;
     }
 
-    const direction = event.key === 'PageDown' ? 1 : -1;
-    const viewportDelta = this.getViewportHeight() * direction;
-    this.addVerticalScrollDelta(viewportDelta);
-    this.markScrollDirty();
-    this.scheduleRender();
+    const nextCell = this.resolveNextCellByKeyboard(event.key, isCtrlOrMeta, activeCell);
+    if (!nextCell) {
+      return;
+    }
+
+    const hasSelectionChanged = this.applyKeyboardSelection(nextCell, event.shiftKey);
+    let hasScrolled = false;
+    if (event.key === 'PageDown' || event.key === 'PageUp') {
+      const direction = event.key === 'PageDown' ? 1 : -1;
+      this.addVerticalScrollDelta(this.getViewportHeight() * direction);
+      hasScrolled = true;
+    } else {
+      hasScrolled = this.ensureSelectionCellVisible(nextCell);
+    }
+
+    if (hasSelectionChanged) {
+      this.commitSelectionChange('keyboard');
+    }
+
+    if (hasScrolled) {
+      this.markScrollDirty();
+      this.scheduleRender();
+    }
+
     event.preventDefault();
   };
 

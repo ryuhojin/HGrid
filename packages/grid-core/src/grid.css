@@ -6,6 +6,9 @@
   --hgrid-pinned-separator-color: rgba(148, 163, 184, 0.8);
   --hgrid-pinned-shadow-color: rgba(15, 23, 42, 0.08);
   --hgrid-pinned-shadow-size: 10px;
+  --hgrid-selection-bg: rgba(59, 130, 246, 0.14);
+  --hgrid-row-selection-bg: rgba(59, 130, 246, 0.08);
+  --hgrid-active-border: rgba(37, 99, 235, 0.9);
   --hgrid-header-height: 32px;
   --hgrid-v-scrollbar-width: 0px;
   --hgrid-h-scrollbar-height: 0px;
@@ -232,6 +235,10 @@
   background-color: #fcfdff;
 }
 
+.hgrid__row--selected {
+  background-color: var(--hgrid-row-selection-bg);
+}
+
 .hgrid__cell {
   box-sizing: border-box;
   padding: 4px 8px;
@@ -245,6 +252,15 @@
   position: absolute;
   top: 0;
   height: 100%;
+}
+
+.hgrid__cell--selected {
+  background-color: var(--hgrid-selection-bg);
+}
+
+.hgrid__cell--active {
+  outline: 1px solid var(--hgrid-active-border);
+  outline-offset: -1px;
 }
 
 .hgrid__overlay {

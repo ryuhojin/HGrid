@@ -175,6 +175,28 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 17,
+      "file": "example17.html",
+      "title": "Example 17 - Selection Model Ranges",
+      "tags": [
+        "phase4",
+        "selection-model",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 18,
+      "file": "example18.html",
+      "title": "Example 18 - Keyboard Navigation",
+      "tags": [
+        "phase4",
+        "keyboard-navigation",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

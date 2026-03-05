@@ -6,6 +6,7 @@ import { ColumnModel } from '../data/column-model';
 import { LocalDataProvider } from '../data/local-data-provider';
 import type { RowModelOptions, RowModelState, SparseRowOverride, ViewToDataMapping } from '../data/row-model';
 import { RowModel } from '../data/row-model';
+import type { GridSelection, GridSelectionInput } from '../interaction/selection-model';
 
 const DEFAULT_SCROLLBAR_POLICY = {
   vertical: 'auto',
@@ -162,6 +163,18 @@ export class Grid {
 
   public setState(state: GridState): void {
     this.renderer.setState(state);
+  }
+
+  public getSelection(): GridSelection {
+    return this.renderer.getSelection();
+  }
+
+  public setSelection(selection: GridSelectionInput): void {
+    this.renderer.setSelection(selection);
+  }
+
+  public clearSelection(): void {
+    this.renderer.clearSelection();
   }
 
   public resetRowHeights(rowIndexes?: number[]): void {

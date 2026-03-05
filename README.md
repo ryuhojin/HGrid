@@ -5,13 +5,13 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 ## 프로젝트 상태 (2026-03-05)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1`
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.3`
 - 진행 예정: `Phase 4.2+` (selection/keyboard/editing/worker data ops 등)
 - 상세 기준: `checklist.md`
 
 구현 완료된 핵심 항목:
 
-- AG-like scroll shell (x/y native scroll source 분리 + sync lock)
+- 분리 스크롤 셸 (x/y native scroll source 분리 + sync lock)
 - Vertical/Horizontal virtualization + binary search window
 - Row/Cell pooling (스크롤 중 DOM create/remove 0 유지)
 - rAF scheduler + dirty flags
@@ -19,6 +19,8 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - RowModel 100M 메모리 최적화(lazy identity/sparse/materialized)
 - Variable row height (`fixed | estimated | measured`) + row top map
 - Event delegation/hit-test/wheel orchestration (Phase 4.1)
+- Selection model ranges + `selectionChange` contract (Phase 4.2)
+- Keyboard navigation (`arrows/page/home/end` + shift range) (Phase 4.3)
 
 ## 핵심 원칙
 
@@ -125,15 +127,17 @@ const grid = new Grid(document.getElementById('grid') as HTMLElement, {
 - `pnpm bench`
 - `pnpm ci:phase0`
 
-## Examples (현재 1~16)
+## Examples (현재 1~18)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
-- `example6~12`: AG-like layout/scroll/orchestration/virtualization/pooling/scheduler
+- `example6~12`: 분리 스크롤 layout/scroll/orchestration/virtualization/pooling/scheduler
 - `example13`: 100M scroll scaling
 - `example14`: RowModel memory optimization (100M)
 - `example15`: variable row height
 - `example16`: event delegation + hit-test + wheel orchestration
+- `example17`: selection model ranges + 1M selection update smoke
+- `example18`: keyboard navigation + shift range + edge jump
 
 기능 추가 시 규칙:
 
@@ -158,6 +162,8 @@ const grid = new Grid(document.getElementById('grid') as HTMLElement, {
 - `docs/scroll-scaling-phase3.md`
 - `docs/row-model-memory-phase3.md`
 - `docs/variable-row-height-phase3.md`
+- `docs/selection-model-phase4.md`
+- `docs/keyboard-navigation-phase4.md`
 
 ## 라이선스
 

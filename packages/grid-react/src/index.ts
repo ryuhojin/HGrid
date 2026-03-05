@@ -2,6 +2,8 @@ import { Grid } from '@hgrid/grid-core';
 import type {
   ColumnDef,
   GridConfig,
+  GridSelection,
+  GridSelectionInput,
   GridEventMap,
   GridEventName,
   RowModelOptions,
@@ -16,6 +18,8 @@ export type {
   GridConfig,
   GridEventMap,
   GridEventName,
+  GridSelection,
+  GridSelectionInput,
   GridState,
   GridTheme,
   RowModelOptions,
@@ -80,6 +84,18 @@ export class ReactGridAdapter {
 
   public setState(state: GridState): void {
     this.grid.setState(state);
+  }
+
+  public getSelection(): GridSelection {
+    return this.grid.getSelection();
+  }
+
+  public setSelection(selection: GridSelectionInput): void {
+    this.grid.setSelection(selection);
+  }
+
+  public clearSelection(): void {
+    this.grid.clearSelection();
   }
 
   public on<K extends GridEventName>(eventName: K, handler: (payload: GridEventMap[K]) => void): void {

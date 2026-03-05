@@ -1,7 +1,7 @@
 # Phase 2.0 Scroll Orchestration
 
 ## Purpose
-- Keep one authoritative scroll state (`scrollTop`, `scrollLeft`) while preserving AG-like split scroll shell.
+- Keep one authoritative scroll state (`scrollTop`, `scrollLeft`) while preserving split scroll shell.
 - Prevent header/body desync during high-frequency wheel and trackpad input.
 - Keep pin/resize changes stable without scroll jump or invalid ranges.
 

@@ -1453,6 +1453,223 @@ async function runExample16Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample17Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example17.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 30_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+
+  const pointerDragPoints = await page.evaluate(() => {
+    const visibleRows = Array.from(document.querySelectorAll('.hgrid__row--center')).filter(
+      (row) => (row).style.display !== 'none'
+    );
+    if (visibleRows.length < 2) {
+      throw new Error('Missing visible rows for pointer drag in example17');
+    }
+
+    const startCell = visibleRows[0].querySelector('.hgrid__cell[data-column-id="c1"]');
+    const endRow = visibleRows[Math.min(3, visibleRows.length - 1)];
+    const endCell = endRow.querySelector('.hgrid__cell[data-column-id="c3"]');
+    if (!startCell || !endCell) {
+      throw new Error('Missing start/end cells for pointer drag in example17');
+    }
+
+    const startRect = startCell.getBoundingClientRect();
+    const endRect = endCell.getBoundingClientRect();
+
+    return {
+      startX: startRect.left + startRect.width * 0.5,
+      startY: startRect.top + startRect.height * 0.5,
+      endX: endRect.left + endRect.width * 0.5,
+      endY: endRect.top + endRect.height * 0.5
+    };
+  });
+
+  await page.mouse.move(pointerDragPoints.startX, pointerDragPoints.startY);
+  await page.mouse.down();
+  await page.mouse.move(pointerDragPoints.endX, pointerDragPoints.endY, { steps: 12 });
+  await page.mouse.up();
+  await waitAnimationFrame(page);
+  await waitAnimationFrame(page);
+  await page.click('#inspect');
+  await waitForLogLabel('inspect');
+  const pointerDragState = await readLogPayload('Missing example17 pointer-drag inspect payload');
+  assert.ok(
+    pointerDragState.snapshot.selection.cellRanges.length > 0,
+    'example17 pointer drag should create selection ranges'
+  );
+  assert.ok(pointerDragState.snapshot.selectedCellDom > 0, 'example17 pointer drag should paint selected cells');
+  assert.equal(pointerDragState.snapshot.lastSelectionSource, 'pointer', 'example17 pointer drag source should be pointer');
+
+  await page.click('#set-cell-range-api');
+  await waitForLogLabel('set-cell-range-api');
+  const cellRangeState = await readLogPayload('Missing example17 set-cell-range-api payload');
+  assert.equal(cellRangeState.snapshot.selection.cellRanges.length, 1, 'example17 should create one cell range from api');
+  assert.equal(cellRangeState.snapshot.selection.rowRanges.length, 1, 'example17 should derive one row range from api cell range');
+  assert.ok(cellRangeState.snapshot.selectedCellDom > 0, 'example17 selected cell DOM should be visible after api range');
+  assert.ok(cellRangeState.snapshot.selectedRowDom > 0, 'example17 selected row DOM should be visible after api range');
+  assert.equal(cellRangeState.snapshot.lastSelectionSource, 'api', 'example17 selection source should be api after setSelection');
+
+  await page.click('#set-row-range-api');
+  await waitForLogLabel('set-row-range-api');
+  const rowRangeState = await readLogPayload('Missing example17 set-row-range-api payload');
+  assert.ok(
+    rowRangeState.snapshot.selection.rowRanges.some((range) => range.r1 === 200_000 && range.r2 === 200_120),
+    'example17 should keep explicit row range'
+  );
+  assert.equal(rowRangeState.snapshot.lastSelectionSource, 'api', 'example17 row-range source should be api');
+
+  await page.click('#drag-1m');
+  await waitForLogLabel('drag-1m');
+  const dragState = await readLogPayload('Missing example17 drag-1m payload');
+  assert.ok(
+    dragState.snapshot.selection.cellRanges.length > 0,
+    'example17 drag-1m should keep at least one selected cell range'
+  );
+  const dragRange = dragState.snapshot.selection.cellRanges[0];
+  const dragBottom = Math.max(dragRange.r1, dragRange.r2);
+  assert.ok(dragBottom > 900_000, `example17 drag-1m should reach deep rows, got ${dragBottom}`);
+  assert.ok(dragState.snapshot.selectedCellDom > 0, 'example17 drag-1m should keep selected cell DOM');
+  assert.ok(
+    dragState.snapshot.selectedCellDom < 5_000,
+    `example17 selected cell DOM should remain bounded by viewport, got ${dragState.snapshot.selectedCellDom}`
+  );
+  assert.ok(
+    dragState.snapshot.selectionEventCount >= 50,
+    `example17 drag-1m should emit repeated range updates, got ${dragState.snapshot.selectionEventCount}`
+  );
+  assert.equal(dragState.snapshot.lastSelectionSource, 'api', 'example17 drag source should be api');
+
+  await page.click('#clear-selection');
+  await waitForLogLabel('clear-selection');
+  const clearState = await readLogPayload('Missing example17 clear-selection payload');
+  assert.equal(clearState.snapshot.selection.cellRanges.length, 0, 'example17 clear should reset cell ranges');
+  assert.equal(clearState.snapshot.selection.rowRanges.length, 0, 'example17 clear should reset row ranges');
+  assert.equal(clearState.snapshot.selectedCellDom, 0, 'example17 clear should remove selected cell class');
+  assert.equal(clearState.snapshot.selectedRowDom, 0, 'example17 clear should remove selected row class');
+  assert.equal(clearState.snapshot.lastSelectionSource, 'clear', 'example17 clear source should be clear');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample18Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example18.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+  const initialState = await readLogPayload('Missing example18 initial payload');
+  assert.equal(initialState.snapshot.focusedOnGrid, true, 'example18 grid should be focused for keyboard navigation');
+
+  await page.click('#run-arrows');
+  await waitForLogLabel('run-arrows');
+  const arrowsState = await readLogPayload('Missing example18 run-arrows payload');
+  assert.deepEqual(
+    arrowsState.snapshot.selection.activeCell,
+    { rowIndex: 1, colIndex: 2 },
+    `example18 arrows should move active cell to row 1 col 2`
+  );
+  assert.equal(arrowsState.snapshot.lastSource, 'keyboard', 'example18 arrows should emit keyboard source');
+
+  await page.click('#run-shift-range');
+  await waitForLogLabel('run-shift-range');
+  const shiftState = await readLogPayload('Missing example18 run-shift-range payload');
+  assert.equal(shiftState.snapshot.selection.cellRanges.length, 1, 'example18 shift should keep one range');
+  const range = shiftState.snapshot.selection.cellRanges[0];
+  assert.ok(range.r2 >= range.r1, `example18 shift range should grow rows, got ${JSON.stringify(range)}`);
+  assert.ok(range.c2 >= range.c1, `example18 shift range should grow cols, got ${JSON.stringify(range)}`);
+  assert.ok(shiftState.snapshot.selectedCellDom > 0, 'example18 shift should paint selected cells');
+
+  await page.click('#run-page');
+  await waitForLogLabel('run-page');
+  const pageState = await readLogPayload('Missing example18 run-page payload');
+  assert.ok(
+    pageState.afterDown.selection.activeCell.rowIndex > shiftState.snapshot.selection.activeCell.rowIndex,
+    'example18 PageDown should increase active row index'
+  );
+  assert.ok(
+    pageState.afterUp.selection.activeCell.rowIndex < pageState.afterDown.selection.activeCell.rowIndex,
+    'example18 PageUp should decrease active row index'
+  );
+
+  await page.click('#run-edge');
+  await waitForLogLabel('run-edge');
+  const edgeState = await readLogPayload('Missing example18 run-edge payload');
+  assert.ok(
+    edgeState.afterEnd.selection.activeCell.rowIndex >= 4_990,
+    `example18 ctrl+End should jump near bottom, got ${edgeState.afterEnd.selection.activeCell.rowIndex}`
+  );
+  assert.equal(
+    edgeState.afterHome.selection.activeCell.rowIndex,
+    0,
+    `example18 ctrl+Home should jump top row, got ${edgeState.afterHome.selection.activeCell.rowIndex}`
+  );
+  assert.equal(
+    edgeState.afterHome.selection.activeCell.colIndex,
+    0,
+    `example18 ctrl+Home should jump first column, got ${edgeState.afterHome.selection.activeCell.colIndex}`
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -1517,6 +1734,10 @@ async function main() {
     await runExample15Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample16Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample17Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample18Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

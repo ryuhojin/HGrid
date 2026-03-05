@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 17 - Selection Model Ranges</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+
+      #grid {
+        width: 1020px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 17 - Selection Model Ranges</h1>
+    <div class="controls">
+      <button id="set-cell-range-api" type="button">set cell range(api)</button>
+      <button id="set-row-range-api" type="button">set row range(api)</button>
+      <button id="clear-selection" type="button">clear</button>
+      <button id="drag-1m" type="button">drag 1M</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const ROW_HEIGHT = 28;
+      const ROW_COUNT = 1_000_000;
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'c1', header: 'C1', width: 120, type: 'text' },
+        { id: 'c2', header: 'C2', width: 120, type: 'text' },
+        { id: 'c3', header: 'C3', width: 120, type: 'text' },
+        { id: 'c4', header: 'C4', width: 120, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' },
+        { id: 'region', header: 'Region', width: 120, type: 'text', pinned: 'right' }
+      ];
+
+      function createLargeProvider(rowCount) {
+        return {
+          getRowCount() {
+            return rowCount;
+          },
+          getRowKey(dataIndex) {
+            return dataIndex + 1;
+          },
+          getValue(dataIndex, columnId) {
+            if (columnId === 'id') {
+              return dataIndex + 1;
+            }
+
+            if (columnId === 'name') {
+              return 'Customer-' + (dataIndex + 1);
+            }
+
+            if (columnId === 'status') {
+              return dataIndex % 2 === 0 ? 'active' : 'idle';
+            }
+
+            if (columnId === 'region') {
+              return ['KR', 'US', 'JP', 'DE'][dataIndex % 4];
+            }
+
+            if (columnId === 'c1' || columnId === 'c2' || columnId === 'c3' || columnId === 'c4') {
+              return columnId + '-' + (dataIndex + 1);
+            }
+
+            return '';
+          },
+          setValue() {},
+          applyTransactions() {},
+          getRow(dataIndex) {
+            return {
+              id: dataIndex + 1,
+              name: 'Customer-' + (dataIndex + 1),
+              c1: 'c1-' + (dataIndex + 1),
+              c2: 'c2-' + (dataIndex + 1),
+              c3: 'c3-' + (dataIndex + 1),
+              c4: 'c4-' + (dataIndex + 1),
+              status: dataIndex % 2 === 0 ? 'active' : 'idle',
+              region: ['KR', 'US', 'JP', 'DE'][dataIndex % 4]
+            };
+          }
+        };
+      }
+
+      const logElement = document.getElementById('log');
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: createLargeProvider(ROW_COUNT),
+        height: 420,
+        rowHeight: 28,
+        overscan: 6
+      });
+
+      let selectionEventCount = 0;
+      let lastSelectionSource = 'none';
+
+      grid.on('selectionChange', (event) => {
+        selectionEventCount += 1;
+        lastSelectionSource = event.source;
+      });
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function getSnapshot() {
+        const selection = grid.getSelection();
+        const selectedCellDom = document.querySelectorAll('.hgrid__cell--selected').length;
+        const selectedRowDom = document.querySelectorAll('.hgrid__row--selected').length;
+        const activeCellDom = document.querySelectorAll('.hgrid__cell--active').length;
+        const firstRow = document.querySelector('.hgrid__row--left');
+        return {
+          rowCount: ROW_COUNT,
+          selection,
+          selectedCellDom,
+          selectedRowDom,
+          activeCellDom,
+          selectionEventCount,
+          lastSelectionSource,
+          firstVisibleRowIndex: firstRow ? Number(firstRow.dataset.rowIndex) : -1
+        };
+      }
+
+      function writeLog(payload) {
+        logElement.textContent = JSON.stringify(payload);
+      }
+
+      async function runDragOneMillion() {
+        const start = performance.now();
+        const steps = 90;
+        for (let index = 1; index <= steps; index += 1) {
+          const targetRowIndex = Math.floor(((ROW_COUNT - 1) * index) / steps);
+          grid.setState({
+            scrollTop: targetRowIndex * ROW_HEIGHT
+          });
+          grid.setSelection({
+            activeCell: { rowIndex: targetRowIndex, colIndex: 5 },
+            cellRanges: [{ r1: 0, c1: 2, r2: targetRowIndex, c2: 5 }]
+          });
+          await waitFrame();
+        }
+        await waitFrame();
+
+        writeLog({
+          label: 'drag-1m',
+          durationMs: Math.round(performance.now() - start),
+          snapshot: getSnapshot()
+        });
+      }
+
+      document.getElementById('set-cell-range-api').addEventListener('click', async () => {
+        grid.setSelection({
+          cellRanges: [{ r1: 2, c1: 1, r2: 12, c2: 4 }]
+        });
+        await waitFrame();
+        writeLog({
+          label: 'set-cell-range-api',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('set-row-range-api').addEventListener('click', async () => {
+        grid.setSelection({
+          rowRanges: [{ r1: 200_000, r2: 200_120 }]
+        });
+        await waitFrame();
+        writeLog({
+          label: 'set-row-range-api',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('clear-selection').addEventListener('click', async () => {
+        grid.clearSelection();
+        await waitFrame();
+        writeLog({
+          label: 'clear-selection',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('drag-1m').addEventListener('click', () => {
+        runDragOneMillion();
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog({
+          label: 'inspect',
+          snapshot: getSnapshot()
+        });
+      });
+
+      writeLog({
+        label: 'initial',
+        snapshot: getSnapshot()
+      });
+    </script>
+  </body>
+</html>

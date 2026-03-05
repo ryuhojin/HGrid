@@ -1179,4 +1179,174 @@ describe('Grid DOM pooling', () => {
     grid.destroy();
     container.remove();
   });
+
+  it('applies range-based selection and emits selectionChange payload', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 980, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 160, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text', pinned: 'right' }
+      ],
+      rowData: Array.from({ length: 200 }, (_value, index) => ({
+        id: index + 1,
+        name: `Customer-${index + 1}`,
+        status: index % 2 === 0 ? 'active' : 'idle',
+        region: ['KR', 'US', 'JP', 'DE'][index % 4]
+      })),
+      height: 260,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    const selectionEvents: Array<{
+      source: string;
+      cellRanges: Array<{ r1: number; c1: number; r2: number; c2: number }>;
+      rowRanges: Array<{ r1: number; r2: number; rowKeyStart: string | number; rowKeyEnd: string | number }>;
+    }> = [];
+    grid.on('selectionChange', (payload) => {
+      selectionEvents.push(payload);
+    });
+
+    grid.setSelection({
+      cellRanges: [{ r1: 2, c1: 0, r2: 6, c2: 2 }]
+    });
+    await waitForFrame();
+
+    const firstEvent = selectionEvents[0];
+    expect(firstEvent.source).toBe('api');
+    expect(firstEvent.cellRanges).toEqual([{ r1: 2, c1: 0, r2: 6, c2: 2 }]);
+    expect(firstEvent.rowRanges).toEqual([{ r1: 2, r2: 6, rowKeyStart: 3, rowKeyEnd: 7 }]);
+    expect(grid.getSelection()).toEqual({
+      activeCell: null,
+      cellRanges: [{ r1: 2, c1: 0, r2: 6, c2: 2 }],
+      rowRanges: [{ r1: 2, r2: 6, rowKeyStart: 3, rowKeyEnd: 7 }]
+    });
+
+    const selectedCells = container.querySelectorAll('.hgrid__cell--selected');
+    expect(selectedCells.length).toBeGreaterThan(0);
+    const selectedRows = container.querySelectorAll('.hgrid__row--selected');
+    expect(selectedRows.length).toBeGreaterThan(0);
+
+    grid.setSelection({
+      rowRanges: [{ r1: 20, r2: 24 }]
+    });
+    await waitForFrame();
+
+    const secondEvent = selectionEvents[1];
+    expect(secondEvent.source).toBe('api');
+    expect(secondEvent.cellRanges).toEqual([{ r1: 2, c1: 0, r2: 6, c2: 2 }]);
+    expect(secondEvent.rowRanges).toEqual([
+      { r1: 2, r2: 6, rowKeyStart: 3, rowKeyEnd: 7 },
+      { r1: 20, r2: 24, rowKeyStart: 21, rowKeyEnd: 25 }
+    ]);
+
+    grid.clearSelection();
+    await waitForFrame();
+
+    const thirdEvent = selectionEvents[2];
+    expect(thirdEvent.source).toBe('clear');
+    expect(thirdEvent.cellRanges).toEqual([]);
+    expect(thirdEvent.rowRanges).toEqual([]);
+    expect(grid.getSelection()).toEqual({
+      activeCell: null,
+      cellRanges: [],
+      rowRanges: []
+    });
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('supports keyboard navigation with shift range extension and ctrl/cmd edge movement', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 900, configurable: true });
+    document.body.append(container);
+
+    const columns = [
+      { id: 'id', header: 'ID', width: 110, type: 'number' as const, pinned: 'left' as const },
+      ...Array.from({ length: 12 }, (_value, index) => ({
+        id: `c${index}`,
+        header: `C${index}`,
+        width: 120,
+        type: 'text' as const
+      })),
+      { id: 'status', header: 'Status', width: 140, type: 'text' as const, pinned: 'right' as const }
+    ];
+
+    const rowData = Array.from({ length: 2_000 }, (_value, index) => {
+      const row: Record<string, unknown> = {
+        id: index + 1,
+        status: index % 2 === 0 ? 'active' : 'idle'
+      };
+      for (let colIndex = 0; colIndex < 12; colIndex += 1) {
+        row[`c${colIndex}`] = `r${index + 1}-c${colIndex}`;
+      }
+      return row;
+    });
+
+    const grid = new Grid(container, {
+      columns,
+      rowData,
+      height: 280,
+      rowHeight: 28,
+      overscan: 6,
+      overscanCols: 2
+    });
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(grid.getSelection().activeCell).toEqual({ rowIndex: 1, colIndex: 0 });
+
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(grid.getSelection().activeCell).toEqual({ rowIndex: 1, colIndex: 1 });
+
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(grid.getSelection().cellRanges).toEqual([{ r1: 1, c1: 1, r2: 2, c2: 1 }]);
+
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(grid.getSelection().cellRanges).toEqual([{ r1: 1, c1: 1, r2: 2, c2: 2 }]);
+
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(grid.getSelection().activeCell?.rowIndex).toBeGreaterThan(2);
+
+    root.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'End',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      })
+    );
+    await waitForFrame();
+    const edgeSelection = grid.getSelection();
+    expect(edgeSelection.activeCell?.rowIndex).toBe(1_999);
+    expect(edgeSelection.activeCell?.colIndex).toBe(columns.length - 1);
+    expect(grid.getState().scrollTop).toBeGreaterThan(0);
+
+    root.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Home',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      })
+    );
+    await waitForFrame();
+    const homeSelection = grid.getSelection();
+    expect(homeSelection.activeCell).toEqual({ rowIndex: 0, colIndex: 0 });
+
+    grid.destroy();
+    container.remove();
+  });
 });

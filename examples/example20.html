@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 20 - Worker Protocol</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 20 - Worker Protocol</h1>
+    <div class="controls">
+      <button id="make-request" type="button">make request</button>
+      <button id="make-cancel" type="button">make cancel</button>
+      <button id="make-response" type="button">make responses</button>
+      <button id="post-message" type="button">post message</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const logElement = document.getElementById('log');
+
+      const protocolState = {
+        request: null,
+        cancel: null,
+        ok: null,
+        canceled: null,
+        error: null,
+        transferablesFromRequest: 0,
+        transferablesFromResponse: 0,
+        postCallTransferables: 0,
+        guards: {
+          request: false,
+          cancel: false,
+          ok: false,
+          canceled: false,
+          error: false,
+        }
+      };
+
+      function writeLog(payload) {
+        logElement.textContent = JSON.stringify(payload);
+      }
+
+      function createPayload() {
+        const rowMapping = new Int32Array([3, 1, 2, 0]);
+        const filterMask = new Uint8Array([1, 0, 1, 1]);
+        return {
+          sortModel: [{ columnId: 'score', direction: 'asc' }],
+          mapping: rowMapping,
+          mask: filterMask,
+          nested: {
+            mappingBuffer: rowMapping.buffer,
+            maskBuffer: filterMask.buffer
+          }
+        };
+      }
+
+      function snapshot(label) {
+        writeLog({
+          label,
+          snapshot: {
+            requestType: protocolState.request ? protocolState.request.type : null,
+            cancelType: protocolState.cancel ? protocolState.cancel.type : null,
+            responseStatus: {
+              ok: protocolState.ok ? protocolState.ok.status : null,
+              canceled: protocolState.canceled ? protocolState.canceled.status : null,
+              error: protocolState.error ? protocolState.error.status : null
+            },
+            transferablesFromRequest: protocolState.transferablesFromRequest,
+            transferablesFromResponse: protocolState.transferablesFromResponse,
+            postCallTransferables: protocolState.postCallTransferables,
+            guards: protocolState.guards
+          }
+        });
+      }
+
+      document.getElementById('make-request').addEventListener('click', () => {
+        const payload = createPayload();
+        protocolState.request = HGrid.createWorkerRequest('sort-1', 'sort', payload);
+        protocolState.transferablesFromRequest = HGrid.resolveWorkerTransferables(protocolState.request).length;
+        protocolState.guards.request = HGrid.isWorkerRequestMessage(protocolState.request);
+        snapshot('make-request');
+      });
+
+      document.getElementById('make-cancel').addEventListener('click', () => {
+        protocolState.cancel = HGrid.createWorkerCancelRequest('sort-1');
+        protocolState.guards.cancel = HGrid.isWorkerRequestMessage(protocolState.cancel);
+        snapshot('make-cancel');
+      });
+
+      document.getElementById('make-response').addEventListener('click', () => {
+        protocolState.ok = HGrid.createWorkerOkResponse('sort-1', {
+          viewToData: new Int32Array([3, 1, 2, 0])
+        });
+        protocolState.canceled = HGrid.createWorkerCanceledResponse('sort-2');
+        protocolState.error = HGrid.createWorkerErrorResponse('sort-3', {
+          message: 'Comparator failed',
+          code: 'SORT_COMPARATOR_FAILURE'
+        });
+
+        protocolState.transferablesFromResponse = HGrid.resolveWorkerTransferables(protocolState.ok).length;
+        protocolState.guards.ok = HGrid.isWorkerResponseMessage(protocolState.ok);
+        protocolState.guards.canceled = HGrid.isWorkerResponseMessage(protocolState.canceled);
+        protocolState.guards.error = HGrid.isWorkerResponseMessage(protocolState.error);
+        snapshot('make-response');
+      });
+
+      document.getElementById('post-message').addEventListener('click', () => {
+        if (!protocolState.request) {
+          protocolState.request = HGrid.createWorkerRequest('sort-1', 'sort', createPayload());
+        }
+
+        const extraBuffer = new ArrayBuffer(8);
+        const calls = [];
+        const target = {
+          postMessage(message, transfer) {
+            calls.push({ message, transferCount: transfer ? transfer.length : 0 });
+          }
+        };
+
+        const transferables = HGrid.postWorkerMessage(target, protocolState.request, {
+          transferables: [extraBuffer]
+        });
+        protocolState.postCallTransferables = transferables.length;
+        snapshot('post-message');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        snapshot('inspect');
+      });
+
+      snapshot('initial');
+    </script>
+  </body>
+</html>

@@ -453,51 +453,83 @@
 
 # Phase 5 — Editing 1.0: Single Overlay Editor
 ## 5.1 편집기 정책
-- [ ] 셀마다 input 생성 금지
-- [ ] overlay에 editor 1개만 띄움
+- [x] 셀마다 input 생성 금지
+- [x] overlay에 editor 1개만 띄움
 - [ ] editor lifecycle:
-  - [ ] start: dblclick/enter
-  - [ ] commit: enter/blur
-  - [ ] cancel: esc
+  - [x] start: dblclick/enter
+  - [x] commit: enter/blur
+  - [x] cancel: esc
 - [ ] validation:
-  - [ ] sync validator
-  - [ ] async validator(promise) + pending UI
+  - [x] sync validator
+  - [x] async validator(promise) + pending UI
 
 ### 수용 기준
-- [ ] 편집 시작/종료가 스크롤/가상화와 충돌하지 않음
+- [x] 편집 시작/종료가 스크롤/가상화와 충돌하지 않음
+
+### 코어 변경 코멘트 (5.1 반영, 2026-03-05)
+- 단일 editor overlay(`.hgrid__editor-host/input/message`)를 초기화 시 1회 생성하고 재사용한다.
+- lifecycle은 `dblclick`/`Enter` 시작, `Enter`/`blur` 커밋, `Escape` 취소로 고정했다.
+- `validateEdit` 옵션을 추가해 sync/async 검증을 통합했고, async는 pending UI + stale-result ticket guard로 보호한다.
+- 이벤트 `editStart`/`editCommit`/`editCancel`를 공개하고 payload 스키마를 고정했다.
+- 검증: `packages/grid-core/test/grid.spec.ts` 편집 라이프사이클/검증 테스트 + `examples/example19.html` + `scripts/run-e2e.mjs` 시나리오.
 
 ## 5.2 예제
-- [ ] `example{N}.html`: text/number/date editing + validation
+- [x] `example{N}.html`: text/number/date editing + validation
 
 ---
 
 # Phase 6 — Data Ops 1.0: Sort/Filter (Worker-first)
 ## 6.1 Worker 프로토콜 설계(문서 포함)
-- [ ] message:
-  - [ ] `{opId, type, payload}`
-  - [ ] cancel: `{opId, type:"cancel"}`
-- [ ] response:
-  - [ ] `{opId, status:"ok"|"canceled"|"error", result}`
-- [ ] large arrays는 transferable 고려
+- [x] message:
+  - [x] `{opId, type, payload}`
+  - [x] cancel: `{opId, type:"cancel"}`
+- [x] response:
+  - [x] `{opId, status:"ok"|"canceled"|"error", result}`
+- [x] large arrays는 transferable 고려
+
+### 코어 변경 코멘트 (6.1 반영, 2026-03-05)
+- `packages/grid-core/src/data/worker-protocol.ts`에 request/cancel/response 타입과 생성 헬퍼를 추가했다.
+- 런타임 타입가드(`isWorkerRequestMessage`, `isWorkerResponseMessage`)로 worker 메시지 경계 검증 규칙을 고정했다.
+- transferable 유틸(`collectTransferables`, `resolveWorkerTransferables`, `postWorkerMessage`)을 추가해 typed-array/ArrayBuffer 기반 대용량 결과 전달 시 복사 비용을 줄일 수 있게 했다.
+- 문서: `docs/worker-protocol-phase6.md`, 예제: `examples/example20.html`, 테스트: `packages/grid-core/test/worker-protocol.spec.ts`.
 
 ## 6.2 Sorting
-- [ ] sort model(단일/다중)
-- [ ] comparator 정책(기본 + column comparator)
-- [ ] 결과는 `viewToData` 인덱스 배열 교체
+- [x] sort model(단일/다중)
+- [x] comparator 정책(기본 + column comparator)
+- [x] 결과는 `viewToData` 인덱스 배열 교체
 
 ### 수용 기준
-- [ ] 1M sort 중에도 스크롤/입력 반응 유지(메인 thread 프리즈 금지)
+- [x] 1M sort 중에도 스크롤/입력 반응 유지(메인 thread 프리즈 금지)
+
+### 코어 변경 코멘트 (6.2 반영, 2026-03-05)
+- `Grid.setSortModel/getSortModel/clearSortModel` API를 추가하고 정렬 결과를 `RowModel.setBaseViewToData`로 반영한다.
+- `packages/grid-core/src/data/sort-executor.ts`에 `CooperativeSortExecutor`를 추가해 sort model 단일/다중 정렬을 안정 정렬(merge sort)로 처리한다.
+- comparator 정책은 `column.comparator` 우선, 미지정 시 column type 기반 기본 comparator로 처리한다.
+- 실행 경로는 yield 기반 협력 스케줄링 + operation token 취소로 구성해 긴 정렬에서도 입력 반응성을 유지한다.
+- 검증: `packages/grid-core/test/sort-executor.spec.ts`, `packages/grid-core/test/grid.spec.ts`, `examples/example21.html`, `scripts/run-e2e.mjs` Example21 시나리오.
 
 ## 6.3 Filtering
-- [ ] filter model(text/number/date/set)
-- [ ] filter UI는 plugin로 분리 가능(기본은 API만)
-- [ ] 결과는 mapping 교체
+- [x] filter model(text/number/date/set)
+- [x] filter UI는 plugin로 분리 가능(기본은 API만)
+- [x] 결과는 mapping 교체
 
 ### 수용 기준
-- [ ] 1M filter 적용/해제 시 UI 반응 유지
+- [x] 1M filter 적용/해제 시 UI 반응 유지
+
+### 코어 변경 코멘트 (6.3 반영, 2026-03-05)
+- `Grid.setFilterModel/getFilterModel/clearFilterModel` API를 추가하고 filter 결과를 `RowModel.setFilterViewToData`로 반영한다.
+- `packages/grid-core/src/data/filter-executor.ts`에 `CooperativeFilterExecutor`를 추가해 text/number/date/set 모델을 처리한다.
+- filter 실행은 source order를 지원해 sort 결과 위에서 필터를 적용할 수 있게 했고, clear filter 시 sort mapping은 유지한다.
+- 실행 경로는 yield 기반 협력 스케줄링 + operation token 취소로 구성해 1M에서도 메인 스레드 장시간 점유를 줄였다.
+- 검증: `packages/grid-core/test/filter-executor.spec.ts`, `packages/grid-core/test/grid.spec.ts`, `examples/example22.html`, `scripts/run-e2e.mjs` Example22 시나리오.
 
 ## 6.4 예제
-- [ ] `example{N}.html`: worker sort + worker filter 데모
+- [x] `example{N}.html`: worker sort + worker filter 데모
+
+### 코어 변경 코멘트 (6.4 반영, 2026-03-05)
+- `examples/example23.html`에 worker-first 정렬+필터 통합 데모를 추가했다.
+- 데모는 sort-only/filter-only/sort+filter/clear/synthetic 1M 시나리오를 포함한다.
+- `scripts/run-e2e.mjs` Example23 시나리오를 추가해 모델 적용/해제 및 1M 경로를 자동 검증한다.
 
 ---
 

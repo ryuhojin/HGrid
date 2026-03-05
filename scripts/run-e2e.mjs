@@ -1670,6 +1670,442 @@ async function runExample18Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample19Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example19.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+  const initialState = await readLogPayload('Missing example19 initial payload');
+  const initialRow1Score = initialState.snapshot.rendered.row1Score;
+  const initialRow0DueDate = initialState.snapshot.rendered.row0DueDate;
+  const initialRow1Name = initialState.snapshot.rendered.row1Name;
+
+  await page.click('#run-enter-commit');
+  await waitForLogLabel('run-enter-commit');
+  const enterCommitState = await readLogPayload('Missing example19 run-enter-commit payload');
+  assert.equal(enterCommitState.snapshot.rendered.row0Score, 321, 'example19 enter commit should update row0.score');
+  assert.equal(enterCommitState.snapshot.editorVisible, false, 'example19 editor should close after enter commit');
+  assert.ok(enterCommitState.snapshot.counters.start >= 1, 'example19 should emit editStart');
+  assert.ok(enterCommitState.snapshot.counters.commit >= 1, 'example19 should emit editCommit');
+
+  await page.click('#run-dblclick-cancel');
+  await waitForLogLabel('run-dblclick-cancel');
+  const dblclickCancelState = await readLogPayload('Missing example19 run-dblclick-cancel payload');
+  assert.equal(
+    dblclickCancelState.snapshot.rendered.row1Score,
+    initialRow1Score,
+    'example19 escape cancel should not mutate row1.score'
+  );
+  assert.equal(
+    dblclickCancelState.snapshot.counters.lastCancelReason,
+    'escape',
+    'example19 cancel reason should be escape'
+  );
+
+  await page.click('#run-sync-invalid');
+  await waitForLogLabel('run-sync-invalid');
+  const syncInvalidState = await readLogPayload('Missing example19 run-sync-invalid payload');
+  assert.equal(syncInvalidState.invalidSnapshot.editorInvalid, true, 'example19 sync validator should mark editor invalid');
+  assert.ok(
+    String(syncInvalidState.invalidSnapshot.editorMessage || '').includes('YYYY-MM-DD'),
+    'example19 sync validator message should mention date format'
+  );
+  assert.equal(
+    syncInvalidState.invalidSnapshot.rendered.row0DueDate,
+    initialRow0DueDate,
+    'example19 sync invalid should not mutate dueDate'
+  );
+  assert.equal(syncInvalidState.afterEscape.editorVisible, false, 'example19 editor should close after escape');
+
+  await page.click('#run-async-validation');
+  await waitForLogLabel('run-async-validation');
+  const asyncValidationState = await readLogPayload('Missing example19 run-async-validation payload');
+  assert.equal(asyncValidationState.pendingSeen, true, 'example19 async validation should show pending state');
+  assert.equal(asyncValidationState.afterReject.editorInvalid, true, 'example19 async reject should keep editor invalid');
+  assert.ok(
+    String(asyncValidationState.afterReject.editorMessage || '').includes('exists'),
+    'example19 async reject should expose duplicate message'
+  );
+  assert.equal(
+    asyncValidationState.afterReject.rendered.row1Name,
+    initialRow1Name,
+    'example19 async reject should not mutate row1.name'
+  );
+  assert.equal(
+    asyncValidationState.afterCommit.rendered.row1Name,
+    'approved-name',
+    'example19 async valid commit should update row1.name'
+  );
+  assert.equal(asyncValidationState.afterCommit.editorVisible, false, 'example19 editor should close after async commit');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample20Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example20.html`, { waitUntil: 'domcontentloaded' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+
+  await page.click('#make-request');
+  await waitForLogLabel('make-request');
+  const requestState = await readLogPayload('Missing example20 make-request payload');
+  assert.equal(requestState.snapshot.requestType, 'sort', 'example20 request envelope should use sort type');
+  assert.equal(requestState.snapshot.guards.request, true, 'example20 request guard should be true');
+  assert.ok(requestState.snapshot.transferablesFromRequest >= 1, 'example20 request should expose transferable buffers');
+
+  await page.click('#make-cancel');
+  await waitForLogLabel('make-cancel');
+  const cancelState = await readLogPayload('Missing example20 make-cancel payload');
+  assert.equal(cancelState.snapshot.cancelType, 'cancel', 'example20 cancel envelope should use cancel type');
+  assert.equal(cancelState.snapshot.guards.cancel, true, 'example20 cancel guard should be true');
+
+  await page.click('#make-response');
+  await waitForLogLabel('make-response');
+  const responseState = await readLogPayload('Missing example20 make-response payload');
+  assert.equal(responseState.snapshot.responseStatus.ok, 'ok', 'example20 ok response status mismatch');
+  assert.equal(responseState.snapshot.responseStatus.canceled, 'canceled', 'example20 canceled response status mismatch');
+  assert.equal(responseState.snapshot.responseStatus.error, 'error', 'example20 error response status mismatch');
+  assert.equal(responseState.snapshot.guards.ok, true, 'example20 ok response guard should be true');
+  assert.equal(responseState.snapshot.guards.canceled, true, 'example20 canceled response guard should be true');
+  assert.equal(responseState.snapshot.guards.error, true, 'example20 error response guard should be true');
+  assert.ok(responseState.snapshot.transferablesFromResponse >= 1, 'example20 response should expose transferable buffers');
+
+  await page.click('#post-message');
+  await waitForLogLabel('post-message');
+  const postState = await readLogPayload('Missing example20 post-message payload');
+  assert.ok(postState.snapshot.postCallTransferables >= 1, 'example20 postMessage should carry transferables');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample21Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example21.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 90_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+
+  await page.click('#sort-score-asc');
+  await waitForLogLabel('sort-score-asc');
+  const scoreAscState = await readLogPayload('Missing example21 score-asc payload');
+  assert.equal(scoreAscState.snapshot.sortModel.length, 1, 'example21 single sort model should have one item');
+  assert.equal(scoreAscState.snapshot.sortModel[0].columnId, 'score', 'example21 sort key should be score');
+  assert.equal(scoreAscState.snapshot.sortModel[0].direction, 'asc', 'example21 sort direction should be asc');
+  assert.ok(scoreAscState.snapshot.topRows.r0.score <= scoreAscState.snapshot.topRows.r1.score, 'example21 asc order mismatch');
+
+  await page.click('#sort-score-desc-name-asc');
+  await waitForLogLabel('sort-score-desc-name-asc');
+  const multiState = await readLogPayload('Missing example21 multi-sort payload');
+  assert.equal(multiState.snapshot.sortModel.length, 2, 'example21 multi-sort should keep two keys');
+  assert.equal(multiState.snapshot.sortModel[0].columnId, 'score', 'example21 first sort key should be score');
+  assert.equal(multiState.snapshot.sortModel[0].direction, 'desc', 'example21 first sort key direction should be desc');
+  assert.equal(multiState.snapshot.sortModel[1].columnId, 'name', 'example21 second sort key should be name');
+  assert.equal(multiState.snapshot.sortModel[1].direction, 'asc', 'example21 second sort key direction should be asc');
+
+  await page.click('#clear-sort');
+  await waitForLogLabel('clear-sort');
+  const clearState = await readLogPayload('Missing example21 clear-sort payload');
+  assert.equal(clearState.snapshot.sortModel.length, 0, 'example21 clear-sort should reset sort model');
+
+  await page.click('#swap-1m');
+  await waitForLogLabel('swap-1m');
+  const swapState = await readLogPayload('Missing example21 swap-1m payload');
+  assert.equal(swapState.snapshot.isSynthetic, true, 'example21 should switch to synthetic provider');
+
+  await page.click('#sort-1m');
+  await waitForLogLabel('sort-1m');
+  const syntheticSortState = await readLogPayload('Missing example21 sort-1m payload');
+  assert.equal(syntheticSortState.snapshot.sortModel.length, 2, 'example21 synthetic sort should keep two keys');
+  assert.equal(syntheticSortState.snapshot.sortModel[0].columnId, 'score', 'example21 synthetic first key should be score');
+  assert.equal(syntheticSortState.snapshot.sortModel[0].direction, 'desc', 'example21 synthetic first key direction should be desc');
+  assert.ok(
+    syntheticSortState.extra && syntheticSortState.extra.elapsedMs >= 0,
+    'example21 synthetic sort should expose elapsedMs'
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample22Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example22.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 90_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+
+  await page.click('#filter-text');
+  await waitForLogLabel('filter-text');
+  const textState = await readLogPayload('Missing example22 text filter payload');
+  assert.equal(textState.snapshot.filterModel.name.kind, 'text', 'example22 text filter kind should be text');
+  assert.ok(
+    String(textState.snapshot.topRows.r0.name || '').toLowerCase().includes('alpha'),
+    'example22 text filter should keep alpha rows on top'
+  );
+
+  await page.click('#filter-number');
+  await waitForLogLabel('filter-number');
+  const numberState = await readLogPayload('Missing example22 number filter payload');
+  assert.equal(numberState.snapshot.filterModel.score.kind, 'number', 'example22 number filter kind should be number');
+  assert.ok(numberState.snapshot.topRows.r0.score >= 200, 'example22 number filter lower bound mismatch');
+  assert.ok(numberState.snapshot.topRows.r0.score <= 400, 'example22 number filter upper bound mismatch');
+
+  await page.click('#filter-date');
+  await waitForLogLabel('filter-date');
+  const dateState = await readLogPayload('Missing example22 date filter payload');
+  assert.equal(dateState.snapshot.filterModel.dueDate.kind, 'date', 'example22 date filter kind should be date');
+
+  await page.click('#filter-set');
+  await waitForLogLabel('filter-set');
+  const setState = await readLogPayload('Missing example22 set filter payload');
+  assert.equal(setState.snapshot.filterModel.region.kind, 'set', 'example22 set filter kind should be set');
+  assert.ok(['KR', 'JP'].includes(setState.snapshot.topRows.r0.region), 'example22 set filter should keep KR/JP');
+
+  await page.click('#filter-combined');
+  await waitForLogLabel('filter-combined');
+  const combinedState = await readLogPayload('Missing example22 combined filter payload');
+  assert.ok(
+    combinedState.snapshot.filterModel.name && combinedState.snapshot.filterModel.score && combinedState.snapshot.filterModel.region,
+    'example22 combined filter should include multiple columns'
+  );
+
+  await page.click('#clear-filter');
+  await waitForLogLabel('clear-filter');
+  const clearState = await readLogPayload('Missing example22 clear filter payload');
+  assert.equal(Object.keys(clearState.snapshot.filterModel).length, 0, 'example22 clear should reset filter model');
+
+  await page.click('#swap-1m');
+  await waitForLogLabel('swap-1m');
+  const swapState = await readLogPayload('Missing example22 swap-1m payload');
+  assert.equal(swapState.snapshot.isSynthetic, true, 'example22 should switch to synthetic provider');
+
+  await page.click('#filter-1m');
+  await waitForLogLabel('filter-1m');
+  const syntheticState = await readLogPayload('Missing example22 filter-1m payload');
+  assert.ok(
+    syntheticState.snapshot.filterModel.score && syntheticState.snapshot.filterModel.region,
+    'example22 synthetic filter should keep score and region clauses'
+  );
+  assert.ok(syntheticState.extra && syntheticState.extra.elapsedMs >= 0, 'example22 synthetic filter should expose elapsedMs');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample23Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example23.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 90_000 }
+    );
+  }
+
+  async function readLogPayload(missingMessage) {
+    return page.evaluate((message) => {
+      const logElement = document.querySelector('#log');
+      if (!logElement || !logElement.textContent) {
+        throw new Error(message);
+      }
+      return JSON.parse(logElement.textContent);
+    }, missingMessage);
+  }
+
+  await waitForLogLabel('initial');
+
+  await page.click('#sort-only');
+  await waitForLogLabel('sort-only');
+  const sortOnlyState = await readLogPayload('Missing example23 sort-only payload');
+  assert.equal(sortOnlyState.snapshot.sortModel.length, 2, 'example23 sort-only should set two sort keys');
+  assert.equal(Object.keys(sortOnlyState.snapshot.filterModel).length, 0, 'example23 sort-only should clear filter model');
+  assert.ok(
+    sortOnlyState.snapshot.topRows.r0.score >= sortOnlyState.snapshot.topRows.r1.score,
+    'example23 sort-only should be descending by score'
+  );
+
+  await page.click('#filter-only');
+  await waitForLogLabel('filter-only');
+  const filterOnlyState = await readLogPayload('Missing example23 filter-only payload');
+  assert.equal(filterOnlyState.snapshot.sortModel.length, 0, 'example23 filter-only should clear sort model');
+  assert.ok(
+    filterOnlyState.snapshot.filterModel.name && filterOnlyState.snapshot.filterModel.score,
+    'example23 filter-only should include name+score clauses'
+  );
+  assert.ok(
+    String(filterOnlyState.snapshot.topRows.r0.name || '').toLowerCase().includes('target'),
+    'example23 filter-only should keep target rows'
+  );
+
+  await page.click('#sort-filter');
+  await waitForLogLabel('sort-filter');
+  const sortFilterState = await readLogPayload('Missing example23 sort-filter payload');
+  assert.equal(sortFilterState.snapshot.sortModel.length, 2, 'example23 sort-filter should keep sort model');
+  assert.ok(
+    sortFilterState.snapshot.filterModel.name && sortFilterState.snapshot.filterModel.region,
+    'example23 sort-filter should keep filter model'
+  );
+  assert.ok(
+    sortFilterState.snapshot.topRows.r0.score >= sortFilterState.snapshot.topRows.r1.score,
+    'example23 sort-filter should preserve score desc on filtered rows'
+  );
+
+  await page.click('#clear-filter');
+  await waitForLogLabel('clear-filter');
+  const clearFilterState = await readLogPayload('Missing example23 clear-filter payload');
+  assert.equal(Object.keys(clearFilterState.snapshot.filterModel).length, 0, 'example23 clear-filter should reset filter model');
+  assert.equal(clearFilterState.snapshot.sortModel.length, 2, 'example23 clear-filter should preserve sort model');
+
+  await page.click('#clear-all');
+  await waitForLogLabel('clear-all');
+  const clearAllState = await readLogPayload('Missing example23 clear-all payload');
+  assert.equal(clearAllState.snapshot.sortModel.length, 0, 'example23 clear-all should reset sort model');
+  assert.equal(Object.keys(clearAllState.snapshot.filterModel).length, 0, 'example23 clear-all should reset filter model');
+
+  await page.click('#swap-1m');
+  await waitForLogLabel('swap-1m');
+  const swapState = await readLogPayload('Missing example23 swap-1m payload');
+  assert.equal(swapState.snapshot.isSynthetic, true, 'example23 should switch to synthetic provider');
+
+  await page.click('#run-1m');
+  await waitForLogLabel('run-1m');
+  const run1mState = await readLogPayload('Missing example23 run-1m payload');
+  assert.equal(run1mState.snapshot.sortModel.length, 2, 'example23 run-1m should set sort model');
+  assert.ok(
+    run1mState.snapshot.filterModel.name && run1mState.snapshot.filterModel.score,
+    'example23 run-1m should set filter model'
+  );
+  assert.ok(run1mState.snapshot.viewRowCount < 1_000_000, 'example23 run-1m should reduce row count via filter');
+  assert.ok(run1mState.extra && run1mState.extra.elapsedMs >= 0, 'example23 run-1m should expose elapsedMs');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -1738,6 +2174,16 @@ async function main() {
     await runExample17Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample18Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample19Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample20Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample21Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample22Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample23Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

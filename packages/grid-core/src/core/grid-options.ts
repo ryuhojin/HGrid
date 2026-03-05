@@ -12,6 +12,16 @@ export type ColumnComparator = (a: unknown, b: unknown) => number;
 export type ColumnValueGetter = (row: GridRowData, column: ColumnDef) => unknown;
 export type ColumnValueSetter = (row: GridRowData, value: unknown, column: ColumnDef) => void;
 export type RowHeightGetter = (rowIndex: number, dataIndex: number) => number;
+export interface EditValidationContext {
+  rowIndex: number;
+  dataIndex: number;
+  column: ColumnDef;
+  value: unknown;
+  previousValue: unknown;
+  row: GridRowData;
+}
+export type EditValidationResult = string | null | undefined | Promise<string | null | undefined>;
+export type EditValidator = (context: EditValidationContext) => EditValidationResult;
 
 export interface ColumnDef {
   id: string;
@@ -43,6 +53,7 @@ export interface GridOptions {
   rowHeightMode?: RowHeightMode;
   estimatedRowHeight?: number;
   getRowHeight?: RowHeightGetter;
+  validateEdit?: EditValidator;
   overscan?: number;
   overscanCols?: number;
   scrollbarPolicy?: ScrollbarPolicy;

@@ -197,6 +197,65 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 19,
+      "file": "example19.html",
+      "title": "Example 19 - Editing Policy",
+      "tags": [
+        "phase5",
+        "editing-policy",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 20,
+      "file": "example20.html",
+      "title": "Example 20 - Worker Protocol",
+      "tags": [
+        "phase6",
+        "worker-protocol",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 21,
+      "file": "example21.html",
+      "title": "Example 21 - Worker Sorting",
+      "tags": [
+        "phase6",
+        "sorting",
+        "worker-first",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 22,
+      "file": "example22.html",
+      "title": "Example 22 - Worker Filtering",
+      "tags": [
+        "phase6",
+        "filtering",
+        "worker-first",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 23,
+      "file": "example23.html",
+      "title": "Example 23 - Worker Sort Filter",
+      "tags": [
+        "phase6",
+        "sorting",
+        "filtering",
+        "worker-first",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

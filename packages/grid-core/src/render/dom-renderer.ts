@@ -82,6 +82,14 @@ interface PointerSelectionSession {
   lastCell: SelectionCellPosition;
 }
 
+interface EditSession {
+  rowIndex: number;
+  dataIndex: number;
+  colIndex: number;
+  column: ColumnDef;
+  originalValue: unknown;
+}
+
 const DEFAULT_HEIGHT = 360;
 const DEFAULT_ROW_HEIGHT = 28;
 const DEFAULT_ESTIMATED_ROW_HEIGHT = 28;
@@ -131,6 +139,9 @@ export class DomRenderer {
   private rowsLayerRightElement: HTMLDivElement;
 
   private overlayElement: HTMLDivElement;
+  private editorHostElement: HTMLDivElement;
+  private editorInputElement: HTMLInputElement;
+  private editorMessageElement: HTMLDivElement;
 
   private options: GridOptions;
   private columnsByZone: ColumnsByZone;
@@ -177,6 +188,9 @@ export class DomRenderer {
   private readonly selectionModel: SelectionModel;
   private pointerSelectionSession: PointerSelectionSession | null = null;
   private keyboardRangeAnchor: SelectionCellPosition | null = null;
+  private editSession: EditSession | null = null;
+  private editValidationTicket = 0;
+  private isEditValidationPending = false;
   private measurementFrameId: number | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
@@ -217,6 +231,9 @@ export class DomRenderer {
     this.rowsLayerRightElement = document.createElement('div');
 
     this.overlayElement = document.createElement('div');
+    this.editorHostElement = document.createElement('div');
+    this.editorInputElement = document.createElement('input');
+    this.editorMessageElement = document.createElement('div');
 
     this.columnsByZone = this.splitColumns(this.options.columns);
     this.scrollbarSize = this.measureScrollbarSize();
@@ -230,6 +247,7 @@ export class DomRenderer {
 
   public setOptions(nextOptions: GridOptions): void {
     this.teardownPointerSelectionSession();
+    this.stopEditing('reconcile');
     this.options = nextOptions;
     this.columnsByZone = this.splitColumns(this.options.columns);
     this.reconcileSelection('reconcile');
@@ -309,6 +327,7 @@ export class DomRenderer {
 
   public destroy(): void {
     this.teardownPointerSelectionSession();
+    this.stopEditing('reconcile');
     this.viewportElement.removeEventListener('scroll', this.handleViewportScroll);
     this.verticalScrollElement.removeEventListener('scroll', this.handleVerticalScroll);
     this.horizontalScrollElement.removeEventListener('scroll', this.handleHorizontalScroll);
@@ -317,6 +336,10 @@ export class DomRenderer {
     this.bodyElement.removeEventListener('wheel', this.handleBodyWheel);
     this.rootElement.removeEventListener('keydown', this.handleRootKeyDown);
     this.rootElement.removeEventListener('pointerdown', this.handleRootPointerDown);
+    this.rootElement.removeEventListener('dblclick', this.handleRootDoubleClick);
+    this.editorInputElement.removeEventListener('keydown', this.handleEditorInputKeyDown);
+    this.editorInputElement.removeEventListener('blur', this.handleEditorInputBlur);
+    this.editorInputElement.removeEventListener('input', this.handleEditorInput);
     this.teardownResizeObserver();
 
     if (this.scheduledFrameId !== null) {
@@ -395,6 +418,13 @@ export class DomRenderer {
     );
 
     this.overlayElement.className = 'hgrid__overlay';
+    this.editorHostElement.className = 'hgrid__editor-host';
+    this.editorInputElement.className = 'hgrid__editor-input';
+    this.editorInputElement.type = 'text';
+    this.editorInputElement.spellcheck = false;
+    this.editorMessageElement.className = 'hgrid__editor-message';
+    this.editorHostElement.append(this.editorInputElement, this.editorMessageElement);
+    this.overlayElement.append(this.editorHostElement);
 
     this.rootElement.append(this.headerElement, this.bodyElement, this.overlayElement);
 
@@ -409,6 +439,10 @@ export class DomRenderer {
     this.bodyElement.addEventListener('wheel', this.handleBodyWheel, { passive: false });
     this.rootElement.addEventListener('keydown', this.handleRootKeyDown);
     this.rootElement.addEventListener('pointerdown', this.handleRootPointerDown);
+    this.rootElement.addEventListener('dblclick', this.handleRootDoubleClick);
+    this.editorInputElement.addEventListener('keydown', this.handleEditorInputKeyDown);
+    this.editorInputElement.addEventListener('blur', this.handleEditorInputBlur);
+    this.editorInputElement.addEventListener('input', this.handleEditorInput);
 
     this.container.replaceChildren(this.rootElement);
     this.setupResizeObserver();
@@ -756,6 +790,12 @@ export class DomRenderer {
     }
 
     this.scheduleMeasuredRowHeightPass();
+    if (this.editSession) {
+      const canKeepEditing = this.syncEditorOverlayPosition();
+      if (!canKeepEditing) {
+        this.stopEditing('detached');
+      }
+    }
   }
 
   private renderZoneRow(
@@ -1037,6 +1077,348 @@ export class DomRenderer {
     });
     this.markSelectionDirty();
     this.scheduleRender();
+  }
+
+  private resolveColumnByGlobalIndex(
+    globalColumnIndex: number
+  ): { zone: ColumnZoneName; zoneColumnIndex: number; column: ColumnDef } | null {
+    if (globalColumnIndex < 0) {
+      return null;
+    }
+
+    const leftCount = this.columnsByZone.left.length;
+    if (globalColumnIndex < leftCount) {
+      const column = this.columnsByZone.left[globalColumnIndex];
+      return column
+        ? {
+            zone: 'left',
+            zoneColumnIndex: globalColumnIndex,
+            column
+          }
+        : null;
+    }
+
+    const centerCount = this.columnsByZone.center.length;
+    if (globalColumnIndex < leftCount + centerCount) {
+      const zoneColumnIndex = globalColumnIndex - leftCount;
+      const column = this.columnsByZone.center[zoneColumnIndex];
+      return column
+        ? {
+            zone: 'center',
+            zoneColumnIndex,
+            column
+          }
+        : null;
+    }
+
+    const zoneColumnIndex = globalColumnIndex - leftCount - centerCount;
+    const column = this.columnsByZone.right[zoneColumnIndex];
+    return column
+      ? {
+          zone: 'right',
+          zoneColumnIndex,
+          column
+        }
+      : null;
+  }
+
+  private findPoolItemByRowIndex(rowIndex: number): RowPoolItem | null {
+    for (let poolIndex = 0; poolIndex < this.rowPool.length; poolIndex += 1) {
+      const poolItem = this.rowPool[poolIndex];
+      if (!poolItem.center.rowState.isVisible) {
+        continue;
+      }
+
+      if (poolItem.center.rowState.rowIndex === rowIndex) {
+        return poolItem;
+      }
+    }
+
+    return null;
+  }
+
+  private resolveCellElementBySelectionPosition(
+    rowIndex: number,
+    colIndex: number
+  ): { cell: HTMLDivElement; column: ColumnDef; zone: ColumnZoneName } | null {
+    const columnEntry = this.resolveColumnByGlobalIndex(colIndex);
+    if (!columnEntry) {
+      return null;
+    }
+
+    const poolItem = this.findPoolItemByRowIndex(rowIndex);
+    if (!poolItem) {
+      return null;
+    }
+
+    if (columnEntry.zone === 'left') {
+      const cell = poolItem.left.cells[columnEntry.zoneColumnIndex];
+      if (!cell) {
+        return null;
+      }
+
+      return {
+        cell,
+        column: columnEntry.column,
+        zone: 'left'
+      };
+    }
+
+    if (columnEntry.zone === 'right') {
+      const cell = poolItem.right.cells[columnEntry.zoneColumnIndex];
+      if (!cell) {
+        return null;
+      }
+
+      return {
+        cell,
+        column: columnEntry.column,
+        zone: 'right'
+      };
+    }
+
+    if (
+      columnEntry.zoneColumnIndex < this.renderedHorizontalWindow.start ||
+      columnEntry.zoneColumnIndex >= this.renderedHorizontalWindow.end
+    ) {
+      return null;
+    }
+
+    const slotIndex = columnEntry.zoneColumnIndex - this.renderedHorizontalWindow.start;
+    if (slotIndex < 0 || slotIndex >= poolItem.center.cells.length) {
+      return null;
+    }
+
+    const cell = poolItem.center.cells[slotIndex];
+    const cellState = poolItem.center.cellStates[slotIndex];
+    if (!cell || !cellState?.isVisible || cellState.columnId !== columnEntry.column.id) {
+      return null;
+    }
+
+    return {
+      cell,
+      column: columnEntry.column,
+      zone: 'center'
+    };
+  }
+
+  private normalizeEditorInputValue(column: ColumnDef, inputText: string): unknown {
+    const trimmedText = inputText.trim();
+    if (column.type === 'number') {
+      if (trimmedText.length === 0) {
+        return null;
+      }
+
+      const numericValue = Number(trimmedText);
+      return Number.isFinite(numericValue) ? numericValue : inputText;
+    }
+
+    if (column.type === 'boolean') {
+      const lowerCaseValue = trimmedText.toLowerCase();
+      if (lowerCaseValue === 'true' || lowerCaseValue === '1' || lowerCaseValue === 'yes' || lowerCaseValue === 'on') {
+        return true;
+      }
+
+      if (lowerCaseValue === 'false' || lowerCaseValue === '0' || lowerCaseValue === 'no' || lowerCaseValue === 'off') {
+        return false;
+      }
+    }
+
+    return inputText;
+  }
+
+  private startEditingAtCell(
+    rowIndex: number,
+    colIndex: number,
+    dataIndexOverride?: number
+  ): boolean {
+    if (this.isEditValidationPending) {
+      return false;
+    }
+
+    if (this.editSession) {
+      const isSameCell = this.editSession.rowIndex === rowIndex && this.editSession.colIndex === colIndex;
+      if (isSameCell) {
+        this.syncEditorOverlayPosition();
+        this.editorInputElement.focus();
+        this.editorInputElement.select();
+        return true;
+      }
+
+      this.stopEditing('reconcile');
+    }
+
+    const cellEntry = this.resolveCellElementBySelectionPosition(rowIndex, colIndex);
+    if (!cellEntry) {
+      return false;
+    }
+
+    const { column } = cellEntry;
+    if (!column.editable) {
+      return false;
+    }
+
+    const dataIndex = typeof dataIndexOverride === 'number' ? dataIndexOverride : this.options.rowModel.getDataIndex(rowIndex);
+    if (dataIndex < 0) {
+      return false;
+    }
+
+    const row = this.resolveRow(dataIndex);
+    const originalValue = getColumnValue(column, row);
+
+    this.editSession = {
+      rowIndex,
+      dataIndex,
+      colIndex,
+      column,
+      originalValue
+    };
+    this.editValidationTicket += 1;
+    this.isEditValidationPending = false;
+    this.editorInputElement.disabled = false;
+    this.editorHostElement.classList.remove('hgrid__editor-host--invalid', 'hgrid__editor-host--pending');
+    this.editorMessageElement.textContent = '';
+    this.editorInputElement.value = originalValue === undefined || originalValue === null ? '' : String(originalValue);
+    this.editorHostElement.classList.add('hgrid__editor-host--visible');
+    this.syncEditorOverlayPosition();
+    this.editorInputElement.focus();
+    this.editorInputElement.select();
+
+    this.eventBus.emit('editStart', {
+      rowIndex,
+      dataIndex,
+      columnId: column.id,
+      value: originalValue
+    });
+
+    return true;
+  }
+
+  private stopEditing(reason: 'escape' | 'reconcile' | 'detached', shouldEmitCancel = true): void {
+    if (!this.editSession) {
+      return;
+    }
+
+    const currentSession = this.editSession;
+    this.editValidationTicket += 1;
+    this.isEditValidationPending = false;
+    this.editSession = null;
+    this.editorInputElement.disabled = false;
+    this.editorHostElement.classList.remove('hgrid__editor-host--visible', 'hgrid__editor-host--invalid', 'hgrid__editor-host--pending');
+    this.editorMessageElement.textContent = '';
+
+    if (shouldEmitCancel) {
+      this.eventBus.emit('editCancel', {
+        rowIndex: currentSession.rowIndex,
+        dataIndex: currentSession.dataIndex,
+        columnId: currentSession.column.id,
+        value: this.editorInputElement.value,
+        reason
+      });
+    }
+  }
+
+  private async commitEditing(trigger: 'enter' | 'blur'): Promise<void> {
+    const currentSession = this.editSession;
+    if (!currentSession || this.isEditValidationPending) {
+      return;
+    }
+
+    const nextValue = this.normalizeEditorInputValue(currentSession.column, this.editorInputElement.value);
+    const row = this.resolveRow(currentSession.dataIndex);
+    const validateEdit = this.options.validateEdit;
+    const currentValidationTicket = ++this.editValidationTicket;
+
+    if (validateEdit) {
+      const validationResult = validateEdit({
+        rowIndex: currentSession.rowIndex,
+        dataIndex: currentSession.dataIndex,
+        column: currentSession.column,
+        value: nextValue,
+        previousValue: currentSession.originalValue,
+        row
+      });
+
+      if (validationResult && typeof (validationResult as Promise<unknown>).then === 'function') {
+        this.isEditValidationPending = true;
+        this.editorHostElement.classList.add('hgrid__editor-host--pending');
+        this.editorInputElement.disabled = true;
+        let resolvedMessage: string | null | undefined = null;
+        try {
+          resolvedMessage = await validationResult;
+        } catch (error) {
+          resolvedMessage = error instanceof Error && error.message ? error.message : 'Validation failed';
+        }
+        if (currentValidationTicket !== this.editValidationTicket || this.editSession !== currentSession) {
+          return;
+        }
+
+        this.isEditValidationPending = false;
+        this.editorHostElement.classList.remove('hgrid__editor-host--pending');
+        this.editorInputElement.disabled = false;
+
+        if (typeof resolvedMessage === 'string' && resolvedMessage.length > 0) {
+          this.editorHostElement.classList.add('hgrid__editor-host--invalid');
+          this.editorMessageElement.textContent = resolvedMessage;
+          if (trigger === 'blur') {
+            this.editorInputElement.focus();
+            this.editorInputElement.select();
+          }
+          return;
+        }
+      } else if (typeof validationResult === 'string' && validationResult.length > 0) {
+        this.editorHostElement.classList.add('hgrid__editor-host--invalid');
+        this.editorMessageElement.textContent = validationResult;
+        if (trigger === 'blur') {
+          this.editorInputElement.focus();
+          this.editorInputElement.select();
+        }
+        return;
+      }
+    }
+
+    this.editorHostElement.classList.remove('hgrid__editor-host--invalid');
+    this.editorMessageElement.textContent = '';
+    let committedValue = nextValue;
+    if (currentSession.column.valueSetter) {
+      const rowForSetter = this.options.dataProvider.getRow
+        ? this.options.dataProvider.getRow(currentSession.dataIndex) ?? row
+        : row;
+      currentSession.column.valueSetter(rowForSetter, nextValue, currentSession.column);
+      committedValue = getColumnValue(currentSession.column, rowForSetter);
+    }
+    this.options.dataProvider.setValue(currentSession.dataIndex, currentSession.column.id, committedValue);
+
+    this.eventBus.emit('editCommit', {
+      rowIndex: currentSession.rowIndex,
+      dataIndex: currentSession.dataIndex,
+      columnId: currentSession.column.id,
+      previousValue: currentSession.originalValue,
+      value: committedValue
+    });
+
+    this.stopEditing('reconcile', false);
+    this.markDataDirty();
+    this.scheduleRender();
+  }
+
+  private syncEditorOverlayPosition(): boolean {
+    if (!this.editSession) {
+      return true;
+    }
+
+    const cellEntry = this.resolveCellElementBySelectionPosition(this.editSession.rowIndex, this.editSession.colIndex);
+    if (!cellEntry) {
+      return false;
+    }
+
+    const cellRect = cellEntry.cell.getBoundingClientRect();
+    const rootRect = this.rootElement.getBoundingClientRect();
+    this.editorHostElement.style.left = `${Math.max(0, cellRect.left - rootRect.left)}px`;
+    this.editorHostElement.style.top = `${Math.max(0, cellRect.top - rootRect.top)}px`;
+    this.editorHostElement.style.width = `${Math.max(1, cellRect.width)}px`;
+    this.editorHostElement.style.height = `${Math.max(1, cellRect.height)}px`;
+    return true;
   }
 
   private buildCenterColumnMetrics(): void {
@@ -1628,6 +2010,10 @@ export class DomRenderer {
   };
 
   private handleRootPointerDown = (event: PointerEvent): void => {
+    if (this.editSession) {
+      return;
+    }
+
     if (event.defaultPrevented) {
       return;
     }
@@ -1663,6 +2049,47 @@ export class DomRenderer {
       columnId: hit.column.id,
       value: getColumnValue(hit.column, row)
     });
+  };
+
+  private handleRootDoubleClick = (event: MouseEvent): void => {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    if (event.button !== 0) {
+      return;
+    }
+
+    const hit = this.hitTestCellAtPoint(event.clientX, event.clientY);
+    if (!hit) {
+      return;
+    }
+
+    const cellPosition = this.toSelectionCellPosition(hit);
+    const hasSelectionChanged = this.selectionModel.setSelection(
+      {
+        activeCell: cellPosition,
+        cellRanges: [
+          {
+            r1: cellPosition.rowIndex,
+            c1: cellPosition.colIndex,
+            r2: cellPosition.rowIndex,
+            c2: cellPosition.colIndex
+          }
+        ],
+        rowRanges: []
+      },
+      this.getSelectionBounds(),
+      this.resolveRowKeyByRowIndex
+    );
+    if (hasSelectionChanged) {
+      this.commitSelectionChange('pointer');
+    }
+
+    this.keyboardRangeAnchor = { ...cellPosition };
+    if (this.startEditingAtCell(hit.rowIndex, cellPosition.colIndex, hit.dataIndex)) {
+      event.preventDefault();
+    }
   };
 
   private toSelectionCellPosition(hit: CellHitTestResult): SelectionCellPosition {
@@ -2046,6 +2473,24 @@ export class DomRenderer {
       return;
     }
 
+    if (this.editSession) {
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      const currentSelection = this.selectionModel.getSelection();
+      const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
+      if (!activeCell) {
+        return;
+      }
+
+      const didStartEditing = this.startEditingAtCell(activeCell.rowIndex, activeCell.colIndex);
+      if (didStartEditing) {
+        event.preventDefault();
+      }
+      return;
+    }
+
     const isCtrlOrMeta = event.ctrlKey || event.metaKey;
     const currentSelection = this.selectionModel.getSelection();
     const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
@@ -2078,6 +2523,44 @@ export class DomRenderer {
     }
 
     event.preventDefault();
+  };
+
+  private handleEditorInputKeyDown = (event: KeyboardEvent): void => {
+    if (!this.editSession) {
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void this.commitEditing('enter');
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.stopEditing('escape');
+    }
+  };
+
+  private handleEditorInputBlur = (): void => {
+    if (!this.editSession) {
+      return;
+    }
+
+    void this.commitEditing('blur');
+  };
+
+  private handleEditorInput = (): void => {
+    if (!this.editSession) {
+      return;
+    }
+
+    if (!this.editorHostElement.classList.contains('hgrid__editor-host--invalid')) {
+      return;
+    }
+
+    this.editorHostElement.classList.remove('hgrid__editor-host--invalid');
+    this.editorMessageElement.textContent = '';
   };
 
   private resolveRow(dataIndex: number): GridRowData {

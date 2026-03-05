@@ -273,6 +273,13 @@ export class RowModel {
     this.rebuildDataToViewIndex();
   }
 
+  public setBaseIdentityMapping(): void {
+    this.baseViewToData = null;
+    this.sparseOverrides = null;
+    this.baseMappingMode = 'identity';
+    this.rebuildDataToViewIndex();
+  }
+
   public setBaseSparseOverrides(overrides: SparseRowOverride[]): void {
     this.baseViewToData = null;
     this.sparseOverrides = buildSparseOverrides(overrides, this.rowCount);

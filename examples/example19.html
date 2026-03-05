@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 19 - Editing Policy</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      #log {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+      }
+
+      #grid {
+        width: 1040px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 19 - Editing Policy</h1>
+    <div class="controls">
+      <button id="focus-grid" type="button">focus grid</button>
+      <button id="run-enter-commit" type="button">run enter commit</button>
+      <button id="run-dblclick-cancel" type="button">run dblclick cancel</button>
+      <button id="run-sync-invalid" type="button">run sync invalid</button>
+      <button id="run-async-validation" type="button">run async validation</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 240, type: 'text', editable: true },
+        { id: 'score', header: 'Score', width: 160, type: 'number', editable: true },
+        { id: 'dueDate', header: 'Due Date', width: 200, type: 'date', editable: true },
+        { id: 'region', header: 'Region', width: 140, type: 'text', pinned: 'right' }
+      ];
+
+      const rowData = Array.from({ length: 3000 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        score: (index * 17) % 1000,
+        dueDate: '2026-03-' + String((index % 28) + 1).padStart(2, '0'),
+        region: ['KR', 'US', 'JP', 'DE'][index % 4]
+      }));
+
+      const logElement = document.getElementById('log');
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        overscanCols: 2,
+        validateEdit: (context) => {
+          if (context.column.id === 'score') {
+            if (typeof context.value !== 'number' || !Number.isFinite(context.value)) {
+              return 'Score must be a number';
+            }
+            if (context.value < 0 || context.value > 1000) {
+              return 'Score must be between 0 and 1000';
+            }
+            return null;
+          }
+
+          if (context.column.id === 'dueDate') {
+            const value = String(context.value ?? '');
+            return /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : 'Due Date must follow YYYY-MM-DD';
+          }
+
+          if (context.column.id === 'name') {
+            const value = String(context.value ?? '').trim();
+            if (value.length < 3) {
+              return 'Name must be at least 3 characters';
+            }
+            return new Promise((resolve) => {
+              setTimeout(() => {
+                const isDuplicate = value.toLowerCase().includes('dup');
+                resolve(isDuplicate ? 'Name already exists' : null);
+              }, 90);
+            });
+          }
+
+          return null;
+        }
+      });
+
+      const counters = {
+        start: 0,
+        commit: 0,
+        cancel: 0,
+        lastCancelReason: 'none',
+        lastCommitColumn: '',
+        lastCommitValue: null
+      };
+
+      grid.on('editStart', () => {
+        counters.start += 1;
+      });
+
+      grid.on('editCommit', (event) => {
+        counters.commit += 1;
+        counters.lastCommitColumn = event.columnId;
+        counters.lastCommitValue = event.value;
+      });
+
+      grid.on('editCancel', (event) => {
+        counters.cancel += 1;
+        counters.lastCancelReason = event.reason;
+      });
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      function getEditorHost() {
+        return document.querySelector('.hgrid__editor-host');
+      }
+
+      function getEditorInput() {
+        return document.querySelector('.hgrid__editor-input');
+      }
+
+      function writeLog(payload) {
+        logElement.textContent = JSON.stringify(payload);
+      }
+
+      function getRenderedCellText(rowIndex, columnId) {
+        const cell = document.querySelector(
+          '.hgrid__row[data-row-index="' + rowIndex + '"] .hgrid__cell[data-column-id="' + columnId + '"]'
+        );
+        return cell ? cell.textContent : null;
+      }
+
+      function getSnapshot() {
+        const root = document.querySelector('.hgrid');
+        const host = getEditorHost();
+        const messageElement = document.querySelector('.hgrid__editor-message');
+        return {
+          scrollTop: Math.round(grid.getState().scrollTop),
+          selection: grid.getSelection(),
+          rendered: {
+            row0Name: getRenderedCellText(0, 'name'),
+            row0Score: Number(getRenderedCellText(0, 'score')),
+            row0DueDate: getRenderedCellText(0, 'dueDate'),
+            row1Name: getRenderedCellText(1, 'name'),
+            row1Score: Number(getRenderedCellText(1, 'score'))
+          },
+          editorVisible: host.classList.contains('hgrid__editor-host--visible'),
+          editorPending: host.classList.contains('hgrid__editor-host--pending'),
+          editorInvalid: host.classList.contains('hgrid__editor-host--invalid'),
+          editorMessage: messageElement ? messageElement.textContent : '',
+          focusedOnEditor: document.activeElement === getEditorInput(),
+          focusedOnGrid: document.activeElement === root,
+          counters: {
+            start: counters.start,
+            commit: counters.commit,
+            cancel: counters.cancel,
+            lastCancelReason: counters.lastCancelReason,
+            lastCommitColumn: counters.lastCommitColumn,
+            lastCommitValue: counters.lastCommitValue
+          }
+        };
+      }
+
+      async function startEditByEnter(rowIndex, colIndex) {
+        grid.setSelection({
+          activeCell: { rowIndex, colIndex },
+          cellRanges: [{ r1: rowIndex, c1: colIndex, r2: rowIndex, c2: colIndex }],
+          rowRanges: []
+        });
+        await waitFrame();
+        const root = document.querySelector('.hgrid');
+        root.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true
+          })
+        );
+        await waitFrame();
+      }
+
+      async function startEditByDblClick(rowIndex, columnId) {
+        const cell = document.querySelector(
+          '.hgrid__row[data-row-index="' + rowIndex + '"] .hgrid__cell[data-column-id="' + columnId + '"]'
+        );
+        if (!cell) {
+          throw new Error('Unable to find cell for dblclick: row=' + rowIndex + ', column=' + columnId);
+        }
+
+        const rect = cell.getBoundingClientRect();
+        cell.dispatchEvent(
+          new MouseEvent('dblclick', {
+            button: 0,
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + Math.max(1, rect.width / 2),
+            clientY: rect.top + Math.max(1, rect.height / 2)
+          })
+        );
+        await waitFrame();
+      }
+
+      function setEditorValue(nextValue) {
+        const input = getEditorInput();
+        input.value = nextValue;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      function sendEditorKey(key) {
+        const input = getEditorInput();
+        input.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key,
+            bubbles: true,
+            cancelable: true
+          })
+        );
+      }
+
+      async function runEnterCommit() {
+        await startEditByEnter(0, 2);
+        setEditorValue('321');
+        sendEditorKey('Enter');
+        await waitFrame();
+        await waitFrame();
+        writeLog({
+          label: 'run-enter-commit',
+          snapshot: getSnapshot()
+        });
+      }
+
+      async function runDblclickCancel() {
+        await startEditByDblClick(1, 'score');
+        setEditorValue('777');
+        sendEditorKey('Escape');
+        await waitFrame();
+        writeLog({
+          label: 'run-dblclick-cancel',
+          snapshot: getSnapshot()
+        });
+      }
+
+      async function runSyncInvalid() {
+        await startEditByDblClick(0, 'dueDate');
+        setEditorValue('03/05/2026');
+        sendEditorKey('Enter');
+        await waitFrame();
+        const invalidSnapshot = getSnapshot();
+        sendEditorKey('Escape');
+        await waitFrame();
+        writeLog({
+          label: 'run-sync-invalid',
+          invalidSnapshot,
+          afterEscape: getSnapshot()
+        });
+      }
+
+      async function runAsyncValidation() {
+        await startEditByDblClick(1, 'name');
+        setEditorValue('dup-name');
+        sendEditorKey('Enter');
+        await waitFrame();
+        const pendingAfterRejectStart = getEditorHost().classList.contains('hgrid__editor-host--pending');
+        await sleep(140);
+        await waitFrame();
+        const afterReject = getSnapshot();
+
+        setEditorValue('approved-name');
+        sendEditorKey('Enter');
+        await waitFrame();
+        const pendingAfterCommitStart = getEditorHost().classList.contains('hgrid__editor-host--pending');
+        await sleep(140);
+        await waitFrame();
+        writeLog({
+          label: 'run-async-validation',
+          pendingSeen: pendingAfterRejectStart || pendingAfterCommitStart,
+          afterReject,
+          afterCommit: getSnapshot()
+        });
+      }
+
+      document.getElementById('focus-grid').addEventListener('click', () => {
+        document.querySelector('.hgrid').focus();
+        writeLog({
+          label: 'focus-grid',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.getElementById('run-enter-commit').addEventListener('click', () => {
+        runEnterCommit();
+      });
+
+      document.getElementById('run-dblclick-cancel').addEventListener('click', () => {
+        runDblclickCancel();
+      });
+
+      document.getElementById('run-sync-invalid').addEventListener('click', () => {
+        runSyncInvalid();
+      });
+
+      document.getElementById('run-async-validation').addEventListener('click', () => {
+        runAsyncValidation();
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog({
+          label: 'inspect',
+          snapshot: getSnapshot()
+        });
+      });
+
+      document.querySelector('.hgrid').focus();
+      writeLog({
+        label: 'initial',
+        snapshot: getSnapshot()
+      });
+    </script>
+  </body>
+</html>

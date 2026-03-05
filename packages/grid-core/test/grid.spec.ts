@@ -1349,4 +1349,368 @@ describe('Grid DOM pooling', () => {
     grid.destroy();
     container.remove();
   });
+
+  it('applies sort model and replaces view mapping order', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, name: 'A', score: 30 },
+        { id: 2, name: 'B', score: 10 },
+        { id: 3, name: 'C', score: 20 },
+        { id: 4, name: 'D', score: 10 }
+      ],
+      height: 180,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await grid.setSortModel([{ columnId: 'score', direction: 'asc' }]);
+    await waitForFrame();
+
+    const firstIdAfterAsc = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    const secondIdAfterAsc = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    expect(firstIdAfterAsc.textContent).toBe('2');
+    expect(secondIdAfterAsc.textContent).toBe('4');
+    expect(grid.getSortModel()).toEqual([{ columnId: 'score', direction: 'asc' }]);
+
+    await grid.setSortModel([
+      { columnId: 'score', direction: 'desc' },
+      { columnId: 'name', direction: 'asc' }
+    ]);
+    await waitForFrame();
+
+    const firstIdAfterMulti = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    const secondIdAfterMulti = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    expect(firstIdAfterMulti.textContent).toBe('1');
+    expect(secondIdAfterMulti.textContent).toBe('3');
+
+    await grid.clearSortModel();
+    await waitForFrame();
+    const firstIdAfterClear = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    expect(firstIdAfterClear.textContent).toBe('1');
+    expect(grid.getSortModel()).toEqual([]);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies filter model and composes with sorted source order', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'dueDate', header: 'Due Date', width: 160, type: 'date' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', score: 30, dueDate: '2026-03-03', region: 'KR' },
+        { id: 2, name: 'Beta', score: 10, dueDate: '2026-03-01', region: 'US' },
+        { id: 3, name: 'Alpha-X', score: 20, dueDate: '2026-03-02', region: 'JP' },
+        { id: 4, name: 'Delta', score: 10, dueDate: '2026-03-04', region: 'DE' }
+      ],
+      height: 180,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await grid.setSortModel([
+      { columnId: 'score', direction: 'asc' },
+      { columnId: 'name', direction: 'asc' }
+    ]);
+    await waitForFrame();
+
+    await grid.setFilterModel({
+      name: { kind: 'text', operator: 'contains', value: 'a' },
+      score: { kind: 'number', operator: 'lte', value: 20 },
+      dueDate: { kind: 'date', operator: 'between', min: '2026-03-01', max: '2026-03-03' },
+      region: { kind: 'set', values: ['US', 'JP'] }
+    });
+    await waitForFrame();
+
+    const firstFilteredId = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    const secondFilteredId = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    expect(firstFilteredId.textContent).toBe('2');
+    expect(secondFilteredId.textContent).toBe('3');
+    expect(grid.getFilterModel()).toMatchObject({
+      name: { kind: 'text', operator: 'contains', value: 'a' }
+    });
+
+    await grid.clearFilterModel();
+    await waitForFrame();
+    expect(grid.getFilterModel()).toEqual({});
+
+    const firstAfterClearFilter = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    expect(firstAfterClearFilter.textContent).toBe('2');
+
+    await grid.clearSortModel();
+    await waitForFrame();
+    const firstAfterClearSort = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    expect(firstAfterClearSort.textContent).toBe('1');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('supports single-overlay editor lifecycle with enter/dblclick start and escape cancel', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const columns = [
+      { id: 'id', header: 'ID', width: 100, type: 'number' as const },
+      { id: 'name', header: 'Name', width: 200, type: 'text' as const, editable: true },
+      { id: 'status', header: 'Status', width: 140, type: 'text' as const }
+    ];
+    const rowData = [
+      { id: 1, name: 'User-1', status: 'active' },
+      { id: 2, name: 'User-2', status: 'idle' }
+    ];
+
+    const grid = new Grid(container, {
+      columns,
+      rowData,
+      height: 160,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          startEditingAtCell: (rowIndex: number, colIndex: number) => boolean;
+          editorHostElement: HTMLDivElement;
+          editorInputElement: HTMLInputElement;
+          hitTestCellAtPoint: (x: number, y: number) => unknown;
+        };
+      }
+    ).renderer;
+
+    const editStartEvents: Array<{ rowIndex: number; columnId: string }> = [];
+    const editCommitEvents: Array<{ rowIndex: number; columnId: string; value: unknown }> = [];
+    const editCancelEvents: Array<{ rowIndex: number; columnId: string; reason: string }> = [];
+    grid.on('editStart', (event) => {
+      editStartEvents.push(event);
+    });
+    grid.on('editCommit', (event) => {
+      editCommitEvents.push(event);
+    });
+    grid.on('editCancel', (event) => {
+      editCancelEvents.push(event);
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }]
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+    expect(renderer.editorInputElement.value).toBe('User-1');
+
+    renderer.editorInputElement.value = 'User-1-Edited';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(editStartEvents.length).toBe(1);
+    expect(editCommitEvents.length).toBe(1);
+    expect(editCommitEvents[0]).toMatchObject({
+      rowIndex: 0,
+      columnId: 'name',
+      value: 'User-1-Edited'
+    });
+    const editedNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(editedNameCell.textContent).toBe('User-1-Edited');
+    expect(editCancelEvents.length).toBe(0);
+
+    const originalHitTest = renderer.hitTestCellAtPoint;
+    renderer.hitTestCellAtPoint = () => ({
+      zone: 'center',
+      rowIndex: 1,
+      dataIndex: 1,
+      columnIndex: 1,
+      column: columns[1]
+    });
+    root.dispatchEvent(new MouseEvent('dblclick', { button: 0, bubbles: true, cancelable: true, clientX: 8, clientY: 8 }));
+    renderer.hitTestCellAtPoint = originalHitTest;
+
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+    renderer.editorInputElement.value = 'User-2-Canceled';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const canceledNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(canceledNameCell.textContent).toBe('User-2');
+    expect(editStartEvents.length).toBe(2);
+    expect(editCancelEvents.length).toBe(1);
+    expect(editCancelEvents[0]).toMatchObject({
+      rowIndex: 1,
+      columnId: 'name',
+      reason: 'escape'
+    });
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('supports sync and async edit validation with pending UI and recovery', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const columns = [
+      { id: 'id', header: 'ID', width: 100, type: 'number' as const },
+      { id: 'name', header: 'Name', width: 220, type: 'text' as const, editable: true },
+      { id: 'score', header: 'Score', width: 120, type: 'number' as const, editable: true },
+      { id: 'dueDate', header: 'Due Date', width: 160, type: 'date' as const, editable: true }
+    ];
+    const rowData = [
+      { id: 1, name: 'Alpha', score: 10, dueDate: '2026-03-05' },
+      { id: 2, name: 'Beta', score: 20, dueDate: '2026-03-06' }
+    ];
+
+    const asyncResolvers: Array<(message: string | null) => void> = [];
+    const grid = new Grid(container, {
+      columns,
+      rowData,
+      height: 160,
+      rowHeight: 28,
+      overscan: 2,
+      validateEdit(context) {
+        if (context.column.id === 'score') {
+          return typeof context.value === 'number' && context.value >= 0 && context.value <= 1000
+            ? null
+            : 'Score must be between 0 and 1000';
+        }
+
+        if (context.column.id === 'name') {
+          return new Promise((resolve) => {
+            asyncResolvers.push(resolve);
+          });
+        }
+
+        if (context.column.id === 'dueDate') {
+          return Promise.reject(new Error('Validator unreachable'));
+        }
+
+        return null;
+      }
+    });
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          startEditingAtCell: (rowIndex: number, colIndex: number) => boolean;
+          editorHostElement: HTMLDivElement;
+          editorInputElement: HTMLInputElement;
+          editorMessageElement: HTMLDivElement;
+        };
+      }
+    ).renderer;
+
+    expect(renderer.startEditingAtCell(0, 2)).toBe(true);
+    renderer.editorInputElement.value = '-5';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const initialScoreCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="score"]'
+    ) as HTMLDivElement;
+    expect(initialScoreCell.textContent).toBe('10');
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--invalid')).toBe(true);
+    expect(renderer.editorMessageElement.textContent).toBe('Score must be between 0 and 1000');
+
+    renderer.editorInputElement.value = '99';
+    renderer.editorInputElement.dispatchEvent(new Event('input', { bubbles: true }));
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const committedScoreCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="score"]'
+    ) as HTMLDivElement;
+    expect(committedScoreCell.textContent).toBe('99');
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(false);
+
+    expect(renderer.startEditingAtCell(1, 1)).toBe(true);
+    renderer.editorInputElement.value = 'blocked-name';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--pending')).toBe(true);
+    expect(renderer.editorInputElement.disabled).toBe(true);
+    const firstAsyncResolve = asyncResolvers.shift();
+    expect(typeof firstAsyncResolve).toBe('function');
+    firstAsyncResolve?.('Name already exists');
+    await waitForFrame();
+    await waitForFrame();
+
+    const rejectedNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(rejectedNameCell.textContent).toBe('Beta');
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--invalid')).toBe(true);
+    expect(renderer.editorMessageElement.textContent).toBe('Name already exists');
+
+    renderer.editorInputElement.value = 'Approved-Name';
+    renderer.editorInputElement.dispatchEvent(new Event('input', { bubbles: true }));
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    const secondAsyncResolve = asyncResolvers.shift();
+    expect(typeof secondAsyncResolve).toBe('function');
+    secondAsyncResolve?.(null);
+    await waitForFrame();
+    await waitForFrame();
+    const committedNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(committedNameCell.textContent).toBe('Approved-Name');
+
+    expect(renderer.startEditingAtCell(0, 3)).toBe(true);
+    renderer.editorInputElement.value = '2026-04-01';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    const dueDateCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="dueDate"]'
+    ) as HTMLDivElement;
+    expect(dueDateCell.textContent).toBe('2026-03-05');
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--invalid')).toBe(true);
+    expect(renderer.editorMessageElement.textContent).toBe('Validator unreachable');
+
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    grid.destroy();
+    container.remove();
+  });
 });

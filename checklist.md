@@ -908,15 +908,30 @@
 ---
 
 # Phase 13 — Security/CSP Hardening
-- [ ] CSP strict 페이지에서 동작:
-  - [ ] no unsafe-eval
-  - [ ] no inline script required
-  - [ ] styleNonce 옵션(필요 시)
-- [ ] XSS 방어 기본값:
-  - [ ] textContent 기본
-  - [ ] unsafe HTML 렌더 opt-in + sanitize 훅
-- [ ] 감사 로그 훅(엔터프라이즈 옵션):
-  - [ ] edit commit 로그 payload 표준화
+- [x] CSP strict 페이지에서 동작:
+  - [x] no unsafe-eval
+  - [x] no inline script required
+  - [x] styleNonce 옵션(필요 시)
+- [x] XSS 방어 기본값:
+  - [x] textContent 기본
+  - [x] unsafe HTML 렌더 opt-in + sanitize 훅
+- [x] 감사 로그 훅(엔터프라이즈 옵션):
+  - [x] edit commit 로그 payload 표준화
+
+### 코어 변경 코멘트 (13.1~13.3 반영, 2026-03-06)
+- CSP hardening:
+  - `scripts/security-scan.mjs` 추가로 `eval/new Function/setTimeout(string)/setInterval(string)` 정적 검출
+  - `csp-smoke-test`에서 inline script 미사용(`script:not([src]) == 0`) 검증
+- XSS 기본값:
+  - 셀 기본 경로는 기존과 동일하게 `textContent`
+  - `ColumnDef.unsafeHtml` opt-in 컬럼에서만 HTML 렌더
+  - `sanitizeHtml` 훅: `column.sanitizeHtml` 우선, 없으면 `grid.options.sanitizeHtml`
+- 감사 로그:
+  - `editCommit` payload 표준화(`rowKey/source/commitId/timestamp*`)
+  - `GridOptions.onAuditLog` 훅으로 표준 audit payload 전달
+- 참고 문서/예제:
+  - `docs/security-csp-phase13.md`
+  - `examples/example41.html`
 
 ---
 

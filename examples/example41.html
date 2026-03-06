@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 41 - Security CSP Hardening</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 10px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #summary {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 980px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 41 - Security CSP Hardening</h1>
+    <p>기본 textContent/XSS 방어, unsafeHtml opt-in + sanitize 훅, editCommit audit payload 확인 예제.</p>
+
+    <div class="controls">
+      <button id="sanitize-on" type="button">sanitize on</button>
+      <button id="sanitize-off" type="button">sanitize off (unsafe)</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <pre id="summary">Ready</pre>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const summaryElement = document.getElementById('summary');
+      const auditLogs = [];
+      let sanitizeMode = 'on';
+
+      function strictSanitize(unsafeHtml) {
+        return unsafeHtml
+          .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+          .replace(/<img[\s\S]*?>/gi, '')
+          .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
+      }
+
+      function resolveSanitizeHook() {
+        if (sanitizeMode === 'off') {
+          return (unsafeHtml) => unsafeHtml;
+        }
+        return strictSanitize;
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'safeText', header: 'Safe Text (Default)', width: 250, type: 'text' },
+        { id: 'unsafeHtml', header: 'Unsafe Html (Opt-in)', width: 330, type: 'text', unsafeHtml: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text' }
+      ];
+
+      const rowData = Array.from({ length: 600 }, (_, index) => ({
+        id: index + 1,
+        safeText: index % 2 === 0 ? '<strong>Literal</strong>' : '<img src=x onerror=alert(1)>',
+        unsafeHtml:
+          index % 3 === 0
+            ? '<strong class="safe-mark">Trusted-' + (index + 1) + '</strong>'
+            : '<strong class="safe-mark">Trusted-' +
+              (index + 1) +
+              '</strong><img src=x onerror="window.__hgridXss=true" /><a href="javascript:alert(1)">link</a>',
+        status: index % 2 === 0 ? 'active' : 'idle'
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        sanitizeHtml: resolveSanitizeHook(),
+        onAuditLog(payload) {
+          auditLogs.push(payload);
+          if (auditLogs.length > 8) {
+            auditLogs.shift();
+          }
+        },
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      function getSnapshot() {
+        const unsafeCell = document.querySelector('.hgrid__row--center[data-row-index="1"] .hgrid__cell[data-column-id="unsafeHtml"]');
+        const safeCell = document.querySelector('.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="safeText"]');
+        const bold = unsafeCell ? unsafeCell.querySelector('strong.safe-mark') : null;
+        const img = unsafeCell ? unsafeCell.querySelector('img') : null;
+
+        return {
+          sanitizeMode,
+          safeTextCell: safeCell ? safeCell.textContent : null,
+          unsafeHtmlText: unsafeCell ? unsafeCell.textContent : null,
+          hasUnsafeBold: Boolean(bold),
+          hasUnsafeImage: Boolean(img),
+          auditLogCount: auditLogs.length,
+          lastAuditLog: auditLogs.length > 0 ? auditLogs[auditLogs.length - 1] : null
+        };
+      }
+
+      function renderSummary(label) {
+        summaryElement.textContent = JSON.stringify({ label, snapshot: getSnapshot() }, null, 2);
+      }
+
+      function applySanitizeMode(mode) {
+        sanitizeMode = mode;
+        grid.setOptions({
+          sanitizeHtml: resolveSanitizeHook()
+        });
+      }
+
+      document.getElementById('sanitize-on').addEventListener('click', () => {
+        applySanitizeMode('on');
+        renderSummary('sanitize-on');
+      });
+
+      document.getElementById('sanitize-off').addEventListener('click', () => {
+        applySanitizeMode('off');
+        renderSummary('sanitize-off');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderSummary('inspect');
+      });
+
+      renderSummary('init');
+
+      window.__example41 = {
+        getSnapshot,
+        setSanitizeMode(mode) {
+          applySanitizeMode(mode === 'off' ? 'off' : 'on');
+        }
+      };
+    </script>
+  </body>
+</html>

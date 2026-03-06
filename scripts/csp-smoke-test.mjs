@@ -33,7 +33,9 @@ async function main() {
     await page.goto(`${server.url}/tests/fixtures/csp-smoke.html`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#status[data-status="ok"]', { timeout: 10_000 });
 
+    const inlineScriptCount = await page.locator('script:not([src])').count();
     const renderedRows = await page.locator('.hgrid__row').count();
+    assert.equal(inlineScriptCount, 0, 'CSP smoke page should not require inline scripts');
     assert.ok(renderedRows > 0, 'CSP smoke page should render pooled rows');
     assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
     assert.equal(consoleErrors.length, 0, `Unexpected console errors: ${consoleErrors.join(' | ')}`);

@@ -1,6 +1,7 @@
 import type { DataProvider, GridRowData, RowKey } from '../data/data-provider';
 import type { RowModel } from '../data/row-model';
 import type { RowModelOptions } from '../data/row-model';
+import type { EditCommitAuditLogger } from './edit-events';
 
 export type CellValueType = 'text' | 'number' | 'date' | 'boolean';
 export type ColumnPinPosition = 'left' | 'right';
@@ -18,6 +19,7 @@ export type ColumnComparator = (a: unknown, b: unknown) => number;
 export type ColumnValueGetter = (row: GridRowData, column: ColumnDef) => unknown;
 export type ColumnValueSetter = (row: GridRowData, value: unknown, column: ColumnDef) => void;
 export type RowHeightGetter = (rowIndex: number, dataIndex: number) => number;
+export type UnsafeHtmlSanitizer = (unsafeHtml: string, context: UnsafeHtmlSanitizeContext) => string;
 
 export interface GridLocaleText {
   selectAllRows: string;
@@ -171,6 +173,17 @@ export interface ColumnDef {
   comparator?: ColumnComparator;
   valueGetter?: ColumnValueGetter;
   valueSetter?: ColumnValueSetter;
+  unsafeHtml?: boolean;
+  sanitizeHtml?: UnsafeHtmlSanitizer;
+}
+
+export interface UnsafeHtmlSanitizeContext {
+  rowIndex: number;
+  dataIndex: number;
+  rowKey: RowKey;
+  column: ColumnDef;
+  row: GridRowData;
+  value: unknown;
 }
 
 export interface ScrollbarPolicy {
@@ -188,6 +201,9 @@ export interface GridOptions {
   rowModel: RowModel;
   locale?: string;
   localeText?: Partial<GridLocaleText>;
+  styleNonce?: string;
+  sanitizeHtml?: UnsafeHtmlSanitizer;
+  onAuditLog?: EditCommitAuditLogger;
   rtl?: boolean;
   numberFormatOptions?: Intl.NumberFormatOptions;
   dateTimeFormatOptions?: Intl.DateTimeFormatOptions;

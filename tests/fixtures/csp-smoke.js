@@ -23,6 +23,7 @@
     window.__cspSmokeGrid = new window.HGrid.Grid(document.getElementById('grid'), {
       columns: columns,
       rowData: rowData,
+      styleNonce: 'csp-smoke-nonce',
       height: 320,
       rowHeight: 28,
       overscan: 8

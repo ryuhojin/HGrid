@@ -18,7 +18,8 @@ import type {
   GridOptions,
   GridState,
   GridTheme,
-  RowIndicatorOptions
+  RowIndicatorOptions,
+  UnsafeHtmlSanitizer
 } from './grid-options';
 import { normalizeGridLocale } from './grid-locale-text';
 import { DomRenderer } from '../render/dom-renderer';
@@ -38,6 +39,7 @@ import { CooperativePivotExecutor, type PivotExecutionResult, type PivotExecutor
 import { GroupedDataProvider } from '../data/grouped-data-provider';
 import { CooperativeTreeExecutor, toTreeNodeKeyToken, type TreeExecutionResult, type TreeExecutor } from '../data/tree-executor';
 import { TreeDataProvider } from '../data/tree-data-provider';
+import type { EditCommitAuditLogger } from './edit-events';
 
 const DEFAULT_SCROLLBAR_POLICY = {
   vertical: 'auto',
@@ -151,6 +153,23 @@ function normalizeOptionalLocale(locale: string | undefined): string | undefined
 
   const trimmed = locale.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeStyleNonce(styleNonce: string | undefined): string | undefined {
+  if (typeof styleNonce !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = styleNonce.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function cloneSanitizeHtmlHook(sanitizeHtml?: UnsafeHtmlSanitizer): UnsafeHtmlSanitizer | undefined {
+  return typeof sanitizeHtml === 'function' ? sanitizeHtml : undefined;
+}
+
+function cloneAuditLogHook(onAuditLog?: EditCommitAuditLogger): EditCommitAuditLogger | undefined {
+  return typeof onAuditLog === 'function' ? onAuditLog : undefined;
 }
 
 function cloneGroupModel(groupModel?: GroupModelItem[]): GroupModelItem[] {
@@ -577,6 +596,9 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     rowModel,
     locale: normalizeOptionalLocale(config?.locale),
     localeText: cloneLocaleText(config?.localeText),
+    styleNonce: normalizeStyleNonce(config?.styleNonce),
+    sanitizeHtml: cloneSanitizeHtmlHook(config?.sanitizeHtml),
+    onAuditLog: cloneAuditLogHook(config?.onAuditLog),
     rtl: config?.rtl === true,
     numberFormatOptions: cloneNumberFormatOptions(config?.numberFormatOptions),
     dateTimeFormatOptions: cloneDateTimeFormatOptions(config?.dateTimeFormatOptions),
@@ -713,6 +735,7 @@ export class Grid {
     this.eventBus.on('cellClick', this.handleCellClickForTree);
     this.eventBus.on('cellClick', this.handleCellClickForGrouping);
     this.eventBus.on('editCommit', this.handleEditCommitForGrouping);
+    this.eventBus.on('editCommit', this.handleEditCommitAuditLog);
     this.sortExecutor = new CooperativeSortExecutor();
     this.filterExecutor = new CooperativeFilterExecutor();
     this.groupExecutor = new CooperativeGroupExecutor();
@@ -768,11 +791,21 @@ export class Grid {
     const mergedTreeData = mergeTreeDataOptions(this.treeDataOptions, options.treeData);
     const hasLocaleOption = Object.prototype.hasOwnProperty.call(options, 'locale');
     const hasLocaleTextOption = Object.prototype.hasOwnProperty.call(options, 'localeText');
+    const hasStyleNonceOption = Object.prototype.hasOwnProperty.call(options, 'styleNonce');
+    const hasSanitizeHtmlOption = Object.prototype.hasOwnProperty.call(options, 'sanitizeHtml');
+    const hasAuditLogHookOption = Object.prototype.hasOwnProperty.call(options, 'onAuditLog');
     const hasRtlOption = Object.prototype.hasOwnProperty.call(options, 'rtl');
     const hasNumberFormatOption = Object.prototype.hasOwnProperty.call(options, 'numberFormatOptions');
     const hasDateTimeFormatOption = Object.prototype.hasOwnProperty.call(options, 'dateTimeFormatOptions');
     const nextLocale = hasLocaleOption ? normalizeOptionalLocale(options.locale) : this.options.locale;
     const nextLocaleText = hasLocaleTextOption ? cloneLocaleText(options.localeText) : cloneLocaleText(this.options.localeText);
+    const nextStyleNonce = hasStyleNonceOption ? normalizeStyleNonce(options.styleNonce) : this.options.styleNonce;
+    const nextSanitizeHtml = hasSanitizeHtmlOption
+      ? cloneSanitizeHtmlHook(options.sanitizeHtml)
+      : cloneSanitizeHtmlHook(this.options.sanitizeHtml);
+    const nextAuditLogHook = hasAuditLogHookOption
+      ? cloneAuditLogHook(options.onAuditLog)
+      : cloneAuditLogHook(this.options.onAuditLog);
     const nextRtl = hasRtlOption ? options.rtl === true : this.options.rtl;
     const nextNumberFormatOptions = hasNumberFormatOption
       ? cloneNumberFormatOptions(options.numberFormatOptions)
@@ -840,6 +873,9 @@ export class Grid {
       ...this.options,
       locale: nextLocale,
       localeText: nextLocaleText,
+      styleNonce: nextStyleNonce,
+      sanitizeHtml: nextSanitizeHtml,
+      onAuditLog: nextAuditLogHook,
       rtl: nextRtl,
       numberFormatOptions: nextNumberFormatOptions,
       dateTimeFormatOptions: nextDateTimeFormatOptions,
@@ -1549,6 +1585,7 @@ export class Grid {
     this.eventBus.off('cellClick', this.handleCellClickForTree);
     this.eventBus.off('cellClick', this.handleCellClickForGrouping);
     this.eventBus.off('editCommit', this.handleEditCommitForGrouping);
+    this.eventBus.off('editCommit', this.handleEditCommitAuditLog);
     this.renderer.destroy();
   }
 
@@ -2106,6 +2143,27 @@ export class Grid {
     }
 
     void this.applyGroupingViewInternal();
+  };
+
+  private handleEditCommitAuditLog = (event: GridEventMap['editCommit']): void => {
+    const onAuditLog = this.options.onAuditLog;
+    if (!onAuditLog) {
+      return;
+    }
+
+    onAuditLog({
+      eventName: 'editCommit',
+      rowIndex: event.rowIndex,
+      dataIndex: event.dataIndex,
+      rowKey: event.rowKey,
+      columnId: event.columnId,
+      previousValue: event.previousValue,
+      value: event.value,
+      source: event.source,
+      commitId: event.commitId,
+      timestampMs: event.timestampMs,
+      timestamp: event.timestamp
+    });
   };
 
   private getColumnOrder(): string[] {

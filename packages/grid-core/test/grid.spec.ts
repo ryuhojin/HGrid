@@ -3,6 +3,7 @@ import { Grid } from '../src';
 import { LocalDataProvider } from '../src/data/local-data-provider';
 import type { DataProvider, DataTransaction, GridRowData } from '../src/data/data-provider';
 import type { RemoteQueryModel } from '../src/data/remote-data-provider';
+import type { EditCommitAuditPayload, GridEventMap } from '../src';
 
 function getVerticalScrollElement(container: HTMLElement): HTMLDivElement {
   const verticalScrollElement = container.querySelector('.hgrid__v-scroll') as HTMLDivElement | null;
@@ -2283,6 +2284,57 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
+  it('renders unsafe HTML only when opt-in is enabled and sanitize hook is provided', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const sanitizeCalls: Array<{ columnId: string; rowIndex: number; rowKey: string | number }> = [];
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'unsafeName', header: 'Unsafe Name', width: 220, type: 'text', unsafeHtml: true },
+        { id: 'plainName', header: 'Plain Name', width: 220, type: 'text' }
+      ],
+      rowData: [
+        {
+          id: 101,
+          unsafeName: '<strong class="safe-name">Safe</strong><img src=x onerror="window.__xss=true" />',
+          plainName: '<strong>Literal</strong>'
+        }
+      ],
+      sanitizeHtml(unsafeHtml, context) {
+        sanitizeCalls.push({
+          columnId: context.column.id,
+          rowIndex: context.rowIndex,
+          rowKey: context.rowKey
+        });
+        return unsafeHtml.replace(/<img[\s\S]*?>/gi, '').replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
+      },
+      height: 150,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await waitForFrame();
+
+    const unsafeCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="unsafeName"]'
+    ) as HTMLDivElement;
+    const plainCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="plainName"]'
+    ) as HTMLDivElement;
+
+    expect(unsafeCell.querySelector('strong.safe-name')).not.toBeNull();
+    expect(unsafeCell.querySelector('img')).toBeNull();
+    expect(plainCell.textContent).toBe('<strong>Literal</strong>');
+    expect(plainCell.querySelector('strong')).toBeNull();
+    expect(sanitizeCalls.some((call) => call.columnId === 'unsafeName' && call.rowKey === 101)).toBe(true);
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('exports visible rows as CSV with headers', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -2845,12 +2897,16 @@ describe('Grid DOM pooling', () => {
       { id: 2, name: 'User-2', status: 'idle' }
     ];
 
+    const auditLogs: EditCommitAuditPayload[] = [];
     const grid = new Grid(container, {
       columns,
       rowData,
       height: 160,
       rowHeight: 28,
-      overscan: 2
+      overscan: 2,
+      onAuditLog(payload) {
+        auditLogs.push(payload);
+      }
     });
 
     const renderer = (
@@ -2865,7 +2921,7 @@ describe('Grid DOM pooling', () => {
     ).renderer;
 
     const editStartEvents: Array<{ rowIndex: number; columnId: string }> = [];
-    const editCommitEvents: Array<{ rowIndex: number; columnId: string; value: unknown }> = [];
+    const editCommitEvents: GridEventMap['editCommit'][] = [];
     const editCancelEvents: Array<{ rowIndex: number; columnId: string; reason: string }> = [];
     grid.on('editStart', (event) => {
       editStartEvents.push(event);
@@ -2896,7 +2952,21 @@ describe('Grid DOM pooling', () => {
     expect(editCommitEvents.length).toBe(1);
     expect(editCommitEvents[0]).toMatchObject({
       rowIndex: 0,
+      rowKey: 1,
       columnId: 'name',
+      value: 'User-1-Edited',
+      source: 'editor'
+    });
+    expect(typeof editCommitEvents[0].commitId).toBe('string');
+    expect(typeof editCommitEvents[0].timestamp).toBe('string');
+    expect(typeof editCommitEvents[0].timestampMs).toBe('number');
+    expect(auditLogs.length).toBe(1);
+    expect(auditLogs[0]).toMatchObject({
+      eventName: 'editCommit',
+      rowIndex: 0,
+      rowKey: 1,
+      columnId: 'name',
+      source: 'editor',
       value: 'User-1-Edited'
     });
     const editedNameCell = container.querySelector(

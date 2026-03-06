@@ -52,7 +52,9 @@ export type {
   GridState,
   GridTheme,
   ScrollbarPolicy,
-  ScrollbarVisibility
+  ScrollbarVisibility,
+  UnsafeHtmlSanitizeContext,
+  UnsafeHtmlSanitizer
 } from '../core/grid-options';
 export type {
   CellClickEvent,
@@ -64,6 +66,7 @@ export type {
   GridEventMap,
   GridEventName
 } from '../core/event-bus';
+export type { EditCommitAuditLogger, EditCommitAuditPayload, EditCommitEventPayload, EditCommitSource } from '../core/edit-events';
 export { LocalDataProvider } from '../data/local-data-provider';
 export { ColumnarDataProvider } from '../data/columnar-data-provider';
 export { CooperativeFilterExecutor } from '../data/filter-executor';

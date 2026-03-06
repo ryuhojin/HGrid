@@ -9,9 +9,10 @@
     "test": "pnpm --filter @hgrid/grid-core test",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:csp": "node scripts/csp-smoke-test.mjs",
+    "test:security": "node scripts/security-scan.mjs",
     "check:naming": "node scripts/check-naming.mjs",
     "bench": "node scripts/bench.mjs",
-    "ci:phase0": "pnpm typecheck && pnpm build && pnpm test && pnpm test:e2e && pnpm verify:examples && pnpm test:csp && pnpm check:naming && pnpm bench",
+    "ci:phase0": "pnpm typecheck && pnpm build && pnpm test && pnpm test:e2e && pnpm verify:examples && pnpm test:csp && pnpm test:security && pnpm check:naming && pnpm bench",
     "new:example": "node scripts/new-example.mjs",
     "verify:examples": "node scripts/verify-examples.mjs"
   },

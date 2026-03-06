@@ -5,8 +5,8 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 ## 프로젝트 상태 (2026-03-06)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`, `Phase 10.1~10.4`, `Phase 11.1~11.3`, `Phase 12.1~12.4`
-- 다음 범위: `Phase 13+` (CSP hardening, benchmark gates)
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`, `Phase 10.1~10.4`, `Phase 11.1~11.3`, `Phase 12.1~12.4`, `Phase 13.1~13.3`
+- 다음 범위: `Phase 14+` (benchmark gates, release readiness)
 - 상세 기준: `checklist.md`
 
 구현 완료 핵심:
@@ -38,6 +38,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - ARIA Grid semantics pipeline (`aria-rowcount/colcount/rowindex/colindex` + `aria-activedescendant` focus strategy)
 - Keyboard-only pipeline (navigation/selection/editing, `Ctrl/Cmd+A`, `F2`, editor `Tab/Shift+Tab`)
 - i18n pipeline (`localeText` externalization, Intl number/date formatting, RTL direction option)
+- Security/CSP hardening (`unsafeHtml` opt-in + sanitize hook, `editCommit` audit payload 표준화, CSP/정적 보안 스캔)
 
 ## 핵심 원칙
 
@@ -46,6 +47,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - 이벤트 위임 + rAF 배치 렌더
 - CSP 친화 (`eval`, `new Function`, `setTimeout("string")` 금지)
 - 기본 셀 렌더는 `textContent` 사용
+- HTML 렌더는 컬럼 opt-in(`unsafeHtml`) + sanitize hook으로만 허용
 
 ## Monorepo 구조
 
@@ -111,6 +113,29 @@ pnpm verify:examples
     overscanCols: 2
   });
 </script>
+```
+
+### Security/CSP API
+
+```ts
+const grid = new HGrid.Grid(container, {
+  columns: [
+    { id: 'name', header: 'Name', width: 220, type: 'text' },
+    { id: 'bioHtml', header: 'Bio', width: 320, type: 'text', unsafeHtml: true }
+  ],
+  rowData,
+  styleNonce: 'nonce-from-server',
+  sanitizeHtml(unsafeHtml, context) {
+    // 기본은 textContent이며, unsafeHtml=true 컬럼에서만 호출됩니다.
+    return unsafeHtml
+      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+      .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
+  },
+  onAuditLog(payload) {
+    // editCommit 표준 payload: rowKey/source/commitId/timestamp 포함
+    console.log(payload.eventName, payload.rowKey, payload.source, payload.commitId);
+  }
+});
 ```
 
 ### 정렬/필터 API
@@ -231,13 +256,14 @@ await excel.importXlsx(grid, file, {
 - `pnpm test`
 - `pnpm test:e2e`
 - `pnpm test:csp`
+- `pnpm test:security`
 - `pnpm verify:examples`
 - `pnpm new:example`
 - `pnpm check:naming`
 - `pnpm bench`
 - `pnpm ci:phase0`
 
-## Examples (현재 1~40)
+## Examples (현재 1~41)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -270,6 +296,7 @@ await excel.importXlsx(grid, file, {
 - `example38`: ARIA grid semantics(role/row/col index + active descendant)
 - `example39`: keyboard-only flow(navigation/selection/editing)
 - `example40`: i18n(localeText/Intl formatting/RTL)
+- `example41`: security/csp hardening(unsafeHtml opt-in + sanitize + audit payload snapshot)
 
 기능 추가 시 규칙:
 
@@ -316,6 +343,7 @@ await excel.importXlsx(grid, file, {
 - `docs/aria-grid-semantics-phase12.md`
 - `docs/keyboard-only-phase12.md`
 - `docs/i18n-phase12.md`
+- `docs/security-csp-phase13.md`
 
 ## 라이선스
 

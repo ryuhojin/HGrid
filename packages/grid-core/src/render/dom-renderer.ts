@@ -11,7 +11,8 @@ import type {
   RowStatusTone,
   ScrollbarPolicy,
   ScrollbarVisibility,
-  StateColumnRenderResult
+  StateColumnRenderResult,
+  UnsafeHtmlSanitizeContext
 } from '../core/grid-options';
 import {
   formatColumnValue,
@@ -55,6 +56,7 @@ import {
   mapVirtualToPhysicalScrollTop
 } from '../virtualization/scroll-scaling';
 import { RowHeightMap } from '../virtualization/row-height-map';
+import type { EditCommitEventPayload, EditCommitSource } from '../core/edit-events';
 
 type ColumnZoneName = 'left' | 'center' | 'right';
 
@@ -68,7 +70,9 @@ interface CellRenderState {
   isVisible: boolean;
   columnId: string;
   role: string;
+  contentMode: 'text' | 'html';
   textContent: string;
+  htmlContent: string;
   left: number;
   width: number;
   isSelected: boolean;
@@ -147,6 +151,12 @@ interface HeaderLeafSpanLayout {
 interface HeaderLeafSpanMetrics {
   spansByRow: Map<number, HeaderLeafSpanLayout[]>;
   hiddenLeafColumnIds: Set<string>;
+}
+
+interface CellContentResult {
+  textContent: string;
+  contentMode: 'text' | 'html';
+  htmlContent: string;
 }
 
 type StateColumnTone = RowStatusTone | 'dirty' | 'commit';
@@ -261,6 +271,15 @@ const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
 };
 let NEXT_ARIA_GRID_INSTANCE_ID = 1;
 
+function escapeHtmlText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export class DomRenderer {
   private readonly container: HTMLElement;
   private readonly eventBus: EventBus;
@@ -370,6 +389,7 @@ export class DomRenderer {
   private ariaRowCount = -1;
   private ariaColCount = -1;
   private activeDescendantCellId = '';
+  private editCommitSequence = 0;
   private locale = 'en-US';
   private localeText: GridLocaleText = resolveGridLocaleText('en-US');
   private columnValueFormatContext: ColumnValueFormatContext | null = null;
@@ -1711,7 +1731,9 @@ export class DomRenderer {
         isVisible: false,
         columnId: '',
         role: 'columnheader',
+        contentMode: 'text',
         textContent: '',
+        htmlContent: '',
         left: 0,
         width: 0,
         isSelected: false,
@@ -1801,7 +1823,9 @@ export class DomRenderer {
         isVisible: zoneName !== 'center',
         columnId: zoneName === 'center' ? '' : column.id,
         role: 'gridcell',
+        contentMode: 'text',
         textContent: '',
+        htmlContent: '',
         left: Number.NaN,
         width: zoneName === 'center' ? Number.NaN : column.width,
         isSelected: false,
@@ -2083,6 +2107,102 @@ export class DomRenderer {
     }
   }
 
+  private resolveCellContent(
+    column: ColumnDef,
+    row: GridRowData,
+    rowIndex: number,
+    dataIndex: number,
+    isRowLoading: boolean
+  ): CellContentResult {
+    const textContent = isRowLoading ? '' : formatColumnValue(column, row, this.columnValueFormatContext ?? undefined);
+    if (isRowLoading || column.unsafeHtml !== true) {
+      return {
+        textContent,
+        contentMode: 'text',
+        htmlContent: ''
+      };
+    }
+
+    const value = getColumnValue(column, row);
+    const context: UnsafeHtmlSanitizeContext = {
+      rowIndex,
+      dataIndex,
+      rowKey: this.options.dataProvider.getRowKey(dataIndex),
+      column,
+      row,
+      value
+    };
+    const htmlContent = this.resolveUnsafeHtmlContent(textContent, context);
+    return {
+      textContent,
+      contentMode: 'html',
+      htmlContent
+    };
+  }
+
+  private resolveUnsafeHtmlContent(rawHtml: string, context: UnsafeHtmlSanitizeContext): string {
+    const columnSanitize = context.column.sanitizeHtml;
+    if (typeof columnSanitize === 'function') {
+      const sanitizedHtml = columnSanitize(rawHtml, context);
+      return typeof sanitizedHtml === 'string' ? sanitizedHtml : '';
+    }
+
+    const gridSanitize = this.options.sanitizeHtml;
+    if (typeof gridSanitize === 'function') {
+      const sanitizedHtml = gridSanitize(rawHtml, context);
+      return typeof sanitizedHtml === 'string' ? sanitizedHtml : '';
+    }
+
+    return rawHtml;
+  }
+
+  private prependCellPrefix(content: CellContentResult, prefix: string): CellContentResult {
+    if (prefix.length === 0) {
+      return content;
+    }
+
+    if (content.contentMode === 'html') {
+      return {
+        textContent: `${prefix} ${content.textContent}`,
+        contentMode: 'html',
+        htmlContent: `${escapeHtmlText(prefix)} ${content.htmlContent}`
+      };
+    }
+
+    return {
+      textContent: `${prefix} ${content.textContent}`,
+      contentMode: 'text',
+      htmlContent: ''
+    };
+  }
+
+  private createEditCommitEventPayload(
+    payload: {
+      rowIndex: number;
+      dataIndex: number;
+      columnId: string;
+      previousValue: unknown;
+      value: unknown;
+    },
+    source: EditCommitSource
+  ): EditCommitEventPayload {
+    const timestampMs = Date.now();
+    this.editCommitSequence += 1;
+
+    return {
+      rowIndex: payload.rowIndex,
+      dataIndex: payload.dataIndex,
+      rowKey: this.options.dataProvider.getRowKey(payload.dataIndex),
+      columnId: payload.columnId,
+      previousValue: payload.previousValue,
+      value: payload.value,
+      source,
+      commitId: `edit-${timestampMs}-${this.editCommitSequence}`,
+      timestampMs,
+      timestamp: new Date(timestampMs).toISOString()
+    };
+  }
+
   private renderZoneRow(
     zoneName: ColumnZoneName,
     zoneRow: ZoneRowItem,
@@ -2174,14 +2294,18 @@ export class DomRenderer {
         continue;
       }
 
-      let textContent = isRowLoading ? '' : formatColumnValue(column, row, this.columnValueFormatContext ?? undefined);
+      let cellContent = this.resolveCellContent(column, row, rowIndex, dataIndex, isRowLoading);
       let extraClassName = isRowLoading ? 'hgrid__cell--loading' : '';
       let titleText = '';
       let ariaLabel = '';
       if (column.id === STATE_COLUMN_ID && !isRowLoading) {
         const rowStatus = this.resolveRowStatusTone(row, rowIndex, dataIndex, this.selectionModel.isRowSelected(rowIndex));
         const stateColumnResult = this.resolveStateColumnResult(row, rowIndex, dataIndex, rowStatus);
-        textContent = stateColumnResult.textContent;
+        cellContent = {
+          textContent: stateColumnResult.textContent,
+          contentMode: 'text',
+          htmlContent: ''
+        };
         extraClassName = `hgrid__cell--state${stateColumnResult.tone ? ` hgrid__cell--state-${stateColumnResult.tone}` : ''}`;
         titleText = stateColumnResult.tooltip;
         ariaLabel = stateColumnResult.ariaLabel;
@@ -2189,13 +2313,13 @@ export class DomRenderer {
 
       if (isGroupRow && groupColumnId && column.id === groupColumnId) {
         const expandGlyph = isGroupExpanded ? '▾' : '▸';
-        textContent = `${expandGlyph} ${textContent}`;
+        cellContent = this.prependCellPrefix(cellContent, expandGlyph);
         const indentPx = 10 + groupLevel * 14;
         extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--group`.trim();
         cell.style.setProperty('--hgrid-group-indent', `${indentPx}px`);
       } else if (isTreeRow && treeColumnId && column.id === treeColumnId) {
         const glyph = treeHasChildren ? (isTreeExpanded ? '▾' : '▸') : '•';
-        textContent = `${glyph} ${textContent}`;
+        cellContent = this.prependCellPrefix(cellContent, glyph);
         const indentPx = 10 + treeLevel * 14;
         extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--tree`.trim();
         cell.style.setProperty('--hgrid-tree-indent', `${indentPx}px`);
@@ -2212,7 +2336,9 @@ export class DomRenderer {
         isVisible: true,
         columnId: column.id,
         role: 'gridcell',
-        textContent,
+        textContent: cellContent.textContent,
+        contentMode: cellContent.contentMode,
+        htmlContent: cellContent.htmlContent,
         ariaRowIndex: this.getAriaRowIndexForDataRow(rowIndex),
         ariaColIndex,
         cellId,
@@ -2266,14 +2392,18 @@ export class DomRenderer {
         break;
       }
 
-      let textContent = isRowLoading ? '' : formatColumnValue(column, row, this.columnValueFormatContext ?? undefined);
+      let cellContent = this.resolveCellContent(column, row, rowIndex, dataIndex, isRowLoading);
       let extraClassName = isRowLoading ? 'hgrid__cell--loading' : '';
       let titleText = '';
       let ariaLabel = '';
       if (column.id === STATE_COLUMN_ID && !isRowLoading) {
         const rowStatus = this.resolveRowStatusTone(row, rowIndex, dataIndex, this.selectionModel.isRowSelected(rowIndex));
         const stateColumnResult = this.resolveStateColumnResult(row, rowIndex, dataIndex, rowStatus);
-        textContent = stateColumnResult.textContent;
+        cellContent = {
+          textContent: stateColumnResult.textContent,
+          contentMode: 'text',
+          htmlContent: ''
+        };
         extraClassName = `hgrid__cell--state${stateColumnResult.tone ? ` hgrid__cell--state-${stateColumnResult.tone}` : ''}`;
         titleText = stateColumnResult.tooltip;
         ariaLabel = stateColumnResult.ariaLabel;
@@ -2281,13 +2411,13 @@ export class DomRenderer {
 
       if (isGroupRow && groupColumnId && column.id === groupColumnId) {
         const expandGlyph = isGroupExpanded ? '▾' : '▸';
-        textContent = `${expandGlyph} ${textContent}`;
+        cellContent = this.prependCellPrefix(cellContent, expandGlyph);
         const indentPx = 10 + groupLevel * 14;
         extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--group`.trim();
         cell.style.setProperty('--hgrid-group-indent', `${indentPx}px`);
       } else if (isTreeRow && treeColumnId && column.id === treeColumnId) {
         const glyph = treeHasChildren ? (isTreeExpanded ? '▾' : '▸') : '•';
-        textContent = `${glyph} ${textContent}`;
+        cellContent = this.prependCellPrefix(cellContent, glyph);
         const indentPx = 10 + treeLevel * 14;
         extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--tree`.trim();
         cell.style.setProperty('--hgrid-tree-indent', `${indentPx}px`);
@@ -2304,7 +2434,9 @@ export class DomRenderer {
         isVisible: true,
         columnId: column.id,
         role: 'gridcell',
-        textContent,
+        textContent: cellContent.textContent,
+        contentMode: cellContent.contentMode,
+        htmlContent: cellContent.htmlContent,
         ariaRowIndex: this.getAriaRowIndexForDataRow(rowIndex),
         ariaColIndex: globalColumnIndex + 1,
         cellId,
@@ -2443,6 +2575,8 @@ export class DomRenderer {
       isVisible: boolean;
       columnId: string;
       textContent: string;
+      contentMode?: 'text' | 'html';
+      htmlContent?: string;
       role?: string;
       left?: number;
       width?: number;
@@ -2465,6 +2599,8 @@ export class DomRenderer {
     const ariaRowIndex = nextState.ariaRowIndex ?? -1;
     const ariaColIndex = nextState.ariaColIndex ?? -1;
     const cellId = nextState.cellId ?? '';
+    const contentMode = nextState.contentMode ?? 'text';
+    const htmlContent = nextState.htmlContent ?? '';
 
     if (cellState.isVisible !== nextState.isVisible) {
       cell.style.display = nextState.isVisible ? '' : 'none';
@@ -2495,9 +2631,32 @@ export class DomRenderer {
       cellState.role = role;
     }
 
-    if (cellState.textContent !== nextState.textContent) {
-      cell.textContent = nextState.textContent;
+    if (cellState.contentMode !== contentMode) {
+      if (contentMode === 'html') {
+        cell.innerHTML = htmlContent;
+        cellState.htmlContent = htmlContent;
+      } else {
+        cell.textContent = nextState.textContent;
+        cellState.htmlContent = '';
+      }
       cellState.textContent = nextState.textContent;
+      cellState.contentMode = contentMode;
+    } else if (contentMode === 'html') {
+      if (cellState.htmlContent !== htmlContent) {
+        cell.innerHTML = htmlContent;
+        cellState.htmlContent = htmlContent;
+      }
+      if (cellState.textContent !== nextState.textContent) {
+        cellState.textContent = nextState.textContent;
+      }
+    } else {
+      if (cellState.textContent !== nextState.textContent) {
+        cell.textContent = nextState.textContent;
+        cellState.textContent = nextState.textContent;
+      }
+      if (cellState.htmlContent.length > 0) {
+        cellState.htmlContent = '';
+      }
     }
 
     if (cellState.extraClassName !== extraClassName) {
@@ -3271,13 +3430,19 @@ export class DomRenderer {
     }
     this.options.dataProvider.setValue(currentSession.dataIndex, currentSession.column.id, committedValue);
 
-    this.eventBus.emit('editCommit', {
-      rowIndex: currentSession.rowIndex,
-      dataIndex: currentSession.dataIndex,
-      columnId: currentSession.column.id,
-      previousValue: currentSession.originalValue,
-      value: committedValue
-    });
+    this.eventBus.emit(
+      'editCommit',
+      this.createEditCommitEventPayload(
+        {
+          rowIndex: currentSession.rowIndex,
+          dataIndex: currentSession.dataIndex,
+          columnId: currentSession.column.id,
+          previousValue: currentSession.originalValue,
+          value: committedValue
+        },
+        'editor'
+      )
+    );
 
     this.stopEditing('reconcile', false);
     this.markDataDirty();
@@ -5316,13 +5481,19 @@ export class DomRenderer {
     }
 
     const firstUpdate = updates[0];
-    this.eventBus.emit('editCommit', {
-      rowIndex: firstUpdate.rowIndex,
-      dataIndex: firstUpdate.dataIndex,
-      columnId: firstUpdate.columnId,
-      previousValue: firstUpdate.previousValue,
-      value: firstUpdate.value
-    });
+    this.eventBus.emit(
+      'editCommit',
+      this.createEditCommitEventPayload(
+        {
+          rowIndex: firstUpdate.rowIndex,
+          dataIndex: firstUpdate.dataIndex,
+          columnId: firstUpdate.columnId,
+          previousValue: firstUpdate.previousValue,
+          value: firstUpdate.value
+        },
+        'clipboard'
+      )
+    );
     event.preventDefault();
   };
 

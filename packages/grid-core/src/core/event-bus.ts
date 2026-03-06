@@ -1,4 +1,5 @@
 import type { SelectionChangeEvent } from '../interaction/selection-model';
+import type { EditCommitEventPayload } from './edit-events';
 
 export type GridEventName =
   | 'cellClick'
@@ -33,13 +34,7 @@ export interface EditStartEvent {
   value: unknown;
 }
 
-export interface EditCommitEvent {
-  rowIndex: number;
-  dataIndex: number;
-  columnId: string;
-  previousValue: unknown;
-  value: unknown;
-}
+export type EditCommitEvent = EditCommitEventPayload;
 
 export interface EditCancelEvent {
   rowIndex: number;

@@ -480,6 +480,21 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 41,
+      "file": "example41.html",
+      "title": "Example 41 - Security CSP Hardening",
+      "tags": [
+        "phase13",
+        "security",
+        "csp",
+        "xss",
+        "sanitize",
+        "audit-log",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

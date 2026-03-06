@@ -3498,6 +3498,49 @@ async function runExample40Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample41Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example41.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => {
+    const api = window.__example41;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example41.getSnapshot');
+    }
+    return api.getSnapshot();
+  });
+  assert.equal(initialSnapshot.sanitizeMode, 'on', 'example41 should start in sanitize on mode');
+  assert.equal(initialSnapshot.safeTextCell, '<strong>Literal</strong>', 'example41 default text cell should stay literal');
+  assert.equal(initialSnapshot.hasUnsafeBold, true, 'example41 unsafeHtml opt-in should render strong element');
+  assert.equal(initialSnapshot.hasUnsafeImage, false, 'example41 sanitize-on should remove unsafe img');
+
+  await page.evaluate(() => {
+    const api = window.__example41;
+    api.setSanitizeMode('off');
+  });
+  await page.waitForFunction(() => {
+    const api = window.__example41;
+    return api && api.getSnapshot().hasUnsafeImage === true;
+  });
+  const unsafeSnapshot = await page.evaluate(() => window.__example41.getSnapshot());
+  assert.equal(unsafeSnapshot.sanitizeMode, 'off', 'example41 should switch sanitize mode off');
+  assert.equal(unsafeSnapshot.hasUnsafeImage, true, 'example41 sanitize-off should expose img element');
+
+  await page.evaluate(() => {
+    const api = window.__example41;
+    api.setSanitizeMode('on');
+  });
+  await page.waitForFunction(() => {
+    const api = window.__example41;
+    return api && api.getSnapshot().hasUnsafeImage === false;
+  });
+  const restoredSnapshot = await page.evaluate(() => window.__example41.getSnapshot());
+  assert.equal(restoredSnapshot.sanitizeMode, 'on', 'example41 should switch sanitize mode on');
+  assert.equal(restoredSnapshot.hasUnsafeImage, false, 'example41 sanitize-on should remove img again');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -3610,6 +3653,8 @@ async function main() {
     await runExample39Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample40Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample41Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

@@ -3,10 +3,10 @@
 HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 데이터 그리드**입니다.
 `Canvas/WebGL/OffscreenCanvas` 없이 대용량(10M~100M) 스크롤, pinned 컬럼, 수직/수평 가상화, 풀링 렌더를 제공합니다.
 
-## 프로젝트 상태 (2026-03-05)
+## 프로젝트 상태 (2026-03-06)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.3`, `Phase 5.1~5.2`, `Phase 6.1~6.4`
-- 다음 범위: `Phase 7.6+` (group header/indicator 고도화)
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`
+- 다음 범위: `Phase 9+` (group/tree/pivot/aggregation)
 - 상세 기준: `checklist.md`
 
 구현 완료 핵심:
@@ -23,6 +23,9 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Single overlay editor + sync/async validation
 - Worker protocol 계약 + transferable 유틸
 - Worker-first sorting/filtering executor + Grid API 연동
+- Column feature pack (resize/reorder/pin/hide) + selection indicator columns
+- Multi-level column group header
+- RemoteDataProvider block cache/LRU/prefetch + server-side query model(sort/filter/groupModel placeholder)
 
 ## 핵심 원칙
 
@@ -128,7 +131,7 @@ await grid.clearSortModel();
 - `pnpm bench`
 - `pnpm ci:phase0`
 
-## Examples (현재 1~28)
+## Examples (현재 1~30)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -149,6 +152,8 @@ await grid.clearSortModel();
 - `example26`: column pin/hide + stress
 - `example27`: column feature pack integration
 - `example28`: selection indicator + state column
+- `example29`: multi-level column group header
+- `example30`: remote datasource + block cache + server sort/filter
 
 기능 추가 시 규칙:
 
@@ -183,6 +188,8 @@ await grid.clearSortModel();
 - `docs/column-reorder-phase7.md`
 - `docs/column-pin-hide-phase7.md`
 - `docs/selection-indicator-columns-phase7.md`
+- `docs/column-group-header-phase7.md`
+- `docs/remote-data-provider-phase8.md`
 
 ## 라이선스
 

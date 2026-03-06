@@ -10,6 +10,18 @@ export interface ResolvedColumnDef extends ColumnDef {
   visible: boolean;
 }
 
+export interface ColumnValueFormatContext {
+  locale: string;
+  numberFormatter: Intl.NumberFormat;
+  dateTimeFormatter: Intl.DateTimeFormat;
+}
+
+export interface ColumnValueFormatContextOptions {
+  locale?: string;
+  numberFormatOptions?: Intl.NumberFormatOptions;
+  dateTimeFormatOptions?: Intl.DateTimeFormatOptions;
+}
+
 function normalizeWidthBounds(column: ColumnDef): { minWidth: number; maxWidth: number } {
   const rawMinWidth = Number(column.minWidth);
   const rawMaxWidth = Number(column.maxWidth);
@@ -161,12 +173,81 @@ export function getColumnValue(column: ColumnDef, row: GridRowData): unknown {
   return row[column.id];
 }
 
-export function formatColumnValue(column: ColumnDef, row: GridRowData): string {
+export function createColumnValueFormatContext(options?: ColumnValueFormatContextOptions): ColumnValueFormatContext {
+  const locale = typeof options?.locale === 'string' && options.locale.trim().length > 0 ? options.locale : 'en-US';
+  const numberFormatOptions = options?.numberFormatOptions ? { ...options.numberFormatOptions } : undefined;
+  const dateTimeFormatOptions = options?.dateTimeFormatOptions ? { ...options.dateTimeFormatOptions } : undefined;
+  let numberFormatter: Intl.NumberFormat;
+  let dateTimeFormatter: Intl.DateTimeFormat;
+
+  try {
+    numberFormatter = new Intl.NumberFormat(locale, numberFormatOptions);
+  } catch {
+    numberFormatter = new Intl.NumberFormat('en-US');
+  }
+
+  try {
+    dateTimeFormatter = new Intl.DateTimeFormat(locale, dateTimeFormatOptions);
+  } catch {
+    dateTimeFormatter = new Intl.DateTimeFormat('en-US');
+  }
+
+  return {
+    locale,
+    numberFormatter,
+    dateTimeFormatter
+  };
+}
+
+function resolveDateValue(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value : null;
+  }
+
+  if (typeof value === 'number') {
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date : null;
+  }
+
+  if (typeof value === 'string' && value.length > 0) {
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date : null;
+  }
+
+  return null;
+}
+
+export function formatColumnValue(column: ColumnDef, row: GridRowData, context?: ColumnValueFormatContext): string {
   const value = getColumnValue(column, row);
 
   if (column.formatter) {
     return column.formatter(value, row);
   }
 
-  return value === undefined || value === null ? '' : String(value);
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  if (column.type === 'number' && context) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return context.numberFormatter.format(value);
+    }
+
+    if (typeof value === 'bigint') {
+      const asNumber = Number(value);
+      if (Number.isFinite(asNumber)) {
+        return context.numberFormatter.format(asNumber);
+      }
+      return String(value);
+    }
+  }
+
+  if (column.type === 'date' && context) {
+    const date = resolveDateValue(value);
+    if (date) {
+      return context.dateTimeFormatter.format(date);
+    }
+  }
+
+  return String(value);
 }

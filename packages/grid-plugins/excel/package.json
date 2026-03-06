@@ -1,0 +1,35 @@
+{
+  "name": "@hgrid/grid-plugin-excel",
+  "version": "0.0.0",
+  "description": "Excel import/export plugin for HGrid",
+  "type": "module",
+  "main": "dist/hgrid-excel.umd.js",
+  "module": "dist/hgrid-excel.esm.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/hgrid-excel.esm.js",
+      "default": "./dist/hgrid-excel.umd.js"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "pnpm run clean && rollup -c && tsc -p tsconfig.types.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"No tests yet\""
+  },
+  "peerDependencies": {
+    "@hgrid/grid-core": "workspace:*"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "rollup": "^4.28.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.6.3"
+  }
+}

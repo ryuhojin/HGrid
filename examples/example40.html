@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 40 - i18n Locale RTL</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 10px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #summary {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1040px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 40 - i18n Locale RTL</h1>
+    <p>locale strings/Intl formatting/RTL 옵션 동작 검증 예제.</p>
+
+    <div class="controls">
+      <button id="locale-en" type="button">locale en-US</button>
+      <button id="locale-de" type="button">locale de-DE</button>
+      <button id="locale-ko" type="button">locale ko-KR</button>
+      <button id="rtl-on" type="button">rtl on</button>
+      <button id="rtl-off" type="button">rtl off</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <pre id="summary">Ready</pre>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const NUMBER_FORMAT_OPTIONS = {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      };
+      const DATE_TIME_FORMAT_OPTIONS = {
+        timeZone: 'UTC',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      };
+
+      const rowData = Array.from({ length: 400 }, (_, index) => ({
+        id: index + 1,
+        amount: 1234567.89 + index,
+        updatedAt: new Date(Date.UTC(2026, 2, 6, 0, 0, 0) + index * 60000).toISOString(),
+        status: index % 2 === 0 ? 'active' : 'idle'
+      }));
+
+      let currentLocale = 'en-US';
+      let currentRtl = false;
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: [
+          { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+          { id: 'id', header: 'ID', width: 90, type: 'number', pinned: 'left' },
+          { id: 'amount', header: 'Amount', width: 180, type: 'number' },
+          { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' },
+          { id: 'status', header: 'Status', width: 140, type: 'text' }
+        ],
+        rowData,
+        locale: currentLocale,
+        rtl: currentRtl,
+        numberFormatOptions: NUMBER_FORMAT_OPTIONS,
+        dateTimeFormatOptions: DATE_TIME_FORMAT_OPTIONS,
+        localeText: {
+          selectAllRows: 'Select all rows ({scope})',
+          scopeAll: 'all',
+          scopeFiltered: 'filtered',
+          scopeViewport: 'viewport'
+        },
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      const summaryElement = document.getElementById('summary');
+
+      function getRoot() {
+        return document.querySelector('#grid .hgrid');
+      }
+
+      function getFirstCell(columnId) {
+        return document.querySelector('.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="' + columnId + '"]');
+      }
+
+      function getSnapshot() {
+        const root = getRoot();
+        const amountCell = getFirstCell('amount');
+        const dateCell = getFirstCell('updatedAt');
+        const checkAll = document.querySelector('.hgrid__indicator-checkall');
+
+        return {
+          locale: currentLocale,
+          rtl: currentRtl,
+          rootDir: root ? root.getAttribute('dir') : null,
+          rootClassName: root ? root.className : '',
+          amountText: amountCell ? amountCell.textContent : null,
+          dateText: dateCell ? dateCell.textContent : null,
+          checkAllAriaLabel: checkAll ? checkAll.getAttribute('aria-label') : null,
+          expectedAmountText: new Intl.NumberFormat(currentLocale, NUMBER_FORMAT_OPTIONS).format(rowData[0].amount),
+          expectedDateText: new Intl.DateTimeFormat(currentLocale, DATE_TIME_FORMAT_OPTIONS).format(new Date(rowData[0].updatedAt))
+        };
+      }
+
+      function renderSummary(label) {
+        summaryElement.textContent = JSON.stringify({ label, snapshot: getSnapshot() }, null, 2);
+      }
+
+      function applyLocale(locale) {
+        currentLocale = locale;
+        const localeText =
+          locale === 'ko-KR'
+            ? {
+                selectAllRows: '모든 행 선택 ({scope})',
+                scopeAll: '전체',
+                scopeFiltered: '필터 결과',
+                scopeViewport: '현재 뷰포트',
+                selectRow: '{row}행 선택',
+                selectRowGeneric: '행 선택',
+                groupingRow: '그룹 행',
+                rowStatus: '{row}행 상태',
+                rowStatusWithValue: '{row}행 상태 {status}',
+                rowNumber: '{row}행 번호',
+                validationFailed: '검증 실패'
+              }
+            : {
+                selectAllRows: 'Select all rows ({scope})',
+                scopeAll: 'all',
+                scopeFiltered: 'filtered',
+                scopeViewport: 'viewport',
+                selectRow: 'Select row {row}',
+                selectRowGeneric: 'Select row',
+                groupingRow: 'Grouping row',
+                rowStatus: 'Row {row} status',
+                rowStatusWithValue: 'Row {row} status {status}',
+                rowNumber: 'Row {row} number',
+                validationFailed: 'Validation failed'
+              };
+
+        grid.setOptions({
+          locale,
+          localeText,
+          numberFormatOptions: NUMBER_FORMAT_OPTIONS,
+          dateTimeFormatOptions: DATE_TIME_FORMAT_OPTIONS
+        });
+      }
+
+      function applyRtl(enabled) {
+        currentRtl = enabled;
+        grid.setOptions({ rtl: enabled });
+      }
+
+      document.getElementById('locale-en').addEventListener('click', () => {
+        applyLocale('en-US');
+        renderSummary('locale-en');
+      });
+
+      document.getElementById('locale-de').addEventListener('click', () => {
+        applyLocale('de-DE');
+        renderSummary('locale-de');
+      });
+
+      document.getElementById('locale-ko').addEventListener('click', () => {
+        applyLocale('ko-KR');
+        renderSummary('locale-ko');
+      });
+
+      document.getElementById('rtl-on').addEventListener('click', () => {
+        applyRtl(true);
+        renderSummary('rtl-on');
+      });
+
+      document.getElementById('rtl-off').addEventListener('click', () => {
+        applyRtl(false);
+        renderSummary('rtl-off');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderSummary('inspect');
+      });
+
+      renderSummary('init');
+
+      window.__example40 = {
+        setLocale(locale) {
+          applyLocale(locale);
+        },
+        setRtl(enabled) {
+          applyRtl(enabled);
+        },
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 36 - Excel Import Export</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button,
+      .controls label {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .controls label {
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .controls input[type='file'] {
+        display: none;
+      }
+
+      #summary,
+      #log {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1080px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 36 - Excel Import/Export</h1>
+    <div class="controls">
+      <button id="select-range" type="button">select B6:E10</button>
+      <button id="export-selection" type="button">export selection xlsx</button>
+      <button id="download-last" type="button">download last xlsx</button>
+      <button id="import-header" type="button">import (header policy)</button>
+      <button id="import-id" type="button">import (id policy)</button>
+      <button id="inspect" type="button">inspect</button>
+      <label for="import-file">import file (.xlsx)</label>
+      <input id="import-file" type="file" accept=".xlsx" />
+    </div>
+    <pre id="summary">Ready</pre>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script src="../packages/grid-plugins/excel/node_modules/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="../packages/grid-plugins/excel/dist/hgrid-excel.umd.js"></script>
+    <script>
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 130, type: 'text', editable: true },
+        { id: 'score', header: 'Score', width: 120, type: 'number', editable: true },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date', editable: true },
+        { id: 'region', header: 'Region', width: 120, type: 'text', editable: true }
+      ];
+
+      const regions = ['KR', 'US', 'JP', 'DE'];
+      const rowData = Array.from({ length: 120 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        status: index % 2 === 0 ? 'active' : 'idle',
+        score: (index * 37) % 1000,
+        updatedAt: new Date(Date.now() - index * 120000).toISOString(),
+        region: regions[index % regions.length]
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 8,
+        overscanCols: 2
+      });
+
+      const excelPlugin = HGridExcel.createExcelPlugin({
+        defaultSheetName: 'HGrid Export',
+        maxClientExportRows: 100000
+      });
+
+      const summaryElement = document.getElementById('summary');
+      const logElement = document.getElementById('log');
+      const fileInput = document.getElementById('import-file');
+      let lastExportResult = null;
+
+      function readCell(rowIndex, columnId) {
+        const selector = '.hgrid__row[data-row-index="' + rowIndex + '"] .hgrid__cell[data-column-id="' + columnId + '"]';
+        const cell = document.querySelector(selector);
+        return cell && typeof cell.textContent === 'string' ? cell.textContent.trim() : '';
+      }
+
+      function getSnapshot() {
+        return {
+          selection: grid.getSelection(),
+          row0: {
+            id: readCell(0, 'id'),
+            name: readCell(0, 'name'),
+            score: readCell(0, 'score'),
+            updatedAt: readCell(0, 'updatedAt')
+          },
+          row1: {
+            id: readCell(1, 'id'),
+            name: readCell(1, 'name'),
+            score: readCell(1, 'score'),
+            updatedAt: readCell(1, 'updatedAt')
+          },
+          row2: {
+            id: readCell(2, 'id'),
+            name: readCell(2, 'name'),
+            score: readCell(2, 'score'),
+            updatedAt: readCell(2, 'updatedAt')
+          },
+          lastExportResult: lastExportResult
+            ? {
+                operationId: lastExportResult.operationId,
+                scope: lastExportResult.scope,
+                rowCount: lastExportResult.rowCount,
+                totalRows: lastExportResult.totalRows,
+                canceled: lastExportResult.canceled,
+                delegated: lastExportResult.delegated
+              }
+            : null
+        };
+      }
+
+      function writeLog(label, payload) {
+        logElement.textContent = JSON.stringify(
+          {
+            label,
+            payload,
+            snapshot: getSnapshot()
+          },
+          null,
+          2
+        );
+      }
+
+      function setSummary(text) {
+        summaryElement.textContent = text;
+      }
+
+      function selectDemoRange() {
+        grid.setSelection({
+          activeCell: { rowIndex: 5, colIndex: 1 },
+          cellRanges: [{ r1: 5, c1: 1, r2: 9, c2: 4 }],
+          rowRanges: []
+        });
+      }
+
+      async function exportSelectionSummary() {
+        selectDemoRange();
+        await waitFrame();
+
+        const result = await excelPlugin.exportXlsx(grid, {
+          scope: 'selection',
+          includeHeaders: true,
+          dateFormat: 'yyyy-mm-dd hh:mm:ss',
+          numberFormat: '#,##0.00'
+        });
+        lastExportResult = result;
+
+        const worksheet = result.workbook ? result.workbook.Sheets[result.sheetName] : null;
+        const headerName = worksheet ? String((worksheet.A1 && worksheet.A1.v) || '') : '';
+        const firstScoreCell = worksheet ? worksheet.C2 : null;
+        const firstDateCell = worksheet ? worksheet.D2 : null;
+
+        const summary = {
+          scope: result.scope,
+          rowCount: result.rowCount,
+          totalRows: result.totalRows,
+          canceled: result.canceled,
+          delegated: result.delegated,
+          headerName,
+          scoreType: firstScoreCell ? firstScoreCell.t : null,
+          scoreFormat: firstScoreCell ? firstScoreCell.z || null : null,
+          dateFormat: firstDateCell ? firstDateCell.z || null : null,
+          hasBuffer: Boolean(result.buffer)
+        };
+
+        setSummary('selection export rows=' + result.rowCount + ', scoreType=' + summary.scoreType);
+        writeLog('export-selection', summary);
+        return summary;
+      }
+
+      function buildImportWorkbook(policy) {
+        const workbook = XLSX.utils.book_new();
+        const header =
+          policy === 'id'
+            ? ['name', 'score', 'updatedAt', 'region']
+            : ['Name', 'Score', 'Updated At', 'Region'];
+
+        const rows = [
+          header,
+          ['Imported-A', 700, '2026-03-01T10:00:00.000Z', 'US'],
+          ['Imported-B', -5, '2026-03-02T10:00:00.000Z', 'KR'],
+          ['Imported-C', 840, '2026-03-03T10:00:00.000Z', 'JP']
+        ];
+
+        const sheet = XLSX.utils.aoa_to_sheet(rows, { cellDates: true });
+        XLSX.utils.book_append_sheet(workbook, sheet, 'Import');
+        return workbook;
+      }
+
+      async function runImport(policy) {
+        const workbook = buildImportWorkbook(policy);
+
+        const result = await excelPlugin.importXlsx(grid, workbook, {
+          sheetName: 'Import',
+          headerMappingPolicy: policy,
+          validationMode: 'skipInvalidRows',
+          validateCell(context) {
+            if (context.columnId === 'score') {
+              const numeric = Number(context.value);
+              if (!Number.isFinite(numeric) || numeric < 0) {
+                return {
+                  accept: false,
+                  message: 'score must be >= 0',
+                  value: context.value
+                };
+              }
+              return {
+                accept: true,
+                value: numeric
+              };
+            }
+
+            if (context.columnId === 'name') {
+              const text = String(context.value || '').trim();
+              if (text.length === 0) {
+                return {
+                  accept: false,
+                  message: 'name is required'
+                };
+              }
+              return {
+                accept: true,
+                value: text
+              };
+            }
+
+            if (context.columnId === 'updatedAt' && context.value instanceof Date) {
+              return {
+                accept: true,
+                value: context.value.toISOString()
+              };
+            }
+
+            return {
+              accept: true,
+              value: context.value
+            };
+          },
+          validateRow(context) {
+            if (!context.values.name) {
+              return {
+                accept: false,
+                message: 'name missing'
+              };
+            }
+            return {
+              accept: true,
+              values: context.values
+            };
+          }
+        });
+
+        await waitFrame();
+
+        setSummary(
+          'import(' +
+            policy +
+            ') imported=' +
+            result.importedRows +
+            ', updated=' +
+            result.updatedRows +
+            ', issues=' +
+            result.issues.length
+        );
+        writeLog('import-' + policy, result);
+        return result;
+      }
+
+      function getDefaultImportValidationOptions() {
+        return {
+          validationMode: 'skipInvalidRows',
+          validateCell(context) {
+            if (context.columnId === 'score') {
+              const numeric = Number(context.value);
+              if (!Number.isFinite(numeric) || numeric < 0) {
+                return {
+                  accept: false,
+                  message: 'score must be >= 0',
+                  value: context.value
+                };
+              }
+              return {
+                accept: true,
+                value: numeric
+              };
+            }
+
+            if (context.columnId === 'name') {
+              const text = String(context.value || '').trim();
+              if (text.length === 0) {
+                return {
+                  accept: false,
+                  message: 'name is required'
+                };
+              }
+              return {
+                accept: true,
+                value: text
+              };
+            }
+
+            if (context.columnId === 'updatedAt' && context.value instanceof Date) {
+              return {
+                accept: true,
+                value: context.value.toISOString()
+              };
+            }
+
+            return {
+              accept: true,
+              value: context.value
+            };
+          },
+          validateRow(context) {
+            if (!context.values.name) {
+              return {
+                accept: false,
+                message: 'name missing'
+              };
+            }
+            return {
+              accept: true,
+              values: context.values
+            };
+          }
+        };
+      }
+
+      async function handleFileImport(file) {
+        if (!file) {
+          return null;
+        }
+
+        const result = await excelPlugin.importXlsx(grid, file, {
+          headerMappingPolicy: 'auto',
+          ...getDefaultImportValidationOptions()
+        });
+        await waitFrame();
+        setSummary('file import imported=' + result.importedRows + ', issues=' + result.issues.length);
+        writeLog('import-file', result);
+        return result;
+      }
+
+      document.getElementById('select-range').addEventListener('click', () => {
+        selectDemoRange();
+        setSummary('Selected B6:E10');
+        writeLog('select-range', { ok: true });
+      });
+
+      document.getElementById('export-selection').addEventListener('click', () => {
+        void exportSelectionSummary();
+      });
+
+      document.getElementById('download-last').addEventListener('click', () => {
+        if (!lastExportResult) {
+          setSummary('No exported workbook yet.');
+          return;
+        }
+
+        excelPlugin.download(lastExportResult, 'example36.xlsx');
+        setSummary('Downloaded example36.xlsx');
+      });
+
+      document.getElementById('import-header').addEventListener('click', () => {
+        void runImport('header');
+      });
+
+      document.getElementById('import-id').addEventListener('click', () => {
+        void runImport('id');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect', getSnapshot());
+      });
+
+      fileInput.addEventListener('change', () => {
+        const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+        if (!file) {
+          return;
+        }
+
+        void handleFileImport(file).finally(() => {
+          fileInput.value = '';
+        });
+      });
+
+      window.__example36 = {
+        selectDemoRange,
+        exportSelectionSummary,
+        runImport,
+        getSnapshot,
+        async simulateFileImportWithWorkbook(policy) {
+          const workbook = buildImportWorkbook(policy || 'header');
+          const bytes = XLSX.write(workbook, {
+            bookType: 'xlsx',
+            type: 'array'
+          });
+          const file = new File([bytes], 'example36-import.xlsx', {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          });
+          return handleFileImport(file);
+        }
+      };
+    </script>
+  </body>
+</html>

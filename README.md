@@ -5,8 +5,8 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 ## 프로젝트 상태 (2026-03-06)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`, `Phase 10.1~10.2`
-- 다음 범위: `Phase 10.3+` (Excel import/export, theming, a11y)
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`, `Phase 10.1~10.4`, `Phase 11.1~11.3`, `Phase 12.1~12.4`
+- 다음 범위: `Phase 13+` (CSP hardening, benchmark gates)
 - 상세 기준: `checklist.md`
 
 구현 완료 핵심:
@@ -30,8 +30,14 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Pivot pipeline (로컬 pivot matrix + 동적 컬럼 생성 + 서버 pivot query model)
 - Clipboard pipeline (selection copy TSV + plain text paste + HTML paste 방어)
 - CSV/TSV export pipeline (visible/selection/all + progress + cancel)
+- Excel(xlsx) plugin pipeline (plugin 분리, export/import, header mapping, validation)
+- CSS Variables theme token pipeline (`.h-theme-light` / `.h-theme-dark` + `setTheme()` runtime override)
+- SI Design Guide pipeline (토큰 매핑표 + 커스터마이징 레시피 + 고객사 테마 샘플)
 - RemoteDataProvider block cache/LRU/prefetch + server-side query model(sort/filter/group/pivot)
 - 성능 스모크(e2e heartbeat max gap)로 그룹/트리/피벗 UI freeze 회귀 점검
+- ARIA Grid semantics pipeline (`aria-rowcount/colcount/rowindex/colindex` + `aria-activedescendant` focus strategy)
+- Keyboard-only pipeline (navigation/selection/editing, `Ctrl/Cmd+A`, `F2`, editor `Tab/Shift+Tab`)
+- i18n pipeline (`localeText` externalization, Intl number/date formatting, RTL direction option)
 
 ## 핵심 원칙
 
@@ -192,6 +198,32 @@ const csvAll = await grid.exportCsv({
 });
 ```
 
+### Excel Plugin API (XLSX)
+
+```ts
+import { createExcelPlugin } from '@hgrid/grid-plugin-excel';
+
+const excel = createExcelPlugin({
+  defaultSheetName: 'HGrid Export',
+  maxClientExportRows: 200_000
+});
+
+const xlsx = await excel.exportXlsx(grid, {
+  scope: 'selection',
+  dateFormat: 'yyyy-mm-dd hh:mm:ss',
+  numberFormat: '#,##0.00'
+});
+
+if (!xlsx.delegated) {
+  excel.download(xlsx, 'export.xlsx');
+}
+
+await excel.importXlsx(grid, file, {
+  headerMappingPolicy: 'auto',
+  validationMode: 'skipInvalidRows'
+});
+```
+
 ## 루트 스크립트
 
 - `pnpm build`
@@ -205,7 +237,7 @@ const csvAll = await grid.exportCsv({
 - `pnpm bench`
 - `pnpm ci:phase0`
 
-## Examples (현재 1~35)
+## Examples (현재 1~40)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -233,6 +265,11 @@ const csvAll = await grid.exportCsv({
 - `example33`: local pivot matrix(가로 집계 컬럼) + server pivot query model
 - `example34`: clipboard copy/paste(sanitize 포함)
 - `example35`: CSV/TSV export(visible/selection/all + progress/cancel)
+- `example36`: Excel(xlsx) import/export(header mapping + validation)
+- `example37`: CSS variable theme switching(light/dark/custom setTheme)
+- `example38`: ARIA grid semantics(role/row/col index + active descendant)
+- `example39`: keyboard-only flow(navigation/selection/editing)
+- `example40`: i18n(localeText/Intl formatting/RTL)
 
 기능 추가 시 규칙:
 
@@ -273,6 +310,12 @@ const csvAll = await grid.exportCsv({
 - `docs/tree-data-phase9.md`
 - `docs/pivot-phase9.md`
 - `docs/csv-tsv-export-phase10.md`
+- `docs/excel-phase10.md`
+- `docs/theme-tokens-phase11.md`
+- `docs/design-guide-phase11.md`
+- `docs/aria-grid-semantics-phase12.md`
+- `docs/keyboard-only-phase12.md`
+- `docs/i18n-phase12.md`
 
 ## 라이선스
 

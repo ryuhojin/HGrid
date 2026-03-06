@@ -2,6 +2,7 @@ import { EventBus } from '../core/event-bus';
 import type {
   ColumnGroupDef,
   ColumnDef,
+  GridLocaleText,
   GridOptions,
   GridState,
   RowHeightMode,
@@ -12,7 +13,18 @@ import type {
   ScrollbarVisibility,
   StateColumnRenderResult
 } from '../core/grid-options';
-import { formatColumnValue, getColumnValue } from '../data/column-model';
+import {
+  formatColumnValue,
+  getColumnValue,
+  createColumnValueFormatContext,
+  type ColumnValueFormatContext
+} from '../data/column-model';
+import {
+  formatGridLocaleText,
+  localizeCheckAllScope,
+  normalizeGridLocale,
+  resolveGridLocaleText
+} from '../core/grid-locale-text';
 import type { DataTransaction, GridRowData, RowKey } from '../data/data-provider';
 import {
   GROUP_ROW_COLUMN_ID_FIELD,
@@ -55,6 +67,7 @@ interface ColumnsByZone {
 interface CellRenderState {
   isVisible: boolean;
   columnId: string;
+  role: string;
   textContent: string;
   left: number;
   width: number;
@@ -63,6 +76,9 @@ interface CellRenderState {
   extraClassName: string;
   titleText: string;
   ariaLabel: string;
+  ariaRowIndex: number;
+  ariaColIndex: number;
+  cellId: string;
 }
 
 interface IndicatorCellElements {
@@ -243,6 +259,7 @@ const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
   vertical: 'auto',
   horizontal: 'auto'
 };
+let NEXT_ARIA_GRID_INSTANCE_ID = 1;
 
 export class DomRenderer {
   private readonly container: HTMLElement;
@@ -349,6 +366,13 @@ export class DomRenderer {
   private headerReorderDraggingCell: HTMLDivElement | null = null;
   private indicatorHeaderCheckAllElement: HTMLInputElement | null = null;
   private rowCheckboxAnchorRowIndex: number | null = null;
+  private readonly ariaGridId: string;
+  private ariaRowCount = -1;
+  private ariaColCount = -1;
+  private activeDescendantCellId = '';
+  private locale = 'en-US';
+  private localeText: GridLocaleText = resolveGridLocaleText('en-US');
+  private columnValueFormatContext: ColumnValueFormatContext | null = null;
 
   public constructor(container: HTMLElement, options: GridOptions, eventBus: EventBus) {
     this.container = container;
@@ -396,6 +420,8 @@ export class DomRenderer {
     this.scrollbarSize = this.measureScrollbarSize();
     this.rowHeightMap = new RowHeightMap(this.options.rowModel.getViewRowCount(), this.getBaseRowHeight());
     this.selectionModel = new SelectionModel();
+    this.ariaGridId = `hgrid-grid-${NEXT_ARIA_GRID_INSTANCE_ID++}`;
+    this.refreshI18nContext();
 
     this.initializeDom();
     this.markLayoutDirty(true);
@@ -408,6 +434,7 @@ export class DomRenderer {
     this.stopEditing('reconcile');
     this.options = nextOptions;
     this.columnsByZone = this.splitColumns(this.options.columns);
+    this.refreshI18nContext();
     this.reconcileSelection('reconcile');
     this.markLayoutDirty(true);
     this.flushRender();
@@ -529,15 +556,23 @@ export class DomRenderer {
 
   private initializeDom(): void {
     this.rootElement.className = 'hgrid';
+    this.refreshI18nContext();
+    this.rootElement.id = this.ariaGridId;
     this.rootElement.setAttribute('role', 'grid');
+    this.rootElement.setAttribute('aria-multiselectable', 'true');
     this.rootElement.tabIndex = 0;
     this.setHeaderRowCount(0);
 
     this.headerElement.className = 'hgrid__header';
+    this.headerElement.setAttribute('role', 'rowgroup');
     this.headerLeftElement.className = 'hgrid__header-left';
+    this.headerLeftElement.setAttribute('role', 'presentation');
     this.headerCenterElement.className = 'hgrid__header-center';
+    this.headerCenterElement.setAttribute('role', 'presentation');
     this.headerCenterViewportElement.className = 'hgrid__header-viewport';
+    this.headerCenterViewportElement.setAttribute('role', 'presentation');
     this.headerRightElement.className = 'hgrid__header-right';
+    this.headerRightElement.setAttribute('role', 'presentation');
 
     this.headerRowLeftElement.className = 'hgrid__header-row hgrid__header-row--left';
     this.headerRowCenterElement.className = 'hgrid__header-row hgrid__header-row--center';
@@ -552,24 +587,40 @@ export class DomRenderer {
     this.headerElement.append(this.headerLeftElement, this.headerCenterElement, this.headerRightElement, this.headerDropIndicatorElement);
 
     this.bodyElement.className = 'hgrid__body';
+    this.bodyElement.setAttribute('role', 'rowgroup');
     this.bodyLeftElement.className = 'hgrid__body-left';
+    this.bodyLeftElement.setAttribute('role', 'presentation');
     this.bodyCenterElement.className = 'hgrid__body-center';
+    this.bodyCenterElement.setAttribute('role', 'presentation');
     this.bodyRightElement.className = 'hgrid__body-right';
+    this.bodyRightElement.setAttribute('role', 'presentation');
 
     this.viewportElement.className = 'hgrid__viewport';
+    this.viewportElement.setAttribute('role', 'presentation');
     this.spacerElement.className = 'hgrid__spacer';
+    this.spacerElement.setAttribute('aria-hidden', 'true');
     this.verticalScrollElement.className = 'hgrid__v-scroll';
+    this.verticalScrollElement.setAttribute('aria-hidden', 'true');
     this.verticalSpacerElement.className = 'hgrid__v-spacer';
+    this.verticalSpacerElement.setAttribute('aria-hidden', 'true');
     this.horizontalScrollElement.className = 'hgrid__h-scroll';
+    this.horizontalScrollElement.setAttribute('aria-hidden', 'true');
     this.horizontalSpacerElement.className = 'hgrid__h-spacer';
+    this.horizontalSpacerElement.setAttribute('aria-hidden', 'true');
 
     this.rowsViewportLeftElement.className = 'hgrid__rows-viewport hgrid__rows-viewport--left';
+    this.rowsViewportLeftElement.setAttribute('role', 'presentation');
     this.rowsViewportCenterElement.className = 'hgrid__rows-viewport hgrid__rows-viewport--center';
+    this.rowsViewportCenterElement.setAttribute('role', 'presentation');
     this.rowsViewportRightElement.className = 'hgrid__rows-viewport hgrid__rows-viewport--right';
+    this.rowsViewportRightElement.setAttribute('role', 'presentation');
 
     this.rowsLayerLeftElement.className = 'hgrid__rows-layer hgrid__rows-layer--left';
+    this.rowsLayerLeftElement.setAttribute('role', 'presentation');
     this.rowsLayerCenterElement.className = 'hgrid__rows-layer hgrid__rows-layer--center';
+    this.rowsLayerCenterElement.setAttribute('role', 'presentation');
     this.rowsLayerRightElement.className = 'hgrid__rows-layer hgrid__rows-layer--right';
+    this.rowsLayerRightElement.setAttribute('role', 'presentation');
 
     this.rowsViewportLeftElement.append(this.rowsLayerLeftElement);
     this.rowsViewportCenterElement.append(this.rowsLayerCenterElement);
@@ -592,6 +643,7 @@ export class DomRenderer {
     );
 
     this.overlayElement.className = 'hgrid__overlay';
+    this.overlayElement.setAttribute('role', 'presentation');
     this.editorHostElement.className = 'hgrid__editor-host';
     this.editorInputElement.className = 'hgrid__editor-input';
     this.editorInputElement.type = 'text';
@@ -623,8 +675,104 @@ export class DomRenderer {
     this.editorInputElement.addEventListener('blur', this.handleEditorInputBlur);
     this.editorInputElement.addEventListener('input', this.handleEditorInput);
 
+    this.syncAriaGridMetrics();
+    this.syncAriaActiveDescendant();
     this.container.replaceChildren(this.rootElement);
     this.setupResizeObserver();
+  }
+
+  private refreshI18nContext(): void {
+    const hasExplicitLocale = typeof this.options.locale === 'string' && this.options.locale.trim().length > 0;
+    this.locale = normalizeGridLocale(this.options.locale, 'en-US');
+    this.localeText = resolveGridLocaleText(this.locale, this.options.localeText);
+    const hasNumberFormatOptions = Boolean(this.options.numberFormatOptions);
+    const hasDateTimeFormatOptions = Boolean(this.options.dateTimeFormatOptions);
+    const shouldUseIntlFormatting = hasExplicitLocale || hasNumberFormatOptions || hasDateTimeFormatOptions;
+    this.columnValueFormatContext = shouldUseIntlFormatting
+      ? createColumnValueFormatContext({
+          locale: this.locale,
+          numberFormatOptions: this.options.numberFormatOptions,
+          dateTimeFormatOptions: this.options.dateTimeFormatOptions
+        })
+      : null;
+
+    this.rootElement.lang = this.locale;
+    const isRtl = this.options.rtl === true;
+    this.rootElement.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
+    this.rootElement.classList.toggle('hgrid--rtl', isRtl);
+  }
+
+  private localizeText(template: string, values: Record<string, string | number>): string {
+    return formatGridLocaleText(template, values);
+  }
+
+  private getVisibleColumnCount(): number {
+    return this.columnsByZone.left.length + this.columnsByZone.center.length + this.columnsByZone.right.length;
+  }
+
+  private getZoneColumnStartIndex(zoneName: ColumnZoneName): number {
+    if (zoneName === 'left') {
+      return 0;
+    }
+
+    if (zoneName === 'center') {
+      return this.columnsByZone.left.length;
+    }
+
+    return this.columnsByZone.left.length + this.columnsByZone.center.length;
+  }
+
+  private getAriaCellId(rowIndex: number, colIndex: number): string {
+    return `${this.ariaGridId}-cell-r${this.getAriaRowIndexForDataRow(rowIndex)}-c${colIndex + 1}`;
+  }
+
+  private getAccessibleHeaderRowCount(): number {
+    return this.headerGroupRowCount + 1;
+  }
+
+  private getAriaRowIndexForDataRow(rowIndex: number): number {
+    return this.getAccessibleHeaderRowCount() + rowIndex + 1;
+  }
+
+  private syncAriaGridMetrics(): void {
+    const rowCount = this.options.rowModel.getViewRowCount() + this.getAccessibleHeaderRowCount();
+    const colCount = this.getVisibleColumnCount();
+
+    if (this.ariaRowCount !== rowCount) {
+      this.rootElement.setAttribute('aria-rowcount', String(Math.max(0, rowCount)));
+      this.ariaRowCount = rowCount;
+    }
+
+    if (this.ariaColCount !== colCount) {
+      this.rootElement.setAttribute('aria-colcount', String(Math.max(0, colCount)));
+      this.ariaColCount = colCount;
+    }
+  }
+
+  private syncAriaActiveDescendant(): void {
+    const selection = this.selectionModel.getSelection();
+    const activeCell = selection.activeCell;
+    if (!activeCell) {
+      if (this.activeDescendantCellId.length > 0) {
+        this.rootElement.removeAttribute('aria-activedescendant');
+        this.activeDescendantCellId = '';
+      }
+      return;
+    }
+
+    const cellEntry = this.resolveCellElementBySelectionPosition(activeCell.rowIndex, activeCell.colIndex);
+    if (!cellEntry || !cellEntry.cell.id) {
+      if (this.activeDescendantCellId.length > 0) {
+        this.rootElement.removeAttribute('aria-activedescendant');
+        this.activeDescendantCellId = '';
+      }
+      return;
+    }
+
+    if (this.activeDescendantCellId !== cellEntry.cell.id) {
+      this.rootElement.setAttribute('aria-activedescendant', cellEntry.cell.id);
+      this.activeDescendantCellId = cellEntry.cell.id;
+    }
   }
 
   private getResolvedRowIndicatorOptions(): Required<
@@ -856,14 +1004,21 @@ export class DomRenderer {
     };
   }
 
-  private populateHeaderLeafCell(headerCellElement: HTMLDivElement, column: ColumnDef, asPlaceholder: boolean): void {
+  private populateHeaderLeafCell(
+    headerCellElement: HTMLDivElement,
+    column: ColumnDef,
+    asPlaceholder: boolean,
+    ariaColIndex: number
+  ): void {
     headerCellElement.className = 'hgrid__header-cell hgrid__header-cell--leaf';
     headerCellElement.dataset.columnId = column.id;
     headerCellElement.setAttribute('role', 'columnheader');
+    headerCellElement.setAttribute('aria-colindex', String(ariaColIndex));
     if (asPlaceholder) {
       headerCellElement.classList.add('hgrid__header-cell--leaf-placeholder');
       headerCellElement.textContent = '';
       headerCellElement.style.display = 'none';
+      headerCellElement.removeAttribute('aria-colindex');
       return;
     }
 
@@ -877,7 +1032,8 @@ export class DomRenderer {
       checkbox.checked = false;
       checkbox.style.display = rowIndicatorOptions.showCheckbox ? '' : 'none';
       checkbox.disabled = !rowIndicatorOptions.showCheckbox;
-      checkbox.setAttribute('aria-label', `Select all rows (${rowIndicatorOptions.checkAllScope})`);
+      const scopeLabel = localizeCheckAllScope(this.localeText, rowIndicatorOptions.checkAllScope);
+      checkbox.setAttribute('aria-label', this.localizeText(this.localeText.selectAllRows, { scope: scopeLabel }));
       headerCellElement.append(checkbox);
       this.indicatorHeaderCheckAllElement = checkbox;
       return;
@@ -1304,6 +1460,7 @@ export class DomRenderer {
     this.buildCenterColumnMetrics();
     this.rebuildHeader();
     this.updateSpacerSize();
+    this.syncAriaGridMetrics();
 
     const shouldRebuildPool =
       forcePoolRebuild || this.rowPool.length !== this.getPoolSize() || previousCenterCellCapacity !== this.centerCellCapacity;
@@ -1417,10 +1574,17 @@ export class DomRenderer {
   ): HTMLDivElement {
     const rowElement = document.createElement('div');
     rowElement.className = `hgrid__header-row hgrid__header-row--${zoneName} hgrid__header-row--group`;
-    rowElement.setAttribute('role', 'row');
+    const isAriaHeaderRow = zoneName === 'center';
+    rowElement.setAttribute('role', isAriaHeaderRow ? 'row' : 'presentation');
+    if (isAriaHeaderRow) {
+      rowElement.setAttribute('aria-rowindex', String(rowIndex + 1));
+    } else {
+      rowElement.removeAttribute('aria-rowindex');
+    }
     rowElement.style.display = 'block';
     rowElement.style.position = 'relative';
     rowElement.style.width = `${Math.max(1, zoneWidth)}px`;
+    const zoneColumnStartIndex = this.getZoneColumnStartIndex(zoneName);
 
     if (rowLayout) {
       for (let cellIndex = 0; cellIndex < rowLayout.cells.length; cellIndex += 1) {
@@ -1453,6 +1617,7 @@ export class DomRenderer {
         headerCellElement.style.width = `${width}px`;
         headerCellElement.dataset.groupId = cellLayout.groupId;
         headerCellElement.setAttribute('role', 'columnheader');
+        headerCellElement.setAttribute('aria-colindex', String(zoneColumnStartIndex + startColIndex + 1));
         headerCellElement.setAttribute('aria-colspan', String(cellLayout.leafSpan));
         headerCellElement.textContent = cellLayout.header;
         rowElement.append(headerCellElement);
@@ -1476,7 +1641,7 @@ export class DomRenderer {
         }
 
         const headerCellElement = document.createElement('div');
-        this.populateHeaderLeafCell(headerCellElement, column, false);
+        this.populateHeaderLeafCell(headerCellElement, column, false, zoneColumnStartIndex + spanLayout.colIndex + 1);
         headerCellElement.classList.add('hgrid__header-cell--leaf-span');
         headerCellElement.style.position = 'absolute';
         headerCellElement.style.left = `${left}px`;
@@ -1498,16 +1663,23 @@ export class DomRenderer {
   ): void {
     rowElement.replaceChildren();
     rowElement.classList.add('hgrid__header-row--leaf');
-    rowElement.setAttribute('role', 'row');
+    rowElement.setAttribute('role', 'presentation');
+    rowElement.removeAttribute('aria-rowindex');
     rowElement.style.display = 'block';
     rowElement.style.position = 'relative';
     rowElement.style.width = `${Math.max(1, zoneWidth)}px`;
     const hiddenColumns = this.leafSpanHiddenColumnsByZone[zoneName];
+    const zoneColumnStartIndex = this.getZoneColumnStartIndex(zoneName);
 
     for (let colIndex = 0; colIndex < columns.length; colIndex += 1) {
       const column = columns[colIndex];
       const headerCellElement = document.createElement('div');
-      this.populateHeaderLeafCell(headerCellElement, column, hiddenColumns.has(column.id));
+      this.populateHeaderLeafCell(
+        headerCellElement,
+        column,
+        hiddenColumns.has(column.id),
+        zoneColumnStartIndex + colIndex + 1
+      );
       headerCellElement.style.position = 'absolute';
       headerCellElement.style.left = `${columnLeft[colIndex] ?? 0}px`;
       headerCellElement.style.width = `${column.width}px`;
@@ -1519,6 +1691,7 @@ export class DomRenderer {
     rowElement.replaceChildren();
     rowElement.classList.add('hgrid__header-row--leaf');
     rowElement.setAttribute('role', 'row');
+    rowElement.setAttribute('aria-rowindex', String(this.headerGroupRowCount + 1));
     rowElement.style.display = 'block';
     rowElement.style.position = 'relative';
     rowElement.style.width = `${Math.max(1, this.centerColumnsWidth)}px`;
@@ -1537,6 +1710,7 @@ export class DomRenderer {
       this.centerHeaderCellStates.push({
         isVisible: false,
         columnId: '',
+        role: 'columnheader',
         textContent: '',
         left: 0,
         width: 0,
@@ -1544,7 +1718,10 @@ export class DomRenderer {
         isActive: false,
         extraClassName: '',
         titleText: '',
-        ariaLabel: ''
+        ariaLabel: '',
+        ariaRowIndex: -1,
+        ariaColIndex: -1,
+        cellId: ''
       });
     }
   }
@@ -1586,6 +1763,7 @@ export class DomRenderer {
     const visibleDisplay = zoneName === 'center' ? 'block' : '';
     const rowElement = document.createElement('div');
     rowElement.className = `hgrid__row hgrid__row--${zoneName}`;
+    rowElement.setAttribute('role', zoneName === 'center' ? 'row' : 'presentation');
     rowElement.style.height = `${this.getBaseRowHeight()}px`;
     rowElement.style.width = `${width}px`;
 
@@ -1603,6 +1781,7 @@ export class DomRenderer {
       const cellElement = document.createElement('div');
       let indicatorCell: IndicatorCellElements | null = null;
       cellElement.className = zoneName === 'center' ? 'hgrid__cell hgrid__cell--center' : 'hgrid__cell';
+      cellElement.setAttribute('role', 'gridcell');
       if (zoneName === 'center') {
         cellElement.style.position = 'absolute';
         cellElement.style.left = '0px';
@@ -1621,6 +1800,7 @@ export class DomRenderer {
       cellStates.push({
         isVisible: zoneName !== 'center',
         columnId: zoneName === 'center' ? '' : column.id,
+        role: 'gridcell',
         textContent: '',
         left: Number.NaN,
         width: zoneName === 'center' ? Number.NaN : column.width,
@@ -1628,7 +1808,10 @@ export class DomRenderer {
         isActive: false,
         extraClassName: '',
         titleText: '',
-        ariaLabel: ''
+        ariaLabel: '',
+        ariaRowIndex: -1,
+        ariaColIndex: -1,
+        cellId: ''
       });
     }
 
@@ -1661,7 +1844,7 @@ export class DomRenderer {
     checkbox.type = 'checkbox';
     checkbox.className = 'hgrid__indicator-checkbox';
     checkbox.tabIndex = -1;
-    checkbox.setAttribute('aria-label', 'Select row');
+    checkbox.setAttribute('aria-label', this.localeText.selectRowGeneric);
 
     wrapper.append(checkbox);
     cellElement.append(wrapper);
@@ -1889,6 +2072,8 @@ export class DomRenderer {
     }
 
     this.syncIndicatorHeaderCheckAllState();
+    this.syncAriaGridMetrics();
+    this.syncAriaActiveDescendant();
     this.scheduleMeasuredRowHeightPass();
     if (this.editSession) {
       const canKeepEditing = this.syncEditorOverlayPosition();
@@ -1931,8 +2116,10 @@ export class DomRenderer {
       const cellState = zoneRow.cellStates[colIndex];
       const indicatorCell = zoneRow.indicatorCells[colIndex];
       const globalColumnIndex = this.getGlobalColumnIndex(zoneName, colIndex);
+      const ariaColIndex = globalColumnIndex + 1;
       const isCellSelected = this.selectionModel.isCellSelected(rowIndex, globalColumnIndex);
       const isCellActive = this.selectionModel.isCellActive(rowIndex, globalColumnIndex);
+      const cellId = isCellActive ? this.getAriaCellId(rowIndex, globalColumnIndex) : '';
       if (this.isIndicatorCheckboxColumnId(column.id) && indicatorCell) {
         this.bindIndicatorCheckboxCell(
           cell,
@@ -1951,11 +2138,15 @@ export class DomRenderer {
         this.bindCell(cell, cellState, {
           isVisible: true,
           columnId: column.id,
+          role: 'gridcell',
           textContent: rowNumberText,
+          ariaRowIndex: this.getAriaRowIndexForDataRow(rowIndex),
+          ariaColIndex,
+          cellId,
           isSelected: isCellSelected,
           isActive: isCellActive,
           extraClassName: 'hgrid__cell--indicator hgrid__cell--indicator-row-number',
-          ariaLabel: isGroupRow ? '' : `Row ${rowIndex + 1} number`
+          ariaLabel: isGroupRow ? '' : this.localizeText(this.localeText.rowNumber, { row: rowIndex + 1 })
         });
         continue;
       }
@@ -1966,17 +2157,24 @@ export class DomRenderer {
         this.bindCell(cell, cellState, {
           isVisible: true,
           columnId: column.id,
+          role: 'gridcell',
           textContent: statusText,
+          ariaRowIndex: this.getAriaRowIndexForDataRow(rowIndex),
+          ariaColIndex,
+          cellId,
           isSelected: isCellSelected,
           isActive: isCellActive,
           extraClassName: 'hgrid__cell--indicator hgrid__cell--indicator-status',
           titleText: statusText,
-          ariaLabel: statusText.length > 0 ? `Row ${rowIndex + 1} status ${statusText}` : `Row ${rowIndex + 1} status`
+          ariaLabel:
+            statusText.length > 0
+              ? this.localizeText(this.localeText.rowStatusWithValue, { row: rowIndex + 1, status: statusText })
+              : this.localizeText(this.localeText.rowStatus, { row: rowIndex + 1 })
         });
         continue;
       }
 
-      let textContent = isRowLoading ? '' : formatColumnValue(column, row);
+      let textContent = isRowLoading ? '' : formatColumnValue(column, row, this.columnValueFormatContext ?? undefined);
       let extraClassName = isRowLoading ? 'hgrid__cell--loading' : '';
       let titleText = '';
       let ariaLabel = '';
@@ -2013,7 +2211,11 @@ export class DomRenderer {
       this.bindCell(cell, cellState, {
         isVisible: true,
         columnId: column.id,
+        role: 'gridcell',
         textContent,
+        ariaRowIndex: this.getAriaRowIndexForDataRow(rowIndex),
+        ariaColIndex,
+        cellId,
         isSelected: isCellSelected,
         isActive: isCellActive,
         extraClassName,
@@ -2057,11 +2259,14 @@ export class DomRenderer {
       const cell = zoneRow.cells[slotIndex];
       const cellState = zoneRow.cellStates[slotIndex];
       const globalColumnIndex = this.getGlobalColumnIndex('center', colIndex);
+      const isCellSelected = this.selectionModel.isCellSelected(rowIndex, globalColumnIndex);
+      const isCellActive = this.selectionModel.isCellActive(rowIndex, globalColumnIndex);
+      const cellId = isCellActive ? this.getAriaCellId(rowIndex, globalColumnIndex) : '';
       if (!cell) {
         break;
       }
 
-      let textContent = isRowLoading ? '' : formatColumnValue(column, row);
+      let textContent = isRowLoading ? '' : formatColumnValue(column, row, this.columnValueFormatContext ?? undefined);
       let extraClassName = isRowLoading ? 'hgrid__cell--loading' : '';
       let titleText = '';
       let ariaLabel = '';
@@ -2098,11 +2303,15 @@ export class DomRenderer {
       this.bindCell(cell, cellState, {
         isVisible: true,
         columnId: column.id,
+        role: 'gridcell',
         textContent,
+        ariaRowIndex: this.getAriaRowIndexForDataRow(rowIndex),
+        ariaColIndex: globalColumnIndex + 1,
+        cellId,
         left: this.centerColumnLeft[colIndex],
         width: column.width,
-        isSelected: this.selectionModel.isCellSelected(rowIndex, globalColumnIndex),
-        isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex),
+        isSelected: isCellSelected,
+        isActive: isCellActive,
         extraClassName,
         titleText,
         ariaLabel
@@ -2146,6 +2355,7 @@ export class DomRenderer {
     zoneRow.rowState.isVisible = false;
     zoneRow.rowState.rowIndex = -1;
     zoneRow.rowState.dataIndex = -1;
+    zoneRow.element.removeAttribute('aria-rowindex');
   }
 
   private bindRowPosition(
@@ -2178,6 +2388,11 @@ export class DomRenderer {
 
     if (rowState.rowIndex !== rowIndex) {
       zoneRow.element.dataset.rowIndex = String(rowIndex);
+      if (zoneRow.element.getAttribute('role') === 'row') {
+        zoneRow.element.setAttribute('aria-rowindex', String(this.getAriaRowIndexForDataRow(rowIndex)));
+      } else {
+        zoneRow.element.removeAttribute('aria-rowindex');
+      }
       rowState.rowIndex = rowIndex;
     }
 
@@ -2228,6 +2443,7 @@ export class DomRenderer {
       isVisible: boolean;
       columnId: string;
       textContent: string;
+      role?: string;
       left?: number;
       width?: number;
       isSelected?: boolean;
@@ -2235,13 +2451,20 @@ export class DomRenderer {
       extraClassName?: string;
       titleText?: string;
       ariaLabel?: string;
+      ariaRowIndex?: number;
+      ariaColIndex?: number;
+      cellId?: string;
     }
   ): void {
+    const role = nextState.role ?? cellState.role;
     const isSelected = nextState.isSelected ?? false;
     const isActive = nextState.isActive ?? false;
     const extraClassName = nextState.extraClassName ?? '';
     const titleText = nextState.titleText ?? '';
     const ariaLabel = nextState.ariaLabel ?? '';
+    const ariaRowIndex = nextState.ariaRowIndex ?? -1;
+    const ariaColIndex = nextState.ariaColIndex ?? -1;
+    const cellId = nextState.cellId ?? '';
 
     if (cellState.isVisible !== nextState.isVisible) {
       cell.style.display = nextState.isVisible ? '' : 'none';
@@ -2261,6 +2484,15 @@ export class DomRenderer {
     if (cellState.columnId !== nextState.columnId) {
       cell.dataset.columnId = nextState.columnId;
       cellState.columnId = nextState.columnId;
+    }
+
+    if (cellState.role !== role) {
+      if (role.length > 0) {
+        cell.setAttribute('role', role);
+      } else {
+        cell.removeAttribute('role');
+      }
+      cellState.role = role;
     }
 
     if (cellState.textContent !== nextState.textContent) {
@@ -2310,6 +2542,33 @@ export class DomRenderer {
       cellState.ariaLabel = ariaLabel;
     }
 
+    if (cellState.ariaRowIndex !== ariaRowIndex) {
+      if (ariaRowIndex > 0) {
+        cell.setAttribute('aria-rowindex', String(ariaRowIndex));
+      } else {
+        cell.removeAttribute('aria-rowindex');
+      }
+      cellState.ariaRowIndex = ariaRowIndex;
+    }
+
+    if (cellState.ariaColIndex !== ariaColIndex) {
+      if (ariaColIndex > 0) {
+        cell.setAttribute('aria-colindex', String(ariaColIndex));
+      } else {
+        cell.removeAttribute('aria-colindex');
+      }
+      cellState.ariaColIndex = ariaColIndex;
+    }
+
+    if (cellState.cellId !== cellId) {
+      if (cellId.length > 0) {
+        cell.id = cellId;
+      } else {
+        cell.removeAttribute('id');
+      }
+      cellState.cellId = cellId;
+    }
+
     if (cellState.isSelected !== isSelected) {
       cell.classList.toggle('hgrid__cell--selected', isSelected);
       cellState.isSelected = isSelected;
@@ -2333,13 +2592,19 @@ export class DomRenderer {
     const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
     const isRowSelected = this.selectionModel.isRowSelected(rowIndex);
     const extraClassName = 'hgrid__cell--indicator hgrid__cell--indicator-checkbox';
+    const isActive = this.selectionModel.isCellActive(rowIndex, globalColumnIndex);
+    const cellId = isActive ? this.getAriaCellId(rowIndex, globalColumnIndex) : '';
 
     this.bindCell(cell, cellState, {
       isVisible: true,
       columnId,
+      role: 'gridcell',
       textContent: '',
+      ariaRowIndex: this.getAriaRowIndexForDataRow(rowIndex),
+      ariaColIndex: globalColumnIndex + 1,
+      cellId,
       isSelected: this.selectionModel.isCellSelected(rowIndex, globalColumnIndex),
-      isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex),
+      isActive,
       extraClassName,
       ariaLabel: isGroupRow ? '' : `Row ${rowIndex + 1} selection checkbox`
     });
@@ -2348,7 +2613,10 @@ export class DomRenderer {
     indicatorCell.checkbox.checked = isGroupRow ? false : isRowSelected;
     indicatorCell.checkbox.indeterminate = false;
     indicatorCell.checkbox.disabled = isGroupRow;
-    indicatorCell.checkbox.setAttribute('aria-label', isGroupRow ? 'Grouping row' : `Select row ${rowIndex + 1}`);
+    indicatorCell.checkbox.setAttribute(
+      'aria-label',
+      isGroupRow ? this.localeText.groupingRow : this.localizeText(this.localeText.selectRow, { row: rowIndex + 1 })
+    );
   }
 
   private getColumnsWidth(columns: ColumnDef[]): number {
@@ -2700,7 +2968,7 @@ export class DomRenderer {
     }
 
     const row = this.resolveRow(dataIndex);
-    return formatColumnValue(columnEntry.column, row);
+    return formatColumnValue(columnEntry.column, row, this.columnValueFormatContext ?? undefined);
   }
 
   private buildSelectionTsv(): string | null {
@@ -2961,7 +3229,7 @@ export class DomRenderer {
         try {
           resolvedMessage = await validationResult;
         } catch (error) {
-          resolvedMessage = error instanceof Error && error.message ? error.message : 'Validation failed';
+          resolvedMessage = error instanceof Error && error.message ? error.message : this.localeText.validationFailed;
         }
         if (currentValidationTicket !== this.editValidationTicket || this.editSession !== currentSession) {
           return;
@@ -3212,9 +3480,12 @@ export class DomRenderer {
       this.bindCell(headerCell, this.centerHeaderCellStates[slotIndex], {
         isVisible: true,
         columnId: column.id,
+        role: 'columnheader',
         textContent: column.header,
+        ariaRowIndex: this.headerGroupRowCount + 1,
         left: this.centerColumnLeft[colIndex],
-        width: column.width
+        width: column.width,
+        ariaColIndex: this.getZoneColumnStartIndex('center') + colIndex + 1
       });
       slotIndex += 1;
     }
@@ -4534,6 +4805,201 @@ export class DomRenderer {
     };
   }
 
+  private getEditableGlobalColumnIndexes(): number[] {
+    const editableIndexes: number[] = [];
+
+    for (let colIndex = 0; colIndex < this.columnsByZone.left.length; colIndex += 1) {
+      if (this.columnsByZone.left[colIndex].editable) {
+        editableIndexes.push(colIndex);
+      }
+    }
+
+    const centerOffset = this.columnsByZone.left.length;
+    for (let colIndex = 0; colIndex < this.columnsByZone.center.length; colIndex += 1) {
+      if (this.columnsByZone.center[colIndex].editable) {
+        editableIndexes.push(centerOffset + colIndex);
+      }
+    }
+
+    const rightOffset = this.columnsByZone.left.length + this.columnsByZone.center.length;
+    for (let colIndex = 0; colIndex < this.columnsByZone.right.length; colIndex += 1) {
+      if (this.columnsByZone.right[colIndex].editable) {
+        editableIndexes.push(rightOffset + colIndex);
+      }
+    }
+
+    return editableIndexes;
+  }
+
+  private findNextEditableColumnIndex(
+    editableColumnIndexes: number[],
+    currentColIndex: number,
+    direction: 1 | -1
+  ): number {
+    if (direction > 0) {
+      for (let index = 0; index < editableColumnIndexes.length; index += 1) {
+        const candidate = editableColumnIndexes[index];
+        if (candidate > currentColIndex) {
+          return candidate;
+        }
+      }
+      return -1;
+    }
+
+    for (let index = editableColumnIndexes.length - 1; index >= 0; index -= 1) {
+      const candidate = editableColumnIndexes[index];
+      if (candidate < currentColIndex) {
+        return candidate;
+      }
+    }
+
+    return -1;
+  }
+
+  private isEditableRowIndex(rowIndex: number): boolean {
+    const rowCount = this.options.rowModel.getViewRowCount();
+    if (rowIndex < 0 || rowIndex >= rowCount) {
+      return false;
+    }
+
+    const dataIndex = this.options.rowModel.getDataIndex(rowIndex);
+    if (dataIndex < 0) {
+      return false;
+    }
+
+    const row = this.resolveRow(dataIndex);
+    return !isGroupRowData(row);
+  }
+
+  private resolveNextEditableCellByTab(currentCell: SelectionCellPosition, direction: 1 | -1): SelectionCellPosition | null {
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
+      return null;
+    }
+
+    const editableColumnIndexes = this.getEditableGlobalColumnIndexes();
+    if (editableColumnIndexes.length === 0) {
+      return null;
+    }
+
+    if (direction > 0) {
+      let rowIndex = currentCell.rowIndex;
+      let colIndex = currentCell.colIndex;
+
+      while (rowIndex < bounds.rowCount) {
+        if (this.isEditableRowIndex(rowIndex)) {
+          const nextColIndex = this.findNextEditableColumnIndex(editableColumnIndexes, colIndex, 1);
+          if (nextColIndex >= 0) {
+            return {
+              rowIndex,
+              colIndex: nextColIndex
+            };
+          }
+        }
+
+        rowIndex += 1;
+        colIndex = -1;
+      }
+
+      return null;
+    }
+
+    let rowIndex = currentCell.rowIndex;
+    let colIndex = currentCell.colIndex;
+    while (rowIndex >= 0) {
+      if (this.isEditableRowIndex(rowIndex)) {
+        const nextColIndex = this.findNextEditableColumnIndex(editableColumnIndexes, colIndex, -1);
+        if (nextColIndex >= 0) {
+          return {
+            rowIndex,
+            colIndex: nextColIndex
+          };
+        }
+      }
+
+      rowIndex -= 1;
+      colIndex = bounds.columnCount;
+    }
+
+    return null;
+  }
+
+  private resolveNextCellByTab(activeCell: SelectionCellPosition, reverse: boolean): SelectionCellPosition | null {
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
+      return null;
+    }
+
+    let nextRow = activeCell.rowIndex;
+    let nextCol = activeCell.colIndex;
+
+    if (reverse) {
+      if (nextCol > 0) {
+        nextCol -= 1;
+      } else if (nextRow > 0) {
+        nextRow -= 1;
+        nextCol = bounds.columnCount - 1;
+      } else {
+        return null;
+      }
+    } else if (nextCol < bounds.columnCount - 1) {
+      nextCol += 1;
+    } else if (nextRow < bounds.rowCount - 1) {
+      nextRow += 1;
+      nextCol = 0;
+    } else {
+      return null;
+    }
+
+    return {
+      rowIndex: nextRow,
+      colIndex: nextCol
+    };
+  }
+
+  private handleKeyboardSelectAllShortcut(event: KeyboardEvent): boolean {
+    const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+    if (!isCtrlOrMeta || event.altKey) {
+      return false;
+    }
+
+    if (event.key.toLowerCase() !== 'a') {
+      return false;
+    }
+
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
+      event.preventDefault();
+      return true;
+    }
+
+    const currentSelection = this.selectionModel.getSelection();
+    const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell() ?? { rowIndex: 0, colIndex: 0 };
+    const hasSelectionChanged = this.selectionModel.setSelection(
+      {
+        activeCell,
+        cellRanges: [
+          {
+            r1: 0,
+            c1: 0,
+            r2: bounds.rowCount - 1,
+            c2: bounds.columnCount - 1
+          }
+        ],
+        rowRanges: []
+      },
+      bounds,
+      this.resolveRowKeyByRowIndex
+    );
+    if (hasSelectionChanged) {
+      this.keyboardRangeAnchor = { ...activeCell };
+      this.commitSelectionChange('keyboard');
+    }
+
+    event.preventDefault();
+    return true;
+  }
+
   private resolveNextCellByKeyboard(
     key: string,
     isCtrlOrMeta: boolean,
@@ -4686,6 +5152,10 @@ export class DomRenderer {
       return;
     }
 
+    if (this.handleKeyboardSelectAllShortcut(event)) {
+      return;
+    }
+
     if (event.key === ' ' || event.key === 'Spacebar' || event.key === 'Space') {
       const currentSelection = this.selectionModel.getSelection();
       const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
@@ -4710,7 +5180,7 @@ export class DomRenderer {
       return;
     }
 
-    if (event.key === 'Enter') {
+    if (event.key === 'Enter' || event.key === 'F2') {
       const currentSelection = this.selectionModel.getSelection();
       const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
       if (!activeCell) {
@@ -4728,6 +5198,28 @@ export class DomRenderer {
     const currentSelection = this.selectionModel.getSelection();
     const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
     if (!activeCell) {
+      return;
+    }
+
+    if (event.key === 'Tab') {
+      const nextCell = this.resolveNextCellByTab(activeCell, event.shiftKey);
+      if (!nextCell) {
+        return;
+      }
+
+      const hasSelectionChanged = this.applyKeyboardSelection(nextCell, false);
+      const hasScrolled = this.ensureSelectionCellVisible(nextCell);
+
+      if (hasSelectionChanged) {
+        this.commitSelectionChange('keyboard');
+      }
+
+      if (hasScrolled) {
+        this.markScrollDirty();
+        this.scheduleRender();
+      }
+
+      event.preventDefault();
       return;
     }
 
@@ -4845,11 +5337,61 @@ export class DomRenderer {
       return;
     }
 
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      void this.commitEditingWithTabNavigation(event.shiftKey ? -1 : 1);
+      return;
+    }
+
     if (event.key === 'Escape') {
       event.preventDefault();
       this.stopEditing('escape');
     }
   };
+
+  private async commitEditingWithTabNavigation(direction: 1 | -1): Promise<void> {
+    const currentSession = this.editSession;
+    if (!currentSession || this.isEditValidationPending) {
+      return;
+    }
+
+    const currentCell: SelectionCellPosition = {
+      rowIndex: currentSession.rowIndex,
+      colIndex: currentSession.colIndex
+    };
+
+    await this.commitEditing('enter');
+
+    if (this.editSession) {
+      return;
+    }
+
+    const nextCell = this.resolveNextEditableCellByTab(currentCell, direction);
+    if (!nextCell) {
+      this.rootElement.focus();
+      return;
+    }
+
+    const hasSelectionChanged = this.applyKeyboardSelection(nextCell, false);
+    const hasScrolled = this.ensureSelectionCellVisible(nextCell);
+
+    if (hasSelectionChanged) {
+      this.commitSelectionChange('keyboard');
+    }
+
+    if (hasScrolled) {
+      this.markScrollDirty();
+      this.scheduleRender();
+      requestAnimationFrame(() => {
+        if (!this.editSession) {
+          this.startEditingAtCell(nextCell.rowIndex, nextCell.colIndex);
+        }
+      });
+      return;
+    }
+
+    this.startEditingAtCell(nextCell.rowIndex, nextCell.colIndex);
+  }
 
   private handleEditorInputBlur = (): void => {
     if (!this.editSession) {

@@ -18,6 +18,21 @@ export type ColumnComparator = (a: unknown, b: unknown) => number;
 export type ColumnValueGetter = (row: GridRowData, column: ColumnDef) => unknown;
 export type ColumnValueSetter = (row: GridRowData, value: unknown, column: ColumnDef) => void;
 export type RowHeightGetter = (rowIndex: number, dataIndex: number) => number;
+
+export interface GridLocaleText {
+  selectAllRows: string;
+  selectRow: string;
+  selectRowGeneric: string;
+  groupingRow: string;
+  rowStatus: string;
+  rowStatusWithValue: string;
+  rowNumber: string;
+  validationFailed: string;
+  scopeAll: string;
+  scopeFiltered: string;
+  scopeViewport: string;
+}
+
 export interface EditValidationContext {
   rowIndex: number;
   dataIndex: number;
@@ -171,6 +186,11 @@ export interface GridOptions {
   treeData?: TreeDataOptions;
   dataProvider: DataProvider;
   rowModel: RowModel;
+  locale?: string;
+  localeText?: Partial<GridLocaleText>;
+  rtl?: boolean;
+  numberFormatOptions?: Intl.NumberFormatOptions;
+  dateTimeFormatOptions?: Intl.DateTimeFormatOptions;
   height?: number;
   rowHeight?: number;
   rowHeightMode?: RowHeightMode;

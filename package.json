@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "packageManager": "pnpm@10.6.0",
   "scripts": {
-    "build": "pnpm --filter @hgrid/grid-core build",
+    "build": "pnpm --filter @hgrid/grid-core build && pnpm --filter @hgrid/grid-plugin-excel build",
     "typecheck": "pnpm --filter @hgrid/grid-core typecheck",
     "test": "pnpm --filter @hgrid/grid-core test",
     "test:e2e": "node scripts/run-e2e.mjs",

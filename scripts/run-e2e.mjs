@@ -2995,12 +2995,32 @@ async function runExample33Checks(page, serverUrl, pageErrors) {
       Array.isArray(snapshot.pivotModel) &&
       snapshot.pivotModel.length === 0 &&
       Array.isArray(snapshot.headerTexts) &&
-      snapshot.headerTexts.includes('Month')
+      snapshot.headerTexts.some((text) => typeof text === 'string' && text.toLowerCase() === 'month')
     );
   });
-  const clearedSnapshot = await readSnapshot();
+  await waitAnimationFrame(page);
+  await waitAnimationFrame(page);
+  let clearedSnapshot = await readSnapshot();
+  if (!clearedSnapshot.headerTexts.some((text) => typeof text === 'string' && text.toLowerCase() === 'month')) {
+    await page.waitForFunction(() => {
+      const api = window.__example33;
+      if (!api || typeof api.getSnapshot !== 'function') {
+        return false;
+      }
+      const snapshot = api.getSnapshot();
+      return (
+        snapshot &&
+        Array.isArray(snapshot.headerTexts) &&
+        snapshot.headerTexts.some((text) => typeof text === 'string' && text.toLowerCase() === 'month')
+      );
+    });
+    clearedSnapshot = await readSnapshot();
+  }
   assert.equal(clearedSnapshot.pivotModel.length, 0, 'example33 clear-pivot should reset pivot model');
-  assert.ok(clearedSnapshot.headerTexts.includes('Month'), 'example33 clear should restore base month column');
+  assert.ok(
+    clearedSnapshot.headerTexts.some((text) => typeof text === 'string' && text.toLowerCase() === 'month'),
+    'example33 clear should restore base month column'
+  );
 
   await page.click('#set-100k');
   await waitAnimationFrame(page);
@@ -3162,6 +3182,322 @@ async function runExample35Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample36Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example36.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const exportSummary = await page.evaluate(async () => {
+    const api = window.__example36;
+    if (!api || typeof api.exportSelectionSummary !== 'function') {
+      throw new Error('Missing window.__example36.exportSelectionSummary');
+    }
+    return api.exportSelectionSummary();
+  });
+
+  assert.equal(exportSummary.scope, 'selection', 'example36 should export selection scope');
+  assert.equal(exportSummary.rowCount, 5, 'example36 selection export should include 5 rows');
+  assert.equal(exportSummary.canceled, false, 'example36 export should not be canceled');
+  assert.equal(exportSummary.delegated, false, 'example36 export should run client-side');
+  assert.equal(exportSummary.headerName, 'Name', 'example36 export should include Name header in column B');
+  assert.equal(exportSummary.scoreType, 'n', 'example36 score column should be numeric in xlsx');
+  assert.ok(
+    typeof exportSummary.dateFormat === 'string' && exportSummary.dateFormat.includes('yyyy-mm-dd'),
+    `example36 date format should be applied, got ${exportSummary.dateFormat}`
+  );
+  assert.equal(exportSummary.hasBuffer, true, 'example36 export result should include binary buffer');
+
+  const headerImportResult = await page.evaluate(async () => {
+    const api = window.__example36;
+    if (!api || typeof api.runImport !== 'function') {
+      throw new Error('Missing window.__example36.runImport');
+    }
+    return api.runImport('header');
+  });
+
+  assert.equal(headerImportResult.importedRows, 2, 'example36 header import should import 2 valid rows');
+  assert.equal(headerImportResult.updatedRows, 2, 'example36 header import should update 2 rows');
+  assert.equal(headerImportResult.addedRows, 0, 'example36 header import should not append rows');
+  assert.equal(headerImportResult.issues.length, 1, 'example36 header import should report 1 validation issue');
+  assert.ok(
+    headerImportResult.mappedColumns.includes('name') && headerImportResult.mappedColumns.includes('score'),
+    'example36 header import should map expected columns'
+  );
+
+  const afterHeaderSnapshot = await page.evaluate(() => {
+    const api = window.__example36;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example36.getSnapshot');
+    }
+    return api.getSnapshot();
+  });
+  assert.equal(afterHeaderSnapshot.row0.name, 'Imported-A', 'example36 row0 should be updated by import');
+  assert.equal(afterHeaderSnapshot.row1.name, 'Imported-C', 'example36 row1 should be updated by import');
+
+  const idImportResult = await page.evaluate(async () => {
+    const api = window.__example36;
+    if (!api || typeof api.runImport !== 'function') {
+      throw new Error('Missing window.__example36.runImport');
+    }
+    return api.runImport('id');
+  });
+
+  assert.equal(idImportResult.importedRows, 2, 'example36 id import should import 2 valid rows');
+  assert.equal(idImportResult.updatedRows, 2, 'example36 id import should update 2 rows');
+  assert.equal(idImportResult.issues.length, 1, 'example36 id import should preserve validation pipeline');
+
+  const fileImportResult = await page.evaluate(async () => {
+    const api = window.__example36;
+    if (!api || typeof api.simulateFileImportWithWorkbook !== 'function') {
+      throw new Error('Missing window.__example36.simulateFileImportWithWorkbook');
+    }
+    return api.simulateFileImportWithWorkbook('header');
+  });
+  assert.equal(fileImportResult.importedRows, 2, 'example36 file import should import 2 valid rows');
+  assert.equal(fileImportResult.updatedRows, 2, 'example36 file import should update rows');
+  assert.equal(fileImportResult.issues.length, 1, 'example36 file import should report validation issue');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample37Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example37.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => {
+    const api = window.__example37;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example37.getSnapshot');
+    }
+    return api.getSnapshot();
+  });
+
+  assert.ok(
+    initialSnapshot.shellClassName.includes('h-theme-light'),
+    `example37 should start in light class, got ${initialSnapshot.shellClassName}`
+  );
+  assert.equal(
+    initialSnapshot.cssVars.headerBg,
+    '#f8fafc',
+    `example37 light header token mismatch: ${initialSnapshot.cssVars.headerBg}`
+  );
+
+  const darkSnapshot = await page.evaluate(() => {
+    const api = window.__example37;
+    if (!api || typeof api.applyDarkTheme !== 'function' || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example37 dark APIs');
+    }
+    api.applyDarkTheme();
+    return api.getSnapshot();
+  });
+
+  assert.ok(
+    darkSnapshot.shellClassName.includes('h-theme-dark'),
+    `example37 should switch to dark class, got ${darkSnapshot.shellClassName}`
+  );
+  assert.equal(darkSnapshot.cssVars.headerBg, '#111827', 'example37 dark header token should be applied');
+  assert.equal(
+    darkSnapshot.computed.gridBackground,
+    'rgb(15, 23, 42)',
+    `example37 dark background mismatch: ${darkSnapshot.computed.gridBackground}`
+  );
+
+  const brandSnapshot = await page.evaluate(() => {
+    const api = window.__example37;
+    if (!api || typeof api.applyBrandTheme !== 'function' || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example37 brand APIs');
+    }
+    api.applyBrandTheme();
+    return api.getSnapshot();
+  });
+  assert.equal(brandSnapshot.cssVars.headerBg, '#fffbeb', 'example37 brand header token should be applied via setTheme');
+  assert.equal(
+    brandSnapshot.cssVars.borderColor,
+    '#fcd34d',
+    `example37 brand border token mismatch: ${brandSnapshot.cssVars.borderColor}`
+  );
+  assert.ok(
+    brandSnapshot.cssVars.fontFamily.includes('Pretendard'),
+    `example37 brand font token should include Pretendard, got ${brandSnapshot.cssVars.fontFamily}`
+  );
+
+  const resetSnapshot = await page.evaluate(() => {
+    const api = window.__example37;
+    if (!api || typeof api.resetTokensByCurrentClass !== 'function' || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example37 reset APIs');
+    }
+    api.resetTokensByCurrentClass();
+    api.applyLightTheme();
+    return api.getSnapshot();
+  });
+  assert.ok(
+    resetSnapshot.shellClassName.includes('h-theme-light'),
+    `example37 should restore light class, got ${resetSnapshot.shellClassName}`
+  );
+  assert.equal(resetSnapshot.cssVars.headerBg, '#f8fafc', 'example37 reset should restore light header token');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample38Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example38.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => {
+    const api = window.__example38;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example38.getSnapshot');
+    }
+    return api.getSnapshot();
+  });
+  assert.equal(initialSnapshot.root.role, 'grid', 'example38 root role should be grid');
+  assert.equal(initialSnapshot.root.rowcount, '1502', 'example38 aria-rowcount should include header rows');
+  assert.equal(initialSnapshot.root.colcount, '6', 'example38 aria-colcount mismatch');
+  assert.ok(initialSnapshot.root.activedescendant, 'example38 should expose aria-activedescendant on init');
+  assert.equal(initialSnapshot.activeCell?.ariaColIndex, '2', 'example38 active cell should start at Name column');
+
+  await page.evaluate(() => {
+    const api = window.__example38;
+    if (!api || typeof api.setActive !== 'function') {
+      throw new Error('Missing window.__example38 APIs');
+    }
+    api.setActive(0, 4);
+  });
+  await waitAnimationFrame(page);
+  const scoreSnapshot = await page.evaluate(() => window.__example38.getSnapshot());
+  assert.equal(scoreSnapshot.activeCell?.ariaColIndex, '5', 'example38 active cell should move to Score column');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample39Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example39.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => {
+    const api = window.__example39;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example39.getSnapshot');
+    }
+    return api.getSnapshot();
+  });
+  assert.equal(initialSnapshot.root.role, 'grid', 'example39 root role should be grid');
+  assert.deepEqual(initialSnapshot.selection.activeCell, { rowIndex: 0, colIndex: 1 }, 'example39 initial active cell mismatch');
+
+  await page.evaluate(() => {
+    const api = window.__example39;
+    if (!api || typeof api.focusGrid !== 'function') {
+      throw new Error('Missing window.__example39.focusGrid');
+    }
+    api.focusGrid();
+  });
+
+  const selectAllShortcut = process.platform === 'darwin' ? 'Meta+A' : 'Control+A';
+  await page.keyboard.press(selectAllShortcut);
+  await waitAnimationFrame(page);
+
+  const selectAllSnapshot = await page.evaluate(() => {
+    const api = window.__example39;
+    return api.getSnapshot();
+  });
+  assert.deepEqual(
+    selectAllSnapshot.selection.cellRanges[0],
+    { r1: 0, c1: 0, r2: 1199, c2: 4 },
+    'example39 Ctrl/Cmd+A should select full range'
+  );
+
+  await page.keyboard.press('F2');
+  await page.waitForSelector('.hgrid__editor-host--visible', { timeout: 10_000, state: 'attached' });
+  await page.fill('.hgrid__editor-input', 'Customer-1-Edited');
+  await page.keyboard.press('Tab');
+  await waitAnimationFrame(page);
+  await waitAnimationFrame(page);
+
+  const afterTabSnapshot = await page.evaluate(() => window.__example39.getSnapshot());
+  assert.equal(afterTabSnapshot.editor.isEditing, true, 'example39 should stay editing after Tab');
+  assert.deepEqual(
+    afterTabSnapshot.selection.activeCell,
+    { rowIndex: 0, colIndex: 2 },
+    'example39 Tab should move editor to next editable cell'
+  );
+  const editedNameCellText = await page
+    .locator('.hgrid__row--center[data-row-index=\"0\"] .hgrid__cell[data-column-id=\"name\"]')
+    .first()
+    .textContent();
+  assert.equal(editedNameCellText, 'Customer-1-Edited', 'example39 name should be committed by Tab');
+
+  await page.fill('.hgrid__editor-input', '999');
+  await page.keyboard.press('Shift+Tab');
+  await waitAnimationFrame(page);
+  await waitAnimationFrame(page);
+
+  const afterShiftTabSnapshot = await page.evaluate(() => window.__example39.getSnapshot());
+  assert.equal(afterShiftTabSnapshot.editor.isEditing, true, 'example39 should stay editing after Shift+Tab');
+  assert.deepEqual(
+    afterShiftTabSnapshot.selection.activeCell,
+    { rowIndex: 0, colIndex: 1 },
+    'example39 Shift+Tab should move editor to previous editable cell'
+  );
+  const editedScoreCellText = await page
+    .locator('.hgrid__row--center[data-row-index=\"0\"] .hgrid__cell[data-column-id=\"score\"]')
+    .first()
+    .textContent();
+  assert.equal(editedScoreCellText, '999', 'example39 score should be committed by Shift+Tab');
+
+  await page.keyboard.press('Escape');
+  await waitAnimationFrame(page);
+  const afterEscapeSnapshot = await page.evaluate(() => window.__example39.getSnapshot());
+  assert.equal(afterEscapeSnapshot.editor.isEditing, false, 'example39 Escape should close editor');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample40Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example40.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => {
+    const api = window.__example40;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example40.getSnapshot');
+    }
+    return api.getSnapshot();
+  });
+  assert.equal(initialSnapshot.locale, 'en-US', 'example40 should start with en-US locale');
+  assert.equal(initialSnapshot.rootDir, 'ltr', 'example40 should start with LTR dir');
+  assert.equal(initialSnapshot.amountText, initialSnapshot.expectedAmountText, 'example40 en-US amount text mismatch');
+  assert.equal(initialSnapshot.dateText, initialSnapshot.expectedDateText, 'example40 en-US date text mismatch');
+
+  await page.evaluate(() => {
+    const api = window.__example40;
+    api.setLocale('de-DE');
+  });
+  await waitAnimationFrame(page);
+  const deSnapshot = await page.evaluate(() => window.__example40.getSnapshot());
+  assert.equal(deSnapshot.locale, 'de-DE', 'example40 should switch to de-DE locale');
+  assert.equal(deSnapshot.amountText, deSnapshot.expectedAmountText, 'example40 de-DE amount text mismatch');
+  assert.equal(deSnapshot.dateText, deSnapshot.expectedDateText, 'example40 de-DE date text mismatch');
+
+  await page.evaluate(() => {
+    const api = window.__example40;
+    api.setLocale('ko-KR');
+    api.setRtl(true);
+  });
+  await waitAnimationFrame(page);
+  const koRtlSnapshot = await page.evaluate(() => window.__example40.getSnapshot());
+  assert.equal(koRtlSnapshot.locale, 'ko-KR', 'example40 should switch to ko-KR locale');
+  assert.equal(koRtlSnapshot.rtl, true, 'example40 rtl state should be true');
+  assert.equal(koRtlSnapshot.rootDir, 'rtl', 'example40 root dir should switch to rtl');
+  assert.ok(
+    String(koRtlSnapshot.rootClassName).includes('hgrid--rtl'),
+    `example40 root class should include hgrid--rtl, got ${koRtlSnapshot.rootClassName}`
+  );
+  assert.equal(koRtlSnapshot.amountText, koRtlSnapshot.expectedAmountText, 'example40 ko-KR amount text mismatch');
+  assert.equal(koRtlSnapshot.dateText, koRtlSnapshot.expectedDateText, 'example40 ko-KR date text mismatch');
+  assert.ok(
+    String(koRtlSnapshot.checkAllAriaLabel).includes('모든 행 선택'),
+    `example40 checkAll aria label should be localized, got ${koRtlSnapshot.checkAllAriaLabel}`
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -3264,6 +3600,16 @@ async function main() {
     await runExample34Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample35Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample36Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample37Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample38Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample39Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample40Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

@@ -778,58 +778,132 @@
 - [x] all rows(대용량 시 progress + cancel)
 
 ## 10.3 Excel(xlsx)
-- [ ] export:
-  - [ ] 기본 시트/헤더
-  - [ ] number/date formatting
-  - [ ] 대용량 한계 문서화 + 서버 export hook 제공
-- [ ] import:
-  - [ ] 헤더 매핑 정책
-  - [ ] validation pipeline
+- [x] export:
+  - [x] 기본 시트/헤더
+  - [x] number/date formatting
+  - [x] 대용량 한계 문서화 + 서버 export hook 제공
+- [x] import:
+  - [x] 헤더 매핑 정책
+  - [x] validation pipeline
 
 ### 수용 기준
-- [ ] 엑셀/CSV 기능이 core 성능을 오염시키지 않음(플러그인 분리)
+- [x] 엑셀/CSV 기능이 core 성능을 오염시키지 않음(플러그인 분리)
+  - Excel(xlsx) 기능은 `packages/grid-plugins/excel`로 분리하고, core에는 공개 API 훅만 추가
+
+### 코어 변경 코멘트 (10.3 반영, 2026-03-06)
+- `packages/grid-core/src/core/grid.ts`
+  - 플러그인 확장용 공개 API 추가:
+    - `getColumns`, `getVisibleColumns`
+    - `getDataProvider`, `getViewRowCount`, `getDataIndex`
+    - `getVisibleRowRange`, `refresh`
+- `packages/grid-plugins/excel/*`
+  - `@hgrid/grid-plugin-excel` 신규 패키지
+  - xlsx export/import:
+    - export scope(visible/selection/all), progress/cancel, number/date format
+    - import header mapping(id/header/auto), validation pipeline(cell/row)
+    - 대용량 server export hook 제공
+- 검증:
+  - example/e2e: `examples/example36.html`, `scripts/run-e2e.mjs` Example36 시나리오
 
 ## 10.4 예제
 - [x] `example{N}.html`: clipboard
 - [x] `example{N}.html`: csv export
-- [ ] `example{N}.html`: excel import/export
+- [x] `example{N}.html`: excel import/export
 
 ---
 
 # Phase 11 — Theming & Design Guide (SI 필수)
 ## 11.1 CSS Variables 기반 토큰
-- [ ] 토큰 목록 확정(폰트/색/라인/패딩/상태색)
-- [ ] `.eg-theme-light`, `.eg-theme-dark` 제공
-- [ ] 테마 스위칭 API: `setTheme()`
+- [x] 토큰 목록 확정(폰트/색/라인/패딩/상태색)
+- [x] `.h-theme-light`, `.h-theme-dark` 제공
+- [x] 테마 스위칭 API: `setTheme()`
+
+### 코어 변경 코멘트 (11.1 반영, 2026-03-06)
+- `packages/grid-core/src/grid.css`
+  - CSS Variables 확장:
+    - typography/font tokens
+    - color tokens(base/header/selection/editor/state)
+    - line/padding tokens
+  - 테마 클래스 추가:
+    - `.h-theme-light`
+    - `.h-theme-dark`
+- `setTheme()` 연동:
+  - 기존 API를 유지하면서 token 오버라이드 대상 범위를 확장
+  - 런타임 class theme + `setTheme()` 조합 지원
+- 검증:
+  - unit: `packages/grid-core/test/grid.spec.ts` setTheme token 반영 테스트
+  - example/e2e: `examples/example37.html`, `scripts/run-e2e.mjs` Example37 시나리오
 
 ## 11.2 Design Guide 문서
-- [ ] “토큰→UI 반영 위치” 표
-- [ ] SI 커스터마이징 레시피(색/폰트/헤더/선택/포커스)
-- [ ] 고객사 테마 샘플 2~3개
+- [x] “토큰→UI 반영 위치” 표
+- [x] SI 커스터마이징 레시피(색/폰트/헤더/선택/포커스)
+- [x] 고객사 테마 샘플 2~3개
+
+### 문서 변경 코멘트 (11.2 반영, 2026-03-06)
+- `docs/design-guide-phase11.md`
+  - 토큰 -> UI 반영 위치 매핑표 추가
+  - SI 커스터마이징 레시피(색상/폰트/헤더/선택·포커스) 추가
+  - 고객사 테마 샘플 3종(공공/금융/물류) 추가
 
 ## 11.3 예제
-- [ ] `example{N}.html`: theme switching
+- [x] `example{N}.html`: theme switching
 
 ---
 
 # Phase 12 — Accessibility(A11y) & i18n
 ## 12.1 ARIA Grid semantics
-- [ ] role/aria-rowcount/aria-colcount/aria-rowindex/aria-colindex 정책 확정
-- [ ] focus strategy 선택:
-  - [ ] aria-activedescendant OR roving tabindex
-- [ ] 스크린리더 테스트 매트릭스 문서화
+- [x] role/aria-rowcount/aria-colcount/aria-rowindex/aria-colindex 정책 확정
+- [x] focus strategy 선택:
+  - [x] aria-activedescendant OR roving tabindex
+- [x] 스크린리더 테스트 매트릭스 문서화
+
+### 코어 변경 코멘트 (12.1 반영, 2026-03-06)
+- `dom-renderer`에 ARIA row/col semantics를 고정:
+  - root: `role=grid`, `aria-rowcount`, `aria-colcount`, `aria-multiselectable`
+  - header/body rowgroup, center row `role=row`, pinned row `role=presentation`
+  - cell/header `aria-rowindex`/`aria-colindex` 및 `columnheader`/`gridcell` role 반영
+- 포커스 전략은 `aria-activedescendant`로 확정:
+  - active cell에 안정적인 id를 부여하고 root에서 추적
+  - 가상화로 active cell이 비가시 상태가 되면 `aria-activedescendant` 제거
+- 검증:
+  - `grid.spec.ts`에 ARIA semantics + active descendant 동기화 테스트 추가
+  - `docs/aria-grid-semantics-phase12.md`에 스크린리더 매트릭스와 정책 문서화
 
 ## 12.2 Keyboard-only 완전 동작
-- [ ] 내비게이션/선택/편집 전부 키보드 지원
+- [x] 내비게이션/선택/편집 전부 키보드 지원
+
+### 코어 변경 코멘트 (12.2 반영, 2026-03-06)
+- 키보드-only 동작 보강:
+  - `Ctrl/Cmd + A` 전체 셀 선택
+  - `F2` 편집 시작
+  - non-edit `Tab/Shift+Tab` 셀 이동
+  - editor `Tab/Shift+Tab` 커밋 후 다음/이전 editable 셀로 이동
+- 검증:
+  - `grid.spec.ts`에 keyboard-only 선택/편집 테스트 추가
+  - `docs/keyboard-only-phase12.md` 정책 문서 추가
+  - `example39.html` keyboard-only 데모 추가
 
 ## 12.3 i18n
-- [ ] locale strings 외부화
-- [ ] Intl 기반 number/date formatting
-- [ ] RTL 옵션(필요 시)
+- [x] locale strings 외부화
+- [x] Intl 기반 number/date formatting
+- [x] RTL 옵션(필요 시)
+
+### 코어 변경 코멘트 (12.3 반영, 2026-03-06)
+- `GridOptions` i18n 옵션 추가:
+  - `locale`, `localeText`, `numberFormatOptions`, `dateTimeFormatOptions`, `rtl`
+- locale strings 외부화:
+  - `grid-locale-text` 모듈에서 기본 번들(en/ko) + override merge
+  - indicator/aria/edit validation fallback 문자열을 localeText 기반으로 렌더
+- Intl 포맷:
+  - formatter 미지정 컬럼에 대해 `type=number/date` 기본 Intl 포맷 적용
+  - renderer/export 경로 모두 동일 포맷 컨텍스트 사용
+- RTL:
+  - root `dir` + `.hgrid--rtl` 토글
+  - text alignment 및 group/tree indent 방향 전환
 
 ## 12.4 예제
-- [ ] `example{N}.html`: a11y demo
-- [ ] `example{N}.html`: i18n + RTL demo(옵션)
+- [x] `example{N}.html`: a11y demo
+- [x] `example{N}.html`: i18n + RTL demo(옵션)
 
 ---
 

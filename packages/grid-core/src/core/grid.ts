@@ -4,6 +4,7 @@ import type {
   ColumnDef,
   ColumnGroupDef,
   GroupAggregationDef,
+  GridLocaleText,
   GroupModelItem,
   GroupingMode,
   PivotModelItem,
@@ -19,11 +20,13 @@ import type {
   GridTheme,
   RowIndicatorOptions
 } from './grid-options';
+import { normalizeGridLocale } from './grid-locale-text';
 import { DomRenderer } from '../render/dom-renderer';
-import { ColumnModel, formatColumnValue } from '../data/column-model';
+import { ColumnModel, createColumnValueFormatContext, formatColumnValue } from '../data/column-model';
+import type { ColumnValueFormatContext } from '../data/column-model';
 import type { ColumnFilterCondition, GridFilterModel } from '../data/filter-executor';
 import { CooperativeFilterExecutor, type FilterExecutor } from '../data/filter-executor';
-import type { GridRowData, RowKey } from '../data/data-provider';
+import type { DataProvider, GridRowData, RowKey } from '../data/data-provider';
 import { LocalDataProvider } from '../data/local-data-provider';
 import type { RowModelOptions, RowModelState, SparseRowOverride, ViewToDataMapping } from '../data/row-model';
 import { RowModel } from '../data/row-model';
@@ -53,6 +56,7 @@ const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 108;
 const DEFAULT_EXPORT_CHUNK_SIZE = 2000;
 const DEFAULT_EXPORT_LINE_BREAK = '\n';
+const DEFAULT_LOCALE = 'en-US';
 
 function isSystemUtilityColumn(columnId: string): boolean {
   return (
@@ -104,6 +108,49 @@ function mergeStateColumnOptions(
     ...currentOptions,
     ...nextOptions
   };
+}
+
+function cloneLocaleText(localeText?: Partial<GridLocaleText>): Partial<GridLocaleText> | undefined {
+  if (!localeText || typeof localeText !== 'object') {
+    return undefined;
+  }
+
+  const nextLocaleText: Partial<GridLocaleText> = {};
+  const keys = Object.keys(localeText) as Array<keyof GridLocaleText>;
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    const value = localeText[key];
+    if (typeof value === 'string') {
+      nextLocaleText[key] = value;
+    }
+  }
+
+  return nextLocaleText;
+}
+
+function cloneNumberFormatOptions(options?: Intl.NumberFormatOptions): Intl.NumberFormatOptions | undefined {
+  if (!options || typeof options !== 'object') {
+    return undefined;
+  }
+
+  return { ...options };
+}
+
+function cloneDateTimeFormatOptions(options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions | undefined {
+  if (!options || typeof options !== 'object') {
+    return undefined;
+  }
+
+  return { ...options };
+}
+
+function normalizeOptionalLocale(locale: string | undefined): string | undefined {
+  if (typeof locale !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = locale.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function cloneGroupModel(groupModel?: GroupModelItem[]): GroupModelItem[] {
@@ -528,6 +575,11 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     treeData: mergeTreeDataOptions(undefined, config?.treeData),
     dataProvider,
     rowModel,
+    locale: normalizeOptionalLocale(config?.locale),
+    localeText: cloneLocaleText(config?.localeText),
+    rtl: config?.rtl === true,
+    numberFormatOptions: cloneNumberFormatOptions(config?.numberFormatOptions),
+    dateTimeFormatOptions: cloneDateTimeFormatOptions(config?.dateTimeFormatOptions),
     height: config?.height,
     rowHeight: config?.rowHeight,
     rowHeightMode: config?.rowHeightMode,
@@ -586,6 +638,11 @@ export interface GridExportResult {
   canceled: boolean;
 }
 
+export interface GridVisibleRowRange {
+  startRow: number;
+  endRow: number;
+}
+
 interface ExportRowSegment {
   startRow: number;
   endRow: number;
@@ -638,6 +695,7 @@ export class Grid {
   private sortMapping: Int32Array | null = null;
   private filterMapping: Int32Array | null = null;
   private dataProviderUnsubscribe: (() => void) | null = null;
+  private columnValueFormatContext: ColumnValueFormatContext | null = null;
 
   public constructor(container: HTMLElement, config?: GridConfig) {
     const normalizedOptions = normalizeOptions(config);
@@ -648,6 +706,7 @@ export class Grid {
       ...normalizedOptions,
       columns: this.columnModel.getColumns()
     };
+    this.rebuildColumnValueFormatContext();
     this.eventBus = new EventBus();
     this.eventBus.on('columnResize', this.handleColumnResize);
     this.eventBus.on('columnReorder', this.handleColumnReorder);
@@ -707,6 +766,20 @@ export class Grid {
     const nextGrouping = mergeGroupingOptions(this.options.grouping, options.grouping);
     const nextPivoting = mergePivotingOptions(this.options.pivoting, options.pivoting);
     const mergedTreeData = mergeTreeDataOptions(this.treeDataOptions, options.treeData);
+    const hasLocaleOption = Object.prototype.hasOwnProperty.call(options, 'locale');
+    const hasLocaleTextOption = Object.prototype.hasOwnProperty.call(options, 'localeText');
+    const hasRtlOption = Object.prototype.hasOwnProperty.call(options, 'rtl');
+    const hasNumberFormatOption = Object.prototype.hasOwnProperty.call(options, 'numberFormatOptions');
+    const hasDateTimeFormatOption = Object.prototype.hasOwnProperty.call(options, 'dateTimeFormatOptions');
+    const nextLocale = hasLocaleOption ? normalizeOptionalLocale(options.locale) : this.options.locale;
+    const nextLocaleText = hasLocaleTextOption ? cloneLocaleText(options.localeText) : cloneLocaleText(this.options.localeText);
+    const nextRtl = hasRtlOption ? options.rtl === true : this.options.rtl;
+    const nextNumberFormatOptions = hasNumberFormatOption
+      ? cloneNumberFormatOptions(options.numberFormatOptions)
+      : cloneNumberFormatOptions(this.options.numberFormatOptions);
+    const nextDateTimeFormatOptions = hasDateTimeFormatOption
+      ? cloneDateTimeFormatOptions(options.dateTimeFormatOptions)
+      : cloneDateTimeFormatOptions(this.options.dateTimeFormatOptions);
 
     if (options.columns || options.rowIndicator) {
       const sourceColumns = options.columns ?? (this.baseColumnsBeforeClientPivot ?? this.columnModel.getColumns());
@@ -765,6 +838,11 @@ export class Grid {
 
     this.options = {
       ...this.options,
+      locale: nextLocale,
+      localeText: nextLocaleText,
+      rtl: nextRtl,
+      numberFormatOptions: nextNumberFormatOptions,
+      dateTimeFormatOptions: nextDateTimeFormatOptions,
       height: options.height ?? this.options.height,
       rowHeight: options.rowHeight ?? this.options.rowHeight,
       rowHeightMode: options.rowHeightMode ?? this.options.rowHeightMode,
@@ -788,6 +866,7 @@ export class Grid {
       rowModel: this.rowModel,
       columns: this.columnModel.getColumns()
     };
+    this.rebuildColumnValueFormatContext();
 
     if (previousSourceDataProvider !== this.sourceDataProvider) {
       this.bindDataProvider(this.sourceDataProvider);
@@ -1415,6 +1494,34 @@ export class Grid {
     this.renderer.clearSelection();
   }
 
+  public getColumns(): ColumnDef[] {
+    return this.columnModel.getColumns().map((column) => ({ ...column }));
+  }
+
+  public getVisibleColumns(): ColumnDef[] {
+    return this.getVisibleColumnsInRendererOrder().map((column) => ({ ...column }));
+  }
+
+  public getDataProvider(): DataProvider {
+    return this.options.dataProvider;
+  }
+
+  public getViewRowCount(): number {
+    return this.rowModel.getViewRowCount();
+  }
+
+  public getDataIndex(rowIndex: number): number {
+    return this.rowModel.getDataIndex(rowIndex);
+  }
+
+  public getVisibleRowRange(): GridVisibleRowRange | null {
+    return this.renderer.getVisibleRowRange();
+  }
+
+  public refresh(): void {
+    this.renderer.setOptions(this.getRendererOptions());
+  }
+
   public async exportCsv(options: GridExportOptions = {}): Promise<GridExportResult> {
     return this.exportDelimited('csv', ',', options);
   }
@@ -1790,7 +1897,7 @@ export class Grid {
     const row = this.buildExportRowData(dataIndex, columns);
     const cells = new Array<string>(columns.length);
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-      const text = formatColumnValue(columns[columnIndex], row);
+      const text = formatColumnValue(columns[columnIndex], row, this.columnValueFormatContext ?? undefined);
       cells[columnIndex] = this.escapeDelimitedValue(text, delimiter);
     }
 
@@ -2011,6 +2118,24 @@ export class Grid {
       rowModel: this.rowModel,
       columns: this.columnModel.getVisibleColumns()
     };
+  }
+
+  private rebuildColumnValueFormatContext(): void {
+    const hasExplicitLocale = typeof this.options.locale === 'string' && this.options.locale.trim().length > 0;
+    const hasNumberFormatOptions = Boolean(this.options.numberFormatOptions);
+    const hasDateTimeFormatOptions = Boolean(this.options.dateTimeFormatOptions);
+    const shouldUseIntlFormatting = hasExplicitLocale || hasNumberFormatOptions || hasDateTimeFormatOptions;
+
+    if (!shouldUseIntlFormatting) {
+      this.columnValueFormatContext = null;
+      return;
+    }
+
+    this.columnValueFormatContext = createColumnValueFormatContext({
+      locale: normalizeGridLocale(this.options.locale, DEFAULT_LOCALE),
+      numberFormatOptions: this.options.numberFormatOptions,
+      dateTimeFormatOptions: this.options.dateTimeFormatOptions
+    });
   }
 
   private hasActiveFilterModel(): boolean {

@@ -407,6 +407,79 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 36,
+      "file": "example36.html",
+      "title": "Example 36 - Excel Import Export",
+      "tags": [
+        "phase10",
+        "excel",
+        "xlsx",
+        "import",
+        "export",
+        "validation",
+        "umd"
+      ],
+      "plugins": [
+        "excel"
+      ]
+    },
+    {
+      "number": 37,
+      "file": "example37.html",
+      "title": "Example 37 - Theme Tokens Switching",
+      "tags": [
+        "phase11",
+        "theme",
+        "css-variables",
+        "theme-switching",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 38,
+      "file": "example38.html",
+      "title": "Example 38 - ARIA Grid Semantics",
+      "tags": [
+        "phase12",
+        "a11y",
+        "aria",
+        "aria-activedescendant",
+        "screen-reader",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 39,
+      "file": "example39.html",
+      "title": "Example 39 - Keyboard Only Flow",
+      "tags": [
+        "phase12",
+        "a11y",
+        "keyboard-only",
+        "navigation",
+        "selection",
+        "editing",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 40,
+      "file": "example40.html",
+      "title": "Example 40 - i18n Locale RTL",
+      "tags": [
+        "phase12",
+        "i18n",
+        "locale",
+        "intl",
+        "rtl",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

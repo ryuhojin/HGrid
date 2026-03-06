@@ -5,7 +5,8 @@ export type {
   GridExportProgressEvent,
   GridExportResult,
   GridExportScope,
-  GridExportStatus
+  GridExportStatus,
+  GridVisibleRowRange
 } from '../core/grid';
 export type {
   ColumnComparator,
@@ -35,6 +36,7 @@ export type {
   EditValidationResult,
   EditValidator,
   GridConfig,
+  GridLocaleText,
   GridOptions,
   RowHeightGetter,
   RowHeightMode,

@@ -1933,6 +1933,253 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
+  it('selects entire grid cell range by Ctrl/Cmd+A keyboard shortcut', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: Array.from({ length: 240 }, (_value, index) => ({
+        id: index + 1,
+        name: `User-${index + 1}`,
+        status: index % 2 === 0 ? 'active' : 'idle'
+      })),
+      height: 220,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 4, colIndex: 1 },
+      cellRanges: [{ r1: 4, c1: 1, r2: 4, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const selection = grid.getSelection();
+    expect(selection.activeCell).toEqual({ rowIndex: 4, colIndex: 1 });
+    expect(selection.cellRanges).toEqual([{ r1: 0, c1: 0, r2: 239, c2: 2 }]);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('supports keyboard-only editing flow with F2 and Tab/Shift+Tab', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' as const },
+        { id: 'name', header: 'Name', width: 200, type: 'text' as const, editable: true },
+        { id: 'score', header: 'Score', width: 140, type: 'number' as const, editable: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text' as const }
+      ],
+      rowData: [
+        { id: 1, name: 'User-1', score: 10, status: 'active' },
+        { id: 2, name: 'User-2', score: 20, status: 'idle' }
+      ],
+      height: 160,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          editorHostElement: HTMLDivElement;
+          editorInputElement: HTMLInputElement;
+        };
+      }
+    ).renderer;
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true }));
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+    expect(renderer.editorInputElement.value).toBe('User-1');
+
+    renderer.editorInputElement.value = 'User-1-Edited';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+    expect(renderer.editorInputElement.value).toBe('10');
+    expect(grid.getSelection().activeCell).toEqual({ rowIndex: 0, colIndex: 2 });
+    const nameCellAfterTab = container.querySelector(
+      '.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(nameCellAfterTab.textContent).toBe('User-1-Edited');
+
+    renderer.editorInputElement.value = '777';
+    renderer.editorInputElement.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+    expect(renderer.editorInputElement.value).toBe('User-1-Edited');
+    expect(grid.getSelection().activeCell).toEqual({ rowIndex: 0, colIndex: 1 });
+    const scoreCellAfterShiftTab = container.querySelector(
+      '.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="score"]'
+    ) as HTMLDivElement;
+    expect(scoreCellAfterShiftTab.textContent).toBe('777');
+
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(false);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('formats number/date cells by locale and updates formatted output after setOptions', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const rowData = [
+      {
+        id: 1,
+        score: 1234567.89,
+        updatedAt: '2026-03-06T00:00:00.000Z'
+      }
+    ];
+    const dateFormatOptions = {
+      timeZone: 'UTC',
+      year: 'numeric' as const,
+      month: '2-digit' as const,
+      day: '2-digit' as const
+    };
+    const numberFormatOptions = {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    };
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'score', header: 'Score', width: 180, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ],
+      rowData,
+      locale: 'en-US',
+      numberFormatOptions,
+      dateTimeFormatOptions: dateFormatOptions,
+      height: 140,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await waitForFrame();
+
+    const scoreCell = container.querySelector(
+      '.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="score"]'
+    ) as HTMLDivElement;
+    const dateCell = container.querySelector(
+      '.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="updatedAt"]'
+    ) as HTMLDivElement;
+    expect(scoreCell.textContent).toBe(new Intl.NumberFormat('en-US', numberFormatOptions).format(1234567.89));
+    expect(dateCell.textContent).toBe(new Intl.DateTimeFormat('en-US', dateFormatOptions).format(new Date(rowData[0].updatedAt)));
+
+    grid.setOptions({
+      locale: 'de-DE'
+    });
+    await waitForFrame();
+    await waitForFrame();
+
+    const scoreCellAfterLocaleChange = container.querySelector(
+      '.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="score"]'
+    ) as HTMLDivElement;
+    const dateCellAfterLocaleChange = container.querySelector(
+      '.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="updatedAt"]'
+    ) as HTMLDivElement;
+
+    expect(scoreCellAfterLocaleChange.textContent).toBe(new Intl.NumberFormat('de-DE', numberFormatOptions).format(1234567.89));
+    expect(dateCellAfterLocaleChange.textContent).toBe(
+      new Intl.DateTimeFormat('de-DE', dateFormatOptions).format(new Date(rowData[0].updatedAt))
+    );
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies localeText overrides and rtl direction to root/indicator aria labels', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha' },
+        { id: 2, name: 'Beta' }
+      ],
+      locale: 'ko-KR',
+      rtl: true,
+      height: 140,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    const checkAll = container.querySelector('.hgrid__indicator-checkall') as HTMLInputElement;
+    const firstRowCheckbox = container.querySelector(
+      '.hgrid__row--left[data-row-index="0"] .hgrid__indicator-checkbox'
+    ) as HTMLInputElement;
+
+    expect(root.getAttribute('dir')).toBe('rtl');
+    expect(root.classList.contains('hgrid--rtl')).toBe(true);
+    expect(checkAll.getAttribute('aria-label')).toBe('모든 행 선택 (필터 결과)');
+    expect(firstRowCheckbox.getAttribute('aria-label')).toBe('1행 선택');
+
+    grid.setOptions({
+      locale: 'en-US',
+      rtl: false,
+      localeText: {
+        selectAllRows: 'Pick all rows ({scope})',
+        scopeFiltered: 'filtered-set',
+        selectRow: 'Pick row {row}'
+      }
+    });
+    await waitForFrame();
+
+    await waitForFrame();
+    const checkAllAfterSetOptions = container.querySelector('.hgrid__indicator-checkall') as HTMLInputElement;
+    const firstRowCheckboxAfterSetOptions = container.querySelector(
+      '.hgrid__row--left[data-row-index="0"] .hgrid__indicator-checkbox'
+    ) as HTMLInputElement;
+
+    expect(root.getAttribute('dir')).toBe('ltr');
+    expect(root.classList.contains('hgrid--rtl')).toBe(false);
+    expect(checkAllAfterSetOptions.getAttribute('aria-label')).toBe('Pick all rows (filtered-set)');
+    expect(firstRowCheckboxAfterSetOptions.getAttribute('aria-label')).toBe('Pick row 1');
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('copies selected cell range as TSV through clipboard event', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -2077,6 +2324,58 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
+  it('exposes plugin extension APIs for data/viewport access and refresh', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' }
+      ],
+      rowData: Array.from({ length: 80 }, (_value, index) => ({
+        id: index + 1,
+        name: `User-${index + 1}`,
+        score: index
+      })),
+      height: 168,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    const visibleColumns = grid.getVisibleColumns();
+    expect(visibleColumns.map((column) => column.id)).toEqual(['id', 'name', 'score']);
+    expect(grid.getColumns().length).toBe(3);
+    expect(grid.getViewRowCount()).toBe(80);
+    expect(grid.getDataIndex(0)).toBe(0);
+
+    const visibleRange = grid.getVisibleRowRange();
+    expect(visibleRange).not.toBeNull();
+    expect(visibleRange?.startRow).toBeGreaterThanOrEqual(0);
+    expect((visibleRange?.endRow ?? 0) - (visibleRange?.startRow ?? 0)).toBeGreaterThanOrEqual(0);
+
+    const dataProvider = grid.getDataProvider();
+    dataProvider.applyTransactions([
+      {
+        type: 'updateCell',
+        index: 0,
+        columnId: 'name',
+        value: 'Plugin-Updated'
+      }
+    ]);
+    grid.refresh();
+    await waitForFrame();
+
+    const firstNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(firstNameCell.textContent).toBe('Plugin-Updated');
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('exports selection range as TSV', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -2166,6 +2465,40 @@ describe('Grid DOM pooling', () => {
     const exportedLines = result.content.split('\n');
     expect(exportedLines[0]).toBe('ID,Name');
     expect(exportedLines.length).toBe(result.rowCount + 1);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies css variable tokens through setTheme', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha' },
+        { id: 2, name: 'Beta' }
+      ],
+      height: 160,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    grid.setTheme({
+      '--hgrid-header-bg': '#111827',
+      '--hgrid-border-color': '#334155',
+      '--hgrid-font-family': '"Pretendard", "Noto Sans KR", sans-serif'
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    expect(root.style.getPropertyValue('--hgrid-header-bg')).toBe('#111827');
+    expect(root.style.getPropertyValue('--hgrid-border-color')).toBe('#334155');
+    expect(root.style.getPropertyValue('--hgrid-font-family')).toBe('"Pretendard", "Noto Sans KR", sans-serif');
 
     grid.destroy();
     container.remove();
@@ -3037,6 +3370,145 @@ describe('Grid DOM pooling', () => {
     await grid.setTreeExpanded(100, true);
     await waitForFrame();
     expect(loadCount).toBe(1);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('exposes ARIA grid semantics with grouped headers and pinned zones', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 980, configurable: true });
+    document.body.append(container);
+
+    const rowData = Array.from({ length: 120 }, (_, index) => ({
+      id: index + 1,
+      name: `Customer-${index + 1}`,
+      country: index % 2 === 0 ? 'KR' : 'US',
+      score: index * 3
+    }));
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'country', header: 'Country', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number', pinned: 'right' }
+      ],
+      columnGroups: [
+        {
+          groupId: 'participant',
+          header: 'Participant',
+          children: ['name', 'country']
+        }
+      ],
+      rowData,
+      height: 220,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    expect(root.getAttribute('role')).toBe('grid');
+    expect(root.getAttribute('aria-colcount')).toBe('4');
+    expect(root.getAttribute('aria-rowcount')).toBe(String(rowData.length + 2));
+
+    const centerGroupRow = container.querySelector('.hgrid__header-center .hgrid__header-row--group') as HTMLDivElement;
+    expect(centerGroupRow.getAttribute('role')).toBe('row');
+    expect(centerGroupRow.getAttribute('aria-rowindex')).toBe('1');
+
+    const centerLeafRow = container.querySelector('.hgrid__header-center .hgrid__header-row--leaf') as HTMLDivElement;
+    expect(centerLeafRow.getAttribute('role')).toBe('row');
+    expect(centerLeafRow.getAttribute('aria-rowindex')).toBe('2');
+
+    const centerDataRow = container.querySelector('.hgrid__row--center[data-row-index="0"]') as HTMLDivElement;
+    expect(centerDataRow.getAttribute('role')).toBe('row');
+    expect(centerDataRow.getAttribute('aria-rowindex')).toBe('3');
+
+    const leftDataRow = container.querySelector('.hgrid__row--left[data-row-index="0"]') as HTMLDivElement;
+    expect(leftDataRow.getAttribute('role')).toBe('presentation');
+    expect(leftDataRow.hasAttribute('aria-rowindex')).toBe(false);
+
+    const idCell = container.querySelector('.hgrid__row--left[data-row-index="0"] .hgrid__cell[data-column-id="id"]') as HTMLDivElement;
+    expect(idCell.getAttribute('aria-rowindex')).toBe('3');
+    expect(idCell.getAttribute('aria-colindex')).toBe('1');
+
+    const nameHeaderCell = container.querySelector(
+      '.hgrid__header-center .hgrid__header-row--leaf .hgrid__header-cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(nameHeaderCell.getAttribute('aria-colindex')).toBe('2');
+
+    const scoreCell = container.querySelector(
+      '.hgrid__row--right[data-row-index="0"] .hgrid__cell[data-column-id="score"]'
+    ) as HTMLDivElement;
+    expect(scoreCell.getAttribute('aria-rowindex')).toBe('3');
+    expect(scoreCell.getAttribute('aria-colindex')).toBe('4');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('syncs aria-activedescendant with active cell lifecycle', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 760, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 160, type: 'text' }
+      ],
+      rowData: Array.from({ length: 600 }, (_, index) => ({
+        id: index + 1,
+        name: `Name-${index + 1}`,
+        status: index % 2 === 0 ? 'active' : 'idle'
+      })),
+      height: 220,
+      rowHeight: 28,
+      overscan: 6
+    });
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const activeCellId = root.getAttribute('aria-activedescendant');
+    expect(activeCellId).toBeTruthy();
+
+    const activeCell = activeCellId ? (container.querySelector(`#${activeCellId}`) as HTMLDivElement | null) : null;
+    expect(activeCell).toBeTruthy();
+    expect(activeCell?.dataset.columnId).toBe('name');
+    expect(activeCell?.getAttribute('aria-rowindex')).toBe('2');
+    expect(activeCell?.getAttribute('aria-colindex')).toBe('2');
+
+    const verticalScrollElement = getVerticalScrollElement(container);
+    verticalScrollElement.scrollTop = 4000;
+    verticalScrollElement.dispatchEvent(new Event('scroll'));
+    await waitForFrame();
+
+    expect(root.hasAttribute('aria-activedescendant')).toBe(false);
+
+    const visibleCenterRow = container.querySelector('.hgrid__row--center[data-row-index]') as HTMLDivElement;
+    const visibleRowIndex = Number(visibleCenterRow.dataset.rowIndex ?? -1);
+    expect(visibleRowIndex).toBeGreaterThan(0);
+
+    grid.setSelection({
+      activeCell: { rowIndex: visibleRowIndex, colIndex: 1 },
+      cellRanges: [],
+      rowRanges: []
+    });
+    await waitForFrame();
+    expect(root.hasAttribute('aria-activedescendant')).toBe(true);
+
+    grid.clearSelection();
+    await waitForFrame();
+    expect(root.hasAttribute('aria-activedescendant')).toBe(false);
 
     grid.destroy();
     container.remove();

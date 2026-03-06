@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ColumnModel, formatColumnValue, getColumnValue } from '../src/data/column-model';
+import { ColumnModel, createColumnValueFormatContext, formatColumnValue, getColumnValue } from '../src/data/column-model';
 
 describe('ColumnModel', () => {
   it('normalizes width bounds and visibility defaults', () => {
@@ -57,5 +57,52 @@ describe('ColumnModel', () => {
           { id: 'id', header: 'Duplicate', width: 120, type: 'text' }
         ])
     ).toThrow(/Duplicate column id/);
+  });
+
+  it('formats number/date values via Intl context locale', () => {
+    const row = {
+      amount: 1234567.89,
+      updatedAt: '2026-03-06T00:00:00.000Z'
+    };
+    const numberColumn = {
+      id: 'amount',
+      header: 'Amount',
+      width: 120,
+      type: 'number' as const
+    };
+    const dateColumn = {
+      id: 'updatedAt',
+      header: 'Updated At',
+      width: 180,
+      type: 'date' as const
+    };
+    const context = createColumnValueFormatContext({
+      locale: 'de-DE',
+      numberFormatOptions: {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      },
+      dateTimeFormatOptions: {
+        timeZone: 'UTC',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }
+    });
+
+    expect(formatColumnValue(numberColumn, row, context)).toBe(
+      new Intl.NumberFormat('de-DE', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(1234567.89)
+    );
+    expect(formatColumnValue(dateColumn, row, context)).toBe(
+      new Intl.DateTimeFormat('de-DE', {
+        timeZone: 'UTC',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(new Date('2026-03-06T00:00:00.000Z'))
+    );
   });
 });

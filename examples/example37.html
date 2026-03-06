@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 37 - Theme Tokens Switching</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #summary,
+      #log {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1080px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 37 - Theme Tokens Switching</h1>
+    <div class="controls">
+      <button id="theme-light" type="button">light class</button>
+      <button id="theme-dark" type="button">dark class</button>
+      <button id="theme-brand" type="button">brand setTheme()</button>
+      <button id="theme-reset" type="button">reset setTheme()</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="summary">Ready</pre>
+    <pre id="log">Ready</pre>
+
+    <div id="grid-shell" class="h-theme-light">
+      <div id="grid"></div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const rowData = Array.from({ length: 1000 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        status: index % 2 === 0 ? 'active' : 'idle',
+        score: (index * 19) % 1000,
+        updatedAt: new Date(Date.now() - index * 120000).toISOString()
+      }));
+
+      const LIGHT_TOKENS = {
+        '--hgrid-font-family': '"Segoe UI", "Noto Sans KR", sans-serif',
+        '--hgrid-header-bg': '#f8fafc',
+        '--hgrid-header-group-bg': '#f3f6fb',
+        '--hgrid-header-group-text': '#475569',
+        '--hgrid-border-color': '#d5dbe3',
+        '--hgrid-selection-bg': 'rgba(59, 130, 246, 0.14)',
+        '--hgrid-row-selection-bg': 'rgba(59, 130, 246, 0.08)',
+        '--hgrid-active-border': 'rgba(37, 99, 235, 0.9)'
+      };
+
+      const DARK_TOKENS = {
+        '--hgrid-font-family': '"Segoe UI", "Noto Sans KR", sans-serif',
+        '--hgrid-header-bg': '#111827',
+        '--hgrid-header-group-bg': '#1f2937',
+        '--hgrid-header-group-text': '#cbd5e1',
+        '--hgrid-border-color': '#334155',
+        '--hgrid-selection-bg': 'rgba(96, 165, 250, 0.28)',
+        '--hgrid-row-selection-bg': 'rgba(96, 165, 250, 0.16)',
+        '--hgrid-active-border': 'rgba(125, 211, 252, 0.95)'
+      };
+
+      const BRAND_TOKENS = {
+        '--hgrid-font-family': '"Pretendard", "Noto Sans KR", sans-serif',
+        '--hgrid-header-bg': '#fffbeb',
+        '--hgrid-header-group-bg': '#fef3c7',
+        '--hgrid-header-group-text': '#92400e',
+        '--hgrid-border-color': '#fcd34d',
+        '--hgrid-selection-bg': 'rgba(245, 158, 11, 0.25)',
+        '--hgrid-row-selection-bg': 'rgba(245, 158, 11, 0.14)',
+        '--hgrid-active-border': 'rgba(217, 119, 6, 0.95)'
+      };
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 8,
+        overscanCols: 2
+      });
+
+      const shellElement = document.getElementById('grid-shell');
+      const summaryElement = document.getElementById('summary');
+      const logElement = document.getElementById('log');
+
+      function getGridRoot() {
+        return document.querySelector('#grid .hgrid');
+      }
+
+      function applyThemeClass(themeClassName) {
+        shellElement.classList.remove('h-theme-light', 'h-theme-dark');
+        shellElement.classList.add(themeClassName);
+      }
+
+      function applyTokenSet(tokens) {
+        grid.setTheme(tokens);
+      }
+
+      function getSnapshot() {
+        const root = getGridRoot();
+        const headerCell = document.querySelector('.hgrid__header-cell--leaf');
+        const rowCell = document.querySelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]');
+
+        const rootStyle = root ? getComputedStyle(root) : null;
+        const headerStyle = headerCell ? getComputedStyle(headerCell) : null;
+        const rowStyle = rowCell ? getComputedStyle(rowCell) : null;
+
+        return {
+          shellClassName: shellElement.className,
+          cssVars: {
+            headerBg: rootStyle ? rootStyle.getPropertyValue('--hgrid-header-bg').trim() : '',
+            borderColor: rootStyle ? rootStyle.getPropertyValue('--hgrid-border-color').trim() : '',
+            activeBorder: rootStyle ? rootStyle.getPropertyValue('--hgrid-active-border').trim() : '',
+            fontFamily: rootStyle ? rootStyle.getPropertyValue('--hgrid-font-family').trim() : ''
+          },
+          computed: {
+            gridBackground: rootStyle ? rootStyle.backgroundColor : '',
+            gridColor: rootStyle ? rootStyle.color : '',
+            headerBackground: headerStyle ? headerStyle.backgroundColor : '',
+            rowTextColor: rowStyle ? rowStyle.color : ''
+          }
+        };
+      }
+
+      function writeLog(label) {
+        logElement.textContent = JSON.stringify(
+          {
+            label,
+            snapshot: getSnapshot()
+          },
+          null,
+          2
+        );
+      }
+
+      function setSummary(text) {
+        summaryElement.textContent = text;
+      }
+
+      function applyLightTheme() {
+        applyThemeClass('h-theme-light');
+        applyTokenSet(LIGHT_TOKENS);
+        setSummary('Applied .h-theme-light + setTheme(light tokens)');
+        writeLog('theme-light');
+      }
+
+      function applyDarkTheme() {
+        applyThemeClass('h-theme-dark');
+        applyTokenSet(DARK_TOKENS);
+        setSummary('Applied .h-theme-dark + setTheme(dark tokens)');
+        writeLog('theme-dark');
+      }
+
+      function applyBrandTheme() {
+        applyTokenSet(BRAND_TOKENS);
+        setSummary('Applied custom brand tokens with setTheme()');
+        writeLog('theme-brand');
+      }
+
+      function resetTokensByCurrentClass() {
+        if (shellElement.classList.contains('h-theme-dark')) {
+          applyTokenSet(DARK_TOKENS);
+          setSummary('Reset setTheme tokens to dark baseline');
+          writeLog('theme-reset-dark');
+          return;
+        }
+
+        applyTokenSet(LIGHT_TOKENS);
+        setSummary('Reset setTheme tokens to light baseline');
+        writeLog('theme-reset-light');
+      }
+
+      document.getElementById('theme-light').addEventListener('click', applyLightTheme);
+      document.getElementById('theme-dark').addEventListener('click', applyDarkTheme);
+      document.getElementById('theme-brand').addEventListener('click', applyBrandTheme);
+      document.getElementById('theme-reset').addEventListener('click', resetTokensByCurrentClass);
+      document.getElementById('inspect').addEventListener('click', () => writeLog('inspect'));
+
+      applyLightTheme();
+
+      window.__example37 = {
+        applyLightTheme,
+        applyDarkTheme,
+        applyBrandTheme,
+        resetTokensByCurrentClass,
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

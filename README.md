@@ -5,8 +5,8 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 ## 프로젝트 상태 (2026-03-06)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`
-- 다음 범위: `Phase 9+` (group/tree/pivot/aggregation)
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1`
+- 다음 범위: `Phase 9.2+` (tree/pivot/aggregation 확장)
 - 상세 기준: `checklist.md`
 
 구현 완료 핵심:
@@ -25,7 +25,8 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Worker-first sorting/filtering executor + Grid API 연동
 - Column feature pack (resize/reorder/pin/hide) + selection indicator columns
 - Multi-level column group header
-- RemoteDataProvider block cache/LRU/prefetch + server-side query model(sort/filter/groupModel placeholder)
+- Grouping pipeline (group model + key 기반 expand/collapse + sum/avg/min/max/count/custom aggregation)
+- RemoteDataProvider block cache/LRU/prefetch + server-side query model(sort/filter/groupModel)
 
 ## 핵심 원칙
 
@@ -118,6 +119,25 @@ await grid.clearFilterModel();
 await grid.clearSortModel();
 ```
 
+### Grouping API
+
+```ts
+await grid.setGroupModel([
+  { columnId: 'region' },
+  { columnId: 'status' }
+]);
+
+await grid.setGroupAggregations([
+  { columnId: 'balance', type: 'sum' },
+  { columnId: 'score', type: 'avg' },
+  { columnId: 'id', type: 'count' }
+]);
+
+await grid.collapseAllGroups();
+await grid.expandAllGroups();
+await grid.setGroupingMode('server');
+```
+
 ## 루트 스크립트
 
 - `pnpm build`
@@ -131,7 +151,7 @@ await grid.clearSortModel();
 - `pnpm bench`
 - `pnpm ci:phase0`
 
-## Examples (현재 1~30)
+## Examples (현재 1~31)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -154,6 +174,7 @@ await grid.clearSortModel();
 - `example28`: selection indicator + state column
 - `example29`: multi-level column group header
 - `example30`: remote datasource + block cache + server sort/filter
+- `example31`: grouping + aggregation + expand/collapse + mode 전환
 
 기능 추가 시 규칙:
 
@@ -190,6 +211,7 @@ await grid.clearSortModel();
 - `docs/selection-indicator-columns-phase7.md`
 - `docs/column-group-header-phase7.md`
 - `docs/remote-data-provider-phase8.md`
+- `docs/grouping-phase9.md`
 
 ## 라이선스
 

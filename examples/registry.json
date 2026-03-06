@@ -326,6 +326,18 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 30,
+      "file": "example30.html",
+      "title": "Example 30 - Remote DataProvider Block Cache",
+      "tags": [
+        "phase8",
+        "remote-data-provider",
+        "server-side-row-model",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

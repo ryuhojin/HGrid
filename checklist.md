@@ -646,21 +646,32 @@
 
 # Phase 8 — Remote Data: Server-side Row Model(엔터프라이즈 필수)
 ## 8.1 RemoteDataProvider
-- [ ] block cache:
-  - [ ] blockSize 정의(예: 500~2000 rows)
-  - [ ] LRU 캐시
-  - [ ] prefetch 정책(스크롤 방향 기반)
-- [ ] server query model:
-  - [ ] sortModel
-  - [ ] filterModel
-  - [ ] groupModel(추후)
-- [ ] loading row / skeleton 정책
+- [x] block cache:
+  - [x] blockSize 정의(예: 500~2000 rows)
+  - [x] LRU 캐시
+  - [x] prefetch 정책(스크롤 방향 기반)
+- [x] server query model:
+  - [x] sortModel
+  - [x] filterModel
+  - [x] groupModel(추후)
+- [x] loading row / skeleton 정책
 
 ### 수용 기준
-- [ ] “천만 행”을 실제로 보유하지 않아도 서버에서 무한 스크롤 가능
+- [x] “천만 행”을 실제로 보유하지 않아도 서버에서 무한 스크롤 가능
+
+### 코어 변경 코멘트 (8.1 반영, 2026-03-06)
+- `packages/grid-core/src/data/remote-data-provider.ts`에 `RemoteDataProvider` 클래스를 구현했다.
+  - block cache(`blockSize/maxBlocks/prefetchBlocks`), LRU eviction, 스크롤 방향 기반 prefetch
+  - query model(`sortModel/filterModel/groupModel?`) 변경 시 in-flight cancel + cache invalidate
+  - `onRowsChanged` 이벤트와 `loadingRowPolicy`(`skeleton|none`) + `isRowLoading` 제공
+- `packages/grid-core/src/core/grid.ts`는 remote provider 감지 시 `setSortModel/setFilterModel`을 로컬 정렬/필터 executor 대신 서버 query 위임 경로로 전환한다.
+- `packages/grid-core/src/render/dom-renderer.ts` + `grid.css`는 loading row를 `.hgrid__cell--loading` skeleton으로 표시한다(풀링 유지, DOM churn 없음).
+- 검증:
+  - unit: `packages/grid-core/test/remote-data-provider.spec.ts`
+  - e2e/example: `examples/example30.html`, `scripts/run-e2e.mjs` Example30
 
 ## 8.2 예제
-- [ ] `example{N}.html`: remote datasource + cache + server sort/filter
+- [x] `example{N}.html`: remote datasource + cache + server sort/filter
 
 ---
 

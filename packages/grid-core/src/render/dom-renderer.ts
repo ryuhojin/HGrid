@@ -1787,12 +1787,33 @@ export class DomRenderer {
       }
 
       const row = this.resolveRow(dataIndex);
+      const isRowLoading = this.options.dataProvider.isRowLoading?.(dataIndex) === true;
       const rowHeight = this.resolveRenderedRowHeight(rowIndex, dataIndex);
       const rowTranslateY = this.getRowTop(rowIndex) - viewportOffsetY;
 
-      this.renderZoneRow('left', poolItem.left, this.columnsByZone.left, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
-      this.renderCenterZoneRow(poolItem.center, row, rowIndex, dataIndex, rowTranslateY, rowHeight, horizontalWindow);
-      this.renderZoneRow('right', poolItem.right, this.columnsByZone.right, row, rowIndex, dataIndex, rowTranslateY, rowHeight);
+      this.renderZoneRow(
+        'left',
+        poolItem.left,
+        this.columnsByZone.left,
+        row,
+        rowIndex,
+        dataIndex,
+        rowTranslateY,
+        rowHeight,
+        isRowLoading
+      );
+      this.renderCenterZoneRow(poolItem.center, row, rowIndex, dataIndex, rowTranslateY, rowHeight, horizontalWindow, isRowLoading);
+      this.renderZoneRow(
+        'right',
+        poolItem.right,
+        this.columnsByZone.right,
+        row,
+        rowIndex,
+        dataIndex,
+        rowTranslateY,
+        rowHeight,
+        isRowLoading
+      );
     }
 
     this.syncIndicatorHeaderCheckAllState();
@@ -1813,7 +1834,8 @@ export class DomRenderer {
     rowIndex: number,
     dataIndex: number,
     rowTranslateY: number,
-    rowHeight: number
+    rowHeight: number,
+    isRowLoading: boolean
   ): void {
     if (columns.length === 0) {
       this.hidePoolRow(zoneRow);
@@ -1864,11 +1886,11 @@ export class DomRenderer {
         continue;
       }
 
-      let textContent = formatColumnValue(column, row);
-      let extraClassName = '';
+      let textContent = isRowLoading ? '' : formatColumnValue(column, row);
+      let extraClassName = isRowLoading ? 'hgrid__cell--loading' : '';
       let titleText = '';
       let ariaLabel = '';
-      if (column.id === STATE_COLUMN_ID) {
+      if (column.id === STATE_COLUMN_ID && !isRowLoading) {
         const rowStatus = this.resolveRowStatusTone(row, rowIndex, dataIndex, this.selectionModel.isRowSelected(rowIndex));
         const stateColumnResult = this.resolveStateColumnResult(row, rowIndex, dataIndex, rowStatus);
         textContent = stateColumnResult.textContent;
@@ -1897,7 +1919,8 @@ export class DomRenderer {
     dataIndex: number,
     rowTranslateY: number,
     rowHeight: number,
-    horizontalWindow: HorizontalWindow
+    horizontalWindow: HorizontalWindow,
+    isRowLoading: boolean
   ): void {
     if (this.columnsByZone.center.length === 0 || horizontalWindow.end <= horizontalWindow.start) {
       this.hidePoolRow(zoneRow);
@@ -1918,11 +1941,11 @@ export class DomRenderer {
         break;
       }
 
-      let textContent = formatColumnValue(column, row);
-      let extraClassName = '';
+      let textContent = isRowLoading ? '' : formatColumnValue(column, row);
+      let extraClassName = isRowLoading ? 'hgrid__cell--loading' : '';
       let titleText = '';
       let ariaLabel = '';
-      if (column.id === STATE_COLUMN_ID) {
+      if (column.id === STATE_COLUMN_ID && !isRowLoading) {
         const rowStatus = this.resolveRowStatusTone(row, rowIndex, dataIndex, this.selectionModel.isRowSelected(rowIndex));
         const stateColumnResult = this.resolveStateColumnResult(row, rowIndex, dataIndex, rowStatus);
         textContent = stateColumnResult.textContent;

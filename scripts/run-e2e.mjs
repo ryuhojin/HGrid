@@ -2645,6 +2645,115 @@ async function runExample29Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample30Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example30.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readSnapshot() {
+    return page.evaluate(() => {
+      const exampleApi = window.__example30;
+      if (!exampleApi || typeof exampleApi.getSnapshot !== 'function') {
+        throw new Error('Missing window.__example30.getSnapshot');
+      }
+      return exampleApi.getSnapshot();
+    });
+  }
+
+  await waitForLogLabel('initial');
+  const initialSnapshot = await readSnapshot();
+  assert.equal(initialSnapshot.rowCount, 10_000_000, 'example30 should start with 10M remote rows');
+  assert.ok(initialSnapshot.serverRequestCount > 0, 'example30 should request remote data on first paint');
+
+  await page.click('#sort-desc');
+  await waitForLogLabel('sort-desc');
+  const sortSnapshot = await readSnapshot();
+  assert.equal(
+    sortSnapshot.queryModel.sortModel[0]?.direction,
+    'desc',
+    'example30 sort-desc should update remote sort query'
+  );
+
+  await page.click('#filter-active');
+  await waitForLogLabel('filter-active');
+  await page.waitForFunction(
+    () => {
+      const api = window.__example30;
+      if (!api || typeof api.getSnapshot !== 'function') {
+        return false;
+      }
+      const snapshot = api.getSnapshot();
+      return typeof snapshot.rowCount === 'number' && snapshot.rowCount < 10_000_000;
+    },
+    { timeout: 20_000 }
+  );
+  const filterSnapshot = await readSnapshot();
+  assert.ok(filterSnapshot.rowCount > 0, 'example30 filter should keep positive row count');
+  assert.ok(filterSnapshot.rowCount < 10_000_000, 'example30 filter should reduce row count');
+
+  await page.click('#clear-query');
+  await waitForLogLabel('clear-query');
+  await page.waitForFunction(
+    () => {
+      const api = window.__example30;
+      if (!api || typeof api.getSnapshot !== 'function') {
+        return false;
+      }
+      const snapshot = api.getSnapshot();
+      return snapshot.rowCount === 10_000_000;
+    },
+    { timeout: 20_000 }
+  );
+  const clearSnapshot = await readSnapshot();
+  assert.equal(clearSnapshot.rowCount, 10_000_000, 'example30 clear-query should restore total row count');
+
+  await page.click('#scroll-bottom');
+  await waitForLogLabel('scroll-bottom');
+  await page.waitForFunction(
+    () => {
+      const api = window.__example30;
+      if (!api || typeof api.getSnapshot !== 'function') {
+        return false;
+      }
+      const snapshot = api.getSnapshot();
+      return typeof snapshot.firstVisibleId === 'number' && snapshot.firstVisibleId > 0;
+    },
+    { timeout: 20_000 }
+  );
+  const bottomSnapshot = await readSnapshot();
+  assert.ok(
+    typeof bottomSnapshot.firstVisibleId === 'number' && bottomSnapshot.firstVisibleId > 9_000_000,
+    `example30 bottom scroll should move near tail rows, got ${bottomSnapshot.firstVisibleId}`
+  );
+
+  await page.click('#inspect');
+  await waitForLogLabel('inspect');
+  const inspectSnapshot = await readSnapshot();
+  assert.ok(
+    inspectSnapshot.cacheState.cachedBlockIndexes.length > 0,
+    'example30 should expose non-empty cache snapshot'
+  );
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -2735,6 +2844,8 @@ async function main() {
     await runExample28Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample29Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample30Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

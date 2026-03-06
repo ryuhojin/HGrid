@@ -62,18 +62,22 @@ export type {
   DataTransaction,
   GridRowData,
   RowKey,
+  RowsChangedListener,
   AddRowsTransaction,
   RemoveRowsTransaction,
   UpdateCellTransaction,
   UpdateRowTransaction
 } from '../data/data-provider';
+export { RemoteDataProvider } from '../data/remote-data-provider';
 export type {
   FilterModel,
+  RemoteDataProviderDebugState,
+  RemoteDataProviderOptions,
   RemoteBlockRequest,
   RemoteBlockResponse,
   RemoteCacheConfig,
-  RemoteDataProvider,
   RemoteDataSource,
+  RemoteLoadingRowPolicy,
   RemoteQueryModel,
   SortDirection,
   SortModelItem

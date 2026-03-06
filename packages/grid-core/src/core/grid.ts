@@ -17,7 +17,7 @@ import { CooperativeFilterExecutor, type FilterExecutor } from '../data/filter-e
 import { LocalDataProvider } from '../data/local-data-provider';
 import type { RowModelOptions, RowModelState, SparseRowOverride, ViewToDataMapping } from '../data/row-model';
 import { RowModel } from '../data/row-model';
-import type { SortModelItem } from '../data/remote-data-provider';
+import type { RemoteDataProvider as RemoteDataProviderContract, SortModelItem } from '../data/remote-data-provider';
 import { CooperativeSortExecutor, type SortExecutor } from '../data/sort-executor';
 import type { GridSelection, GridSelectionInput } from '../interaction/selection-model';
 
@@ -222,6 +222,10 @@ function createIdentityMapping(rowCount: number): Int32Array {
   return mapping;
 }
 
+function isRemoteDataProvider(dataProvider: GridOptions['dataProvider']): dataProvider is RemoteDataProviderContract {
+  return typeof (dataProvider as RemoteDataProviderContract).setQueryModel === 'function';
+}
+
 export class Grid {
   private options: GridOptions;
   private readonly columnModel: ColumnModel;
@@ -235,6 +239,7 @@ export class Grid {
   private sortOperationToken = 0;
   private filterOperationToken = 0;
   private sortMapping: Int32Array | null = null;
+  private dataProviderUnsubscribe: (() => void) | null = null;
 
   public constructor(container: HTMLElement, config?: GridConfig) {
     const normalizedOptions = normalizeOptions(config);
@@ -250,6 +255,7 @@ export class Grid {
     this.sortExecutor = new CooperativeSortExecutor();
     this.filterExecutor = new CooperativeFilterExecutor();
     this.renderer = new DomRenderer(container, this.getRendererOptions(), this.eventBus);
+    this.bindDataProvider(this.options.dataProvider);
   }
 
   public setColumns(columns: ColumnDef[]): void {
@@ -272,6 +278,7 @@ export class Grid {
     }
 
     const hasProviderOption = Boolean(options.dataProvider || options.rowData);
+    const previousDataProvider = this.options.dataProvider;
     const nextDataProvider = hasProviderOption
       ? options.dataProvider ?? new LocalDataProvider(options.rowData ?? [])
       : this.options.dataProvider;
@@ -306,6 +313,10 @@ export class Grid {
       columns: this.columnModel.getColumns()
     };
     this.renderer.setOptions(this.getRendererOptions());
+
+    if (previousDataProvider !== nextDataProvider) {
+      this.bindDataProvider(nextDataProvider);
+    }
 
     if (hasProviderOption) {
       if (this.sortModel.length > 0) {
@@ -359,6 +370,25 @@ export class Grid {
   public async setSortModel(sortModel: SortModelItem[]): Promise<void> {
     const normalizedSortModel = this.normalizeSortModel(sortModel);
     this.sortModel = normalizedSortModel;
+    if (isRemoteDataProvider(this.options.dataProvider)) {
+      this.sortOperationToken += 1;
+      this.filterOperationToken += 1;
+      this.sortMapping = null;
+      this.options.dataProvider.setQueryModel({
+        sortModel: normalizedSortModel,
+        filterModel: this.filterModel
+      });
+      const rowCount = this.options.dataProvider.getRowCount();
+      if (this.rowModel.getState().rowCount !== rowCount) {
+        this.rowModel.setRowCount(rowCount);
+      } else {
+        this.rowModel.setBaseIdentityMapping();
+        this.rowModel.setFilterViewToData(null);
+      }
+      this.renderer.setOptions(this.getRendererOptions());
+      return;
+    }
+
     const rowCount = this.options.dataProvider.getRowCount();
     this.filterOperationToken += 1;
     const operationToken = ++this.sortOperationToken;
@@ -421,6 +451,25 @@ export class Grid {
 
   public async setFilterModel(filterModel: GridFilterModel): Promise<void> {
     this.filterModel = this.normalizeFilterModel(filterModel);
+    if (isRemoteDataProvider(this.options.dataProvider)) {
+      this.sortMapping = null;
+      this.sortOperationToken += 1;
+      this.filterOperationToken += 1;
+      this.options.dataProvider.setQueryModel({
+        sortModel: this.sortModel,
+        filterModel: this.filterModel
+      });
+      const rowCount = this.options.dataProvider.getRowCount();
+      if (this.rowModel.getState().rowCount !== rowCount) {
+        this.rowModel.setRowCount(rowCount);
+      } else {
+        this.rowModel.setBaseIdentityMapping();
+        this.rowModel.setFilterViewToData(null);
+      }
+      this.renderer.setOptions(this.getRendererOptions());
+      return;
+    }
+
     await this.applyFilterModelInternal();
   }
 
@@ -537,9 +586,28 @@ export class Grid {
   }
 
   public destroy(): void {
+    this.unbindDataProvider();
     this.eventBus.off('columnResize', this.handleColumnResize);
     this.eventBus.off('columnReorder', this.handleColumnReorder);
     this.renderer.destroy();
+  }
+
+  private bindDataProvider(dataProvider: GridOptions['dataProvider']): void {
+    this.unbindDataProvider();
+    if (typeof dataProvider.onRowsChanged !== 'function') {
+      return;
+    }
+
+    this.dataProviderUnsubscribe = dataProvider.onRowsChanged(this.handleDataProviderRowsChanged);
+  }
+
+  private unbindDataProvider(): void {
+    if (!this.dataProviderUnsubscribe) {
+      return;
+    }
+
+    this.dataProviderUnsubscribe();
+    this.dataProviderUnsubscribe = null;
   }
 
   private syncColumnsToRenderer(): void {
@@ -549,6 +617,18 @@ export class Grid {
     };
     this.renderer.setColumns(this.columnModel.getVisibleColumns());
   }
+
+  private handleDataProviderRowsChanged = (): void => {
+    const dataProvider = this.options.dataProvider;
+    const rowCount = dataProvider.getRowCount();
+    if (this.rowModel.getState().rowCount !== rowCount) {
+      this.rowModel.setRowCount(rowCount);
+      if (isRemoteDataProvider(dataProvider)) {
+        this.sortMapping = null;
+      }
+    }
+    this.renderer.setOptions(this.getRendererOptions());
+  };
 
   private handleColumnResize = (event: ColumnResizeEvent): void => {
     if (event.phase === 'start') {

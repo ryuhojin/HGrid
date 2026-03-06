@@ -1,5 +1,6 @@
 export type RowKey = string | number;
 export type GridRowData = Record<string, unknown>;
+export type RowsChangedListener = () => void;
 
 export type DataTransaction = AddRowsTransaction | UpdateRowTransaction | UpdateCellTransaction | RemoveRowsTransaction;
 
@@ -35,4 +36,6 @@ export interface DataProvider {
   setValue(dataIndex: number, columnId: string, value: unknown): void;
   applyTransactions(transactions: DataTransaction[]): void;
   getRow?(dataIndex: number): GridRowData | undefined;
+  onRowsChanged?(listener: RowsChangedListener): () => void;
+  isRowLoading?(dataIndex: number): boolean;
 }

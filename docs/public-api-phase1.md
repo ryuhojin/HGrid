@@ -39,6 +39,16 @@
   - `children: Array<string | ColumnGroupDef>`
   - `collapsed?: boolean`
 - `DataProvider`: pluggable row access abstraction (`LocalDataProvider` default).
+  - optional push contract:
+    - `onRowsChanged?(listener) => unsubscribe`
+    - `isRowLoading?(dataIndex)`
+- `RemoteDataProvider` (Phase 8.1):
+  - `new RemoteDataProvider({ dataSource, rowCount?, cache?, queryModel?, loadingRowPolicy? })`
+  - `setQueryModel(partialQuery)`
+  - `getQueryModel()`
+  - `invalidateCache()`
+  - `cancelOperation(operationId)`
+  - `getCacheConfig()`
 - `RowModelOptions`: row-model runtime options (`enableDataToViewIndex` can be toggled at runtime).
 - `GridConfig` runtime virtualization options:
   - `overscan`: vertical row overscan count

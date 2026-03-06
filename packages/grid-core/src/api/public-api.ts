@@ -4,6 +4,13 @@ export type {
   ColumnDef,
   ColumnGroupDef,
   ColumnFormatter,
+  GroupAggregationContext,
+  GroupAggregationDef,
+  GroupAggregationReducer,
+  GroupAggregationType,
+  GroupModelItem,
+  GroupingMode,
+  GroupingOptions,
   ColumnPinPosition,
   ColumnValueGetter,
   ColumnValueSetter,
@@ -84,6 +91,28 @@ export type {
 } from '../data/remote-data-provider';
 export { CooperativeSortExecutor } from '../data/sort-executor';
 export type { SortExecutionContext, SortExecutionRequest, SortExecutionResult, SortExecutor } from '../data/sort-executor';
+export { CooperativeGroupExecutor } from '../data/group-executor';
+export type {
+  GroupExecutionContext,
+  GroupExecutionRequest,
+  GroupExecutionResult,
+  GroupExecutor,
+  GroupViewDataRow,
+  GroupViewGroupRow,
+  GroupViewRow
+} from '../data/group-executor';
+export {
+  GROUP_ROW_COLUMN_ID_FIELD,
+  GROUP_ROW_EXPANDED_FIELD,
+  GROUP_ROW_KEY_FIELD,
+  GROUP_ROW_KIND_FIELD,
+  GROUP_ROW_LEAF_COUNT_FIELD,
+  GROUP_ROW_LEVEL_FIELD,
+  GroupedDataProvider,
+  getGroupRowLevel,
+  isGroupRowData
+} from '../data/grouped-data-provider';
+export type { GroupedDataProviderSnapshot } from '../data/grouped-data-provider';
 export {
   collectTransferables,
   createWorkerCancelRequest,

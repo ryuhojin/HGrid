@@ -325,6 +325,15 @@
   background-color: var(--hgrid-row-selection-bg);
 }
 
+.hgrid__row--group {
+  background-color: #f8fbff;
+}
+
+.hgrid__row--group .hgrid__cell {
+  font-weight: 600;
+  color: #334155;
+}
+
 .hgrid__cell {
   box-sizing: border-box;
   padding: 4px 8px;
@@ -350,6 +359,10 @@
 .hgrid__cell--indicator-status {
   font-size: 12px;
   color: #334155;
+}
+
+.hgrid__cell--group {
+  padding-left: var(--hgrid-group-indent, 10px);
 }
 
 .hgrid__indicator-cell {

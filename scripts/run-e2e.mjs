@@ -2754,6 +2754,60 @@ async function runExample30Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample31Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example31.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function readSnapshot() {
+    return page.evaluate(() => {
+      const exampleApi = window.__example31;
+      if (!exampleApi || typeof exampleApi.getSnapshot !== 'function') {
+        throw new Error('Missing window.__example31.getSnapshot');
+      }
+      return exampleApi.getSnapshot();
+    });
+  }
+
+  const initialSnapshot = await readSnapshot();
+  assert.equal(initialSnapshot.groupingMode, 'client', 'example31 should start in client grouping mode');
+  assert.ok(Array.isArray(initialSnapshot.groupModel), 'example31 should expose group model');
+  assert.ok(initialSnapshot.groupModel.length > 0, 'example31 should start with group model');
+  assert.ok(initialSnapshot.groupRowCount > 0, 'example31 should render group rows');
+
+  await page.evaluate(async () => {
+    const api = window.__example31;
+    if (!api || typeof api.collapseFirstGroup !== 'function') {
+      throw new Error('Missing window.__example31.collapseFirstGroup');
+    }
+    await api.collapseFirstGroup();
+  });
+  await waitAnimationFrame(page);
+  const collapsedSnapshot = await readSnapshot();
+  assert.equal(collapsedSnapshot.firstGroupExpanded, false, 'example31 first group should be collapsed');
+
+  await page.evaluate(async () => {
+    const api = window.__example31;
+    if (!api || typeof api.expandFirstGroup !== 'function') {
+      throw new Error('Missing window.__example31.expandFirstGroup');
+    }
+    await api.expandFirstGroup();
+  });
+  await waitAnimationFrame(page);
+  const expandedSnapshot = await readSnapshot();
+  assert.equal(expandedSnapshot.firstGroupExpanded, true, 'example31 first group should be expanded');
+
+  await page.click('#mode-server');
+  await waitAnimationFrame(page);
+  const serverModeSnapshot = await readSnapshot();
+  assert.equal(serverModeSnapshot.groupingMode, 'server', 'example31 should switch grouping mode to server');
+
+  await page.click('#mode-client');
+  await waitAnimationFrame(page);
+  const clientModeSnapshot = await readSnapshot();
+  assert.equal(clientModeSnapshot.groupingMode, 'client', 'example31 should switch grouping mode back to client');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -2846,6 +2900,8 @@ async function main() {
     await runExample29Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample30Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample31Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

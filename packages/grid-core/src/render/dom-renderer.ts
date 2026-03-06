@@ -15,6 +15,12 @@ import type {
 import { formatColumnValue, getColumnValue } from '../data/column-model';
 import type { GridRowData, RowKey } from '../data/data-provider';
 import {
+  GROUP_ROW_COLUMN_ID_FIELD,
+  GROUP_ROW_EXPANDED_FIELD,
+  getGroupRowLevel,
+  isGroupRowData
+} from '../data/grouped-data-provider';
+import {
   SelectionModel,
   type GridSelection,
   type GridSelectionInput,
@@ -62,6 +68,8 @@ interface ZoneRowRenderState {
   translateY: number;
   height: number;
   isSelected: boolean;
+  isGroupRow: boolean;
+  groupLevel: number;
 }
 
 interface ZoneRowItem {
@@ -202,6 +210,7 @@ const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 104;
 const DEFAULT_HEADER_ROW_HEIGHT = 32;
 const MAX_GROUP_HEADER_DEPTH = 8;
+const MAX_GROUP_ROW_LEVEL = 12;
 const STATE_TONE_DIRTY = 'dirty';
 const STATE_TONE_COMMIT = 'commit';
 const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
@@ -1600,7 +1609,9 @@ export class DomRenderer {
         dataIndex: -1,
         translateY: Number.NaN,
         height: Number.NaN,
-        isSelected: false
+        isSelected: false,
+        isGroupRow: false,
+        groupLevel: 0
       },
       cellStates
     };
@@ -1787,7 +1798,9 @@ export class DomRenderer {
       }
 
       const row = this.resolveRow(dataIndex);
-      const isRowLoading = this.options.dataProvider.isRowLoading?.(dataIndex) === true;
+      const isGroupRow = isGroupRowData(row);
+      const groupLevel = isGroupRow ? Math.min(MAX_GROUP_ROW_LEVEL, getGroupRowLevel(row)) : 0;
+      const isRowLoading = !isGroupRow && this.options.dataProvider.isRowLoading?.(dataIndex) === true;
       const rowHeight = this.resolveRenderedRowHeight(rowIndex, dataIndex);
       const rowTranslateY = this.getRowTop(rowIndex) - viewportOffsetY;
 
@@ -1800,9 +1813,22 @@ export class DomRenderer {
         dataIndex,
         rowTranslateY,
         rowHeight,
-        isRowLoading
+        isRowLoading,
+        isGroupRow,
+        groupLevel
       );
-      this.renderCenterZoneRow(poolItem.center, row, rowIndex, dataIndex, rowTranslateY, rowHeight, horizontalWindow, isRowLoading);
+      this.renderCenterZoneRow(
+        poolItem.center,
+        row,
+        rowIndex,
+        dataIndex,
+        rowTranslateY,
+        rowHeight,
+        horizontalWindow,
+        isRowLoading,
+        isGroupRow,
+        groupLevel
+      );
       this.renderZoneRow(
         'right',
         poolItem.right,
@@ -1812,7 +1838,9 @@ export class DomRenderer {
         dataIndex,
         rowTranslateY,
         rowHeight,
-        isRowLoading
+        isRowLoading,
+        isGroupRow,
+        groupLevel
       );
     }
 
@@ -1835,14 +1863,18 @@ export class DomRenderer {
     dataIndex: number,
     rowTranslateY: number,
     rowHeight: number,
-    isRowLoading: boolean
+    isRowLoading: boolean,
+    isGroupRow: boolean,
+    groupLevel: number
   ): void {
     if (columns.length === 0) {
       this.hidePoolRow(zoneRow);
       return;
     }
 
-    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight);
+    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight, isGroupRow, groupLevel);
+    const groupColumnId = isGroupRow ? this.resolveGroupRowColumnId(row) : null;
+    const isGroupExpanded = isGroupRow ? this.resolveGroupRowExpanded(row) : false;
 
     for (let colIndex = 0; colIndex < columns.length; colIndex += 1) {
       const column = columns[colIndex];
@@ -1853,26 +1885,35 @@ export class DomRenderer {
       const isCellSelected = this.selectionModel.isCellSelected(rowIndex, globalColumnIndex);
       const isCellActive = this.selectionModel.isCellActive(rowIndex, globalColumnIndex);
       if (this.isIndicatorCheckboxColumnId(column.id) && indicatorCell) {
-        this.bindIndicatorCheckboxCell(cell, cellState, indicatorCell, column.id, rowIndex, globalColumnIndex);
+        this.bindIndicatorCheckboxCell(
+          cell,
+          cellState,
+          indicatorCell,
+          column.id,
+          rowIndex,
+          globalColumnIndex,
+          isGroupRow
+        );
         continue;
       }
 
       if (column.id === INDICATOR_ROW_NUMBER_COLUMN_ID) {
+        const rowNumberText = isGroupRow ? '' : String(rowIndex + 1);
         this.bindCell(cell, cellState, {
           isVisible: true,
           columnId: column.id,
-          textContent: String(rowIndex + 1),
+          textContent: rowNumberText,
           isSelected: isCellSelected,
           isActive: isCellActive,
           extraClassName: 'hgrid__cell--indicator hgrid__cell--indicator-row-number',
-          ariaLabel: `Row ${rowIndex + 1} number`
+          ariaLabel: isGroupRow ? '' : `Row ${rowIndex + 1} number`
         });
         continue;
       }
 
       if (column.id === INDICATOR_STATUS_COLUMN_ID) {
-        const isRowSelected = this.selectionModel.isRowSelected(rowIndex);
-        const statusText = this.resolveIndicatorStatusText(row, rowIndex, dataIndex, isRowSelected);
+        const isRowSelected = isGroupRow ? false : this.selectionModel.isRowSelected(rowIndex);
+        const statusText = isGroupRow ? '' : this.resolveIndicatorStatusText(row, rowIndex, dataIndex, isRowSelected);
         this.bindCell(cell, cellState, {
           isVisible: true,
           columnId: column.id,
@@ -1899,6 +1940,16 @@ export class DomRenderer {
         ariaLabel = stateColumnResult.ariaLabel;
       }
 
+      if (isGroupRow && groupColumnId && column.id === groupColumnId) {
+        const expandGlyph = isGroupExpanded ? '▾' : '▸';
+        textContent = `${expandGlyph} ${textContent}`;
+        const indentPx = 10 + groupLevel * 14;
+        extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--group`.trim();
+        cell.style.setProperty('--hgrid-group-indent', `${indentPx}px`);
+      } else if (cell.style.getPropertyValue('--hgrid-group-indent').length > 0) {
+        cell.style.removeProperty('--hgrid-group-indent');
+      }
+
       this.bindCell(cell, cellState, {
         isVisible: true,
         columnId: column.id,
@@ -1920,14 +1971,18 @@ export class DomRenderer {
     rowTranslateY: number,
     rowHeight: number,
     horizontalWindow: HorizontalWindow,
-    isRowLoading: boolean
+    isRowLoading: boolean,
+    isGroupRow: boolean,
+    groupLevel: number
   ): void {
     if (this.columnsByZone.center.length === 0 || horizontalWindow.end <= horizontalWindow.start) {
       this.hidePoolRow(zoneRow);
       return;
     }
 
-    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight);
+    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight, isGroupRow, groupLevel);
+    const groupColumnId = isGroupRow ? this.resolveGroupRowColumnId(row) : null;
+    const isGroupExpanded = isGroupRow ? this.resolveGroupRowExpanded(row) : false;
 
     const centerColumns = this.columnsByZone.center;
     let slotIndex = 0;
@@ -1952,6 +2007,16 @@ export class DomRenderer {
         extraClassName = `hgrid__cell--state${stateColumnResult.tone ? ` hgrid__cell--state-${stateColumnResult.tone}` : ''}`;
         titleText = stateColumnResult.tooltip;
         ariaLabel = stateColumnResult.ariaLabel;
+      }
+
+      if (isGroupRow && groupColumnId && column.id === groupColumnId) {
+        const expandGlyph = isGroupExpanded ? '▾' : '▸';
+        textContent = `${expandGlyph} ${textContent}`;
+        const indentPx = 10 + groupLevel * 14;
+        extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--group`.trim();
+        cell.style.setProperty('--hgrid-group-indent', `${indentPx}px`);
+      } else if (cell.style.getPropertyValue('--hgrid-group-indent').length > 0) {
+        cell.style.removeProperty('--hgrid-group-indent');
       }
 
       this.bindCell(cell, cellState, {
@@ -1992,6 +2057,11 @@ export class DomRenderer {
       zoneRow.element.classList.remove('hgrid__row--selected');
       zoneRow.rowState.isSelected = false;
     }
+    if (zoneRow.rowState.isGroupRow) {
+      zoneRow.element.classList.remove('hgrid__row--group');
+      zoneRow.rowState.isGroupRow = false;
+      zoneRow.rowState.groupLevel = 0;
+    }
     zoneRow.rowState.isVisible = false;
     zoneRow.rowState.rowIndex = -1;
     zoneRow.rowState.dataIndex = -1;
@@ -2002,7 +2072,9 @@ export class DomRenderer {
     rowIndex: number,
     dataIndex: number,
     rowTranslateY: number,
-    rowHeight: number
+    rowHeight: number,
+    isGroupRow: boolean,
+    groupLevel: number
   ): void {
     const rowState = zoneRow.rowState;
 
@@ -2035,6 +2107,20 @@ export class DomRenderer {
     if (rowState.isSelected !== isSelected) {
       zoneRow.element.classList.toggle('hgrid__row--selected', isSelected);
       rowState.isSelected = isSelected;
+    }
+
+    if (rowState.isGroupRow !== isGroupRow) {
+      zoneRow.element.classList.toggle('hgrid__row--group', isGroupRow);
+      rowState.isGroupRow = isGroupRow;
+    }
+
+    if (rowState.groupLevel !== groupLevel) {
+      if (isGroupRow) {
+        zoneRow.element.dataset.groupLevel = String(groupLevel);
+      } else {
+        delete zoneRow.element.dataset.groupLevel;
+      }
+      rowState.groupLevel = groupLevel;
     }
   }
 
@@ -2144,7 +2230,8 @@ export class DomRenderer {
     indicatorCell: IndicatorCellElements,
     columnId: string,
     rowIndex: number,
-    globalColumnIndex: number
+    globalColumnIndex: number,
+    isGroupRow: boolean
   ): void {
     const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
     const isRowSelected = this.selectionModel.isRowSelected(rowIndex);
@@ -2157,13 +2244,14 @@ export class DomRenderer {
       isSelected: this.selectionModel.isCellSelected(rowIndex, globalColumnIndex),
       isActive: this.selectionModel.isCellActive(rowIndex, globalColumnIndex),
       extraClassName,
-      ariaLabel: `Row ${rowIndex + 1} selection checkbox`
+      ariaLabel: isGroupRow ? '' : `Row ${rowIndex + 1} selection checkbox`
     });
 
-    indicatorCell.checkbox.style.display = rowIndicatorOptions.showCheckbox ? '' : 'none';
-    indicatorCell.checkbox.checked = isRowSelected;
+    indicatorCell.checkbox.style.display = rowIndicatorOptions.showCheckbox && !isGroupRow ? '' : 'none';
+    indicatorCell.checkbox.checked = isGroupRow ? false : isRowSelected;
     indicatorCell.checkbox.indeterminate = false;
-    indicatorCell.checkbox.setAttribute('aria-label', `Select row ${rowIndex + 1}`);
+    indicatorCell.checkbox.disabled = isGroupRow;
+    indicatorCell.checkbox.setAttribute('aria-label', isGroupRow ? 'Grouping row' : `Select row ${rowIndex + 1}`);
   }
 
   private getColumnsWidth(columns: ColumnDef[]): number {
@@ -2478,6 +2566,9 @@ export class DomRenderer {
     }
 
     const row = this.resolveRow(dataIndex);
+    if (isGroupRowData(row)) {
+      return false;
+    }
     const originalValue = getColumnValue(column, row);
 
     this.editSession = {
@@ -4391,6 +4482,19 @@ export class DomRenderer {
     this.editorHostElement.classList.remove('hgrid__editor-host--invalid');
     this.editorMessageElement.textContent = '';
   };
+
+  private resolveGroupRowColumnId(row: GridRowData): string | null {
+    const value = row[GROUP_ROW_COLUMN_ID_FIELD];
+    if (typeof value !== 'string' || value.length === 0) {
+      return null;
+    }
+
+    return value;
+  }
+
+  private resolveGroupRowExpanded(row: GridRowData): boolean {
+    return row[GROUP_ROW_EXPANDED_FIELD] === true;
+  }
 
   private resolveRow(dataIndex: number): GridRowData {
     if (this.options.dataProvider.getRow) {

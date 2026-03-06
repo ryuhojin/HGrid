@@ -679,11 +679,30 @@
 > 대용량일수록 서버 옵션을 1급으로 제공해야 한다.
 
 ## 9.1 Grouping
-- [ ] group model
-- [ ] expand/collapse 상태 관리(키 기반)
-- [ ] aggregation(sum/avg/min/max/count/custom)
-- [ ] worker 로컬 그룹(제한 및 문서화)
-- [ ] 서버 그룹 지원
+- [x] group model
+- [x] expand/collapse 상태 관리(키 기반)
+- [x] aggregation(sum/avg/min/max/count/custom)
+- [x] worker 로컬 그룹(제한 및 문서화)
+- [x] 서버 그룹 지원
+
+### 코어 변경 코멘트 (9.1 반영, 2026-03-06)
+- `packages/grid-core/src/core/grid.ts`
+  - grouping 파이프라인(`sort -> filter -> grouping`)을 상태 기반으로 연결
+  - API 추가: `setGroupModel`, `setGroupExpanded`, `expandAllGroups`, `setGroupingMode` 등
+  - remote + `mode=server`일 때 `queryModel.groupModel`을 서버로 전달
+- `packages/grid-core/src/data/group-executor.ts`
+  - cooperative 실행 + 취소 토큰 + 집계(sum/avg/min/max/count/custom reducer) 지원
+- `packages/grid-core/src/data/grouped-data-provider.ts`
+  - group row/data row 혼합 view provider 구현
+  - group row 메타 필드(`__hgrid_internal_*`)로 renderer에서 스타일/편집 제어
+- `packages/grid-core/src/render/dom-renderer.ts`, `grid.css`
+  - group row 시각화, 들여쓰기, 그룹 행 편집 방지
+- 검증:
+  - unit: `packages/grid-core/test/group-executor.spec.ts`, `packages/grid-core/test/grid.spec.ts`(grouping/remote query 포함)
+  - example/e2e: `examples/example31.html`, `scripts/run-e2e.mjs` Example31
+- 제한 문서화:
+  - remote provider에서 `grouping.mode=\"client\"`는 전체 데이터가 클라이언트에 로드되지 않으므로 비권장
+  - 초대용량 로컬 grouping은 cooperative executor(Worker-compatible protocol) 기반으로 UI 프리즈를 완화
 
 ## 9.2 Tree Data
 - [ ] parentId model
@@ -697,7 +716,7 @@
 - [ ] 그룹/트리/피벗이 “UI thread 프리즈 없이” 동작
 
 ## 9.4 예제
-- [ ] `example{N}.html`: grouping
+- [x] `example{N}.html`: grouping
 - [ ] `example{N}.html`: tree
 - [ ] `example{N}.html`: pivot(서버/로컬)
 

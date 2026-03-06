@@ -338,6 +338,19 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 31,
+      "file": "example31.html",
+      "title": "Example 31 - Grouping",
+      "tags": [
+        "phase9",
+        "grouping",
+        "aggregation",
+        "expand-collapse",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

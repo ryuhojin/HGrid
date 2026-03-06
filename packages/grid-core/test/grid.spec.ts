@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Grid } from '../src';
 import { LocalDataProvider } from '../src/data/local-data-provider';
 import type { DataProvider, DataTransaction, GridRowData } from '../src/data/data-provider';
+import type { RemoteQueryModel } from '../src/data/remote-data-provider';
 
 function getVerticalScrollElement(container: HTMLElement): HTMLDivElement {
   const verticalScrollElement = container.querySelector('.hgrid__v-scroll') as HTMLDivElement | null;
@@ -52,6 +53,67 @@ class SyntheticLargeDataProvider implements DataProvider {
     return {
       id: dataIndex + 1,
       name: `row-${dataIndex + 1}`
+    };
+  }
+}
+
+class MockRemoteGroupingProvider implements DataProvider {
+  private rows: GridRowData[];
+  private queryModel: RemoteQueryModel = {
+    sortModel: [],
+    filterModel: {},
+    groupModel: undefined
+  };
+
+  public constructor(rows: GridRowData[]) {
+    this.rows = rows.map((row) => ({ ...row }));
+  }
+
+  public getRowCount(): number {
+    return this.rows.length;
+  }
+
+  public getRowKey(dataIndex: number): number {
+    return dataIndex;
+  }
+
+  public getValue(dataIndex: number, columnId: string): unknown {
+    const row = this.rows[dataIndex];
+    return row ? row[columnId] : undefined;
+  }
+
+  public setValue(dataIndex: number, columnId: string, value: unknown): void {
+    const row = this.rows[dataIndex];
+    if (!row) {
+      return;
+    }
+
+    row[columnId] = value;
+  }
+
+  public applyTransactions(_transactions: DataTransaction[]): void {}
+
+  public getRow(dataIndex: number): GridRowData | undefined {
+    return this.rows[dataIndex];
+  }
+
+  public setQueryModel(queryModel: Partial<RemoteQueryModel>): void {
+    this.queryModel = {
+      sortModel: Array.isArray(queryModel.sortModel) ? queryModel.sortModel.map((item) => ({ ...item })) : [],
+      filterModel: queryModel.filterModel && typeof queryModel.filterModel === 'object' ? { ...queryModel.filterModel } : {},
+      groupModel: Array.isArray(queryModel.groupModel)
+        ? queryModel.groupModel.map((item) => ({ ...item }))
+        : undefined
+    };
+  }
+
+  public getQueryModel(): RemoteQueryModel {
+    return {
+      sortModel: this.queryModel.sortModel.map((item) => ({ ...item })),
+      filterModel: { ...this.queryModel.filterModel },
+      groupModel: Array.isArray(this.queryModel.groupModel)
+        ? this.queryModel.groupModel.map((item) => ({ ...item }))
+        : undefined
     };
   }
 }
@@ -2369,6 +2431,103 @@ describe('Grid DOM pooling', () => {
 
     renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await waitForFrame();
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies local grouping with expand and collapse state', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, region: 'KR', name: 'A', score: 10 },
+        { id: 2, region: 'KR', name: 'B', score: 20 },
+        { id: 3, region: 'US', name: 'C', score: 30 },
+        { id: 4, region: 'US', name: 'D', score: 40 }
+      ],
+      height: 180,
+      rowHeight: 28
+    });
+
+    await grid.setGroupModel([{ columnId: 'region' }]);
+    await grid.setGroupAggregations([{ columnId: 'score', type: 'sum' }]);
+    await waitForFrame();
+
+    const groupedRows = grid.getGroupedRowsSnapshot();
+    const firstGroupRow = groupedRows.find((row) => row.kind === 'group');
+    expect(firstGroupRow).toBeTruthy();
+    if (!firstGroupRow || firstGroupRow.kind !== 'group') {
+      return;
+    }
+
+    const initialGroupDomCount = container.querySelectorAll('.hgrid__row--group').length;
+    expect(initialGroupDomCount).toBeGreaterThan(0);
+
+    await grid.setGroupExpanded(firstGroupRow.groupKey, false);
+    await waitForFrame();
+    const collapsedSnapshot = grid.getGroupedRowsSnapshot();
+    expect(collapsedSnapshot.length).toBeLessThan(groupedRows.length);
+
+    await grid.setGroupExpanded(firstGroupRow.groupKey, true);
+    await waitForFrame();
+    const expandedSnapshot = grid.getGroupedRowsSnapshot();
+    expect(expandedSnapshot.length).toBe(groupedRows.length);
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          startEditingAtCell: (rowIndex: number, colIndex: number) => boolean;
+        };
+      }
+    ).renderer;
+    expect(renderer.startEditingAtCell(0, 1)).toBe(false);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('passes group model to remote query when grouping mode is server', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const provider = new MockRemoteGroupingProvider([
+      { id: 1, region: 'KR', score: 10 },
+      { id: 2, region: 'US', score: 20 }
+    ]);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'region', header: 'Region', width: 160, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ],
+      dataProvider: provider,
+      grouping: {
+        mode: 'server'
+      },
+      height: 160,
+      rowHeight: 28
+    });
+
+    await grid.setGroupModel([{ columnId: 'region' }]);
+    await waitForFrame();
+
+    const queryAfterGrouping = provider.getQueryModel();
+    expect(queryAfterGrouping.groupModel).toEqual([{ columnId: 'region' }]);
+
+    await grid.setSortModel([{ columnId: 'score', direction: 'desc' }]);
+    await waitForFrame();
+    const queryAfterSort = provider.getQueryModel();
+    expect(queryAfterSort.sortModel).toEqual([{ columnId: 'score', direction: 'desc' }]);
+    expect(queryAfterSort.groupModel).toEqual([{ columnId: 'region' }]);
 
     grid.destroy();
     container.remove();

@@ -8,6 +8,8 @@ export type ScrollbarVisibility = 'auto' | 'always' | 'hidden';
 export type RowHeightMode = 'fixed' | 'estimated' | 'measured';
 export type RowIndicatorCheckAllScope = 'all' | 'filtered' | 'viewport';
 export type RowStatusTone = 'inserted' | 'updated' | 'deleted' | 'invalid' | 'error' | 'clean';
+export type GroupingMode = 'client' | 'server';
+export type GroupAggregationType = 'sum' | 'avg' | 'min' | 'max' | 'count';
 
 export type ColumnFormatter = (value: unknown, row: GridRowData) => string;
 export type ColumnComparator = (a: unknown, b: unknown) => number;
@@ -61,6 +63,33 @@ export interface StateColumnOptions {
   render?: StateColumnRenderer;
 }
 
+export interface GroupModelItem {
+  columnId: string;
+}
+
+export interface GroupAggregationContext {
+  groupKey: string;
+  level: number;
+  columnId: string;
+  groupValue: unknown;
+  rowCount: number;
+}
+
+export type GroupAggregationReducer = (values: unknown[], context: GroupAggregationContext) => unknown;
+
+export interface GroupAggregationDef {
+  columnId: string;
+  type?: GroupAggregationType;
+  reducer?: GroupAggregationReducer;
+}
+
+export interface GroupingOptions {
+  mode?: GroupingMode;
+  groupModel?: GroupModelItem[];
+  aggregations?: GroupAggregationDef[];
+  defaultExpanded?: boolean;
+}
+
 export interface ColumnGroupDef {
   groupId: string;
   header: string;
@@ -92,6 +121,7 @@ export interface ScrollbarPolicy {
 export interface GridOptions {
   columns: ColumnDef[];
   columnGroups?: ColumnGroupDef[];
+  grouping?: GroupingOptions;
   dataProvider: DataProvider;
   rowModel: RowModel;
   height?: number;
@@ -118,6 +148,8 @@ export interface GridState {
   columnOrder?: string[];
   hiddenColumnIds?: string[];
   pinnedColumns?: Record<string, ColumnPinPosition>;
+  groupModel?: GroupModelItem[];
+  groupExpansionState?: Record<string, boolean>;
 }
 
 export interface GridTheme {

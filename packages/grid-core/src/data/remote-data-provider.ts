@@ -1,4 +1,5 @@
 import type { DataProvider, DataTransaction, GridRowData, RowKey, RowsChangedListener } from './data-provider';
+import type { GroupModelItem } from '../core/grid-options';
 
 const DEFAULT_BLOCK_SIZE = 1000;
 const DEFAULT_MAX_BLOCKS = 24;
@@ -17,7 +18,7 @@ export type FilterModel = Record<string, unknown>;
 export interface RemoteQueryModel {
   sortModel: SortModelItem[];
   filterModel: FilterModel;
-  groupModel?: unknown;
+  groupModel?: GroupModelItem[];
 }
 
 export interface RemoteBlockRequest {

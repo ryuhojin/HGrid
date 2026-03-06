@@ -2,6 +2,9 @@ import { Grid } from '@hgrid/grid-core';
 import type {
   ColumnDef,
   ColumnPinPosition,
+  GroupAggregationDef,
+  GroupModelItem,
+  GroupingMode,
   GridConfig,
   GridSelection,
   GridSelectionInput,
@@ -17,6 +20,9 @@ import type {
 export type {
   ColumnDef,
   ColumnPinPosition,
+  GroupAggregationDef,
+  GroupModelItem,
+  GroupingMode,
   GridConfig,
   GridEventMap,
   GridEventName,
@@ -58,6 +64,54 @@ export class VueGridAdapter {
 
   public setColumnPin(columnId: string, pinned?: ColumnPinPosition): void {
     this.grid.setColumnPin(columnId, pinned);
+  }
+
+  public getGroupModel(): GroupModelItem[] {
+    return this.grid.getGroupModel();
+  }
+
+  public setGroupModel(groupModel: GroupModelItem[]): Promise<void> {
+    return this.grid.setGroupModel(groupModel);
+  }
+
+  public clearGroupModel(): Promise<void> {
+    return this.grid.clearGroupModel();
+  }
+
+  public getGroupAggregations(): GroupAggregationDef[] {
+    return this.grid.getGroupAggregations();
+  }
+
+  public setGroupAggregations(aggregations: GroupAggregationDef[]): Promise<void> {
+    return this.grid.setGroupAggregations(aggregations);
+  }
+
+  public getGroupExpansionState(): Record<string, boolean> {
+    return this.grid.getGroupExpansionState();
+  }
+
+  public setGroupExpanded(groupKey: string, expanded: boolean): Promise<void> {
+    return this.grid.setGroupExpanded(groupKey, expanded);
+  }
+
+  public toggleGroupExpanded(groupKey: string): Promise<void> {
+    return this.grid.toggleGroupExpanded(groupKey);
+  }
+
+  public expandAllGroups(): Promise<void> {
+    return this.grid.expandAllGroups();
+  }
+
+  public collapseAllGroups(): Promise<void> {
+    return this.grid.collapseAllGroups();
+  }
+
+  public getGroupingMode(): GroupingMode {
+    return this.grid.getGroupingMode();
+  }
+
+  public setGroupingMode(mode: GroupingMode): Promise<void> {
+    return this.grid.setGroupingMode(mode);
   }
 
   public setRowOrder(viewToData: ViewToDataMapping): void {

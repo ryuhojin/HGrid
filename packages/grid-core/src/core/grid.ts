@@ -3,6 +3,9 @@ import type { ColumnReorderEvent, ColumnResizeEvent, GridEventMap, GridEventName
 import type {
   ColumnDef,
   ColumnGroupDef,
+  GroupAggregationDef,
+  GroupModelItem,
+  GroupingMode,
   ColumnPinPosition,
   GridConfig,
   GridOptions,
@@ -20,6 +23,8 @@ import { RowModel } from '../data/row-model';
 import type { RemoteDataProvider as RemoteDataProviderContract, SortModelItem } from '../data/remote-data-provider';
 import { CooperativeSortExecutor, type SortExecutor } from '../data/sort-executor';
 import type { GridSelection, GridSelectionInput } from '../interaction/selection-model';
+import { CooperativeGroupExecutor, type GroupExecutionResult, type GroupExecutor, type GroupViewRow } from '../data/group-executor';
+import { GroupedDataProvider } from '../data/grouped-data-provider';
 
 const DEFAULT_SCROLLBAR_POLICY = {
   vertical: 'auto',
@@ -77,6 +82,121 @@ function mergeStateColumnOptions(
     ...currentOptions,
     ...nextOptions
   };
+}
+
+function cloneGroupModel(groupModel?: GroupModelItem[]): GroupModelItem[] {
+  if (!Array.isArray(groupModel) || groupModel.length === 0) {
+    return [];
+  }
+
+  const cloned: GroupModelItem[] = [];
+  for (let index = 0; index < groupModel.length; index += 1) {
+    const item = groupModel[index];
+    if (!item || typeof item.columnId !== 'string') {
+      continue;
+    }
+
+    const columnId = item.columnId.trim();
+    if (columnId.length === 0) {
+      continue;
+    }
+
+    cloned.push({ columnId });
+  }
+
+  return cloned;
+}
+
+function cloneGroupAggregations(aggregations?: GroupAggregationDef[]): GroupAggregationDef[] {
+  if (!Array.isArray(aggregations) || aggregations.length === 0) {
+    return [];
+  }
+
+  const cloned: GroupAggregationDef[] = [];
+  for (let index = 0; index < aggregations.length; index += 1) {
+    const item = aggregations[index];
+    if (!item || typeof item.columnId !== 'string') {
+      continue;
+    }
+
+    const columnId = item.columnId.trim();
+    if (columnId.length === 0) {
+      continue;
+    }
+
+    cloned.push({
+      columnId,
+      type: item.type,
+      reducer: typeof item.reducer === 'function' ? item.reducer : undefined
+    });
+  }
+
+  return cloned;
+}
+
+function cloneGroupExpansionState(groupExpansionState?: Record<string, boolean>): Record<string, boolean> {
+  if (!groupExpansionState || typeof groupExpansionState !== 'object') {
+    return {};
+  }
+
+  const cloned: Record<string, boolean> = {};
+  const keys = Object.keys(groupExpansionState);
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    const value = groupExpansionState[key];
+    if (value === true || value === false) {
+      cloned[key] = value;
+    }
+  }
+
+  return cloned;
+}
+
+function cloneGroupingOptions(grouping?: GridOptions['grouping']): GridOptions['grouping'] {
+  if (!grouping) {
+    return undefined;
+  }
+
+  return {
+    mode: grouping.mode === 'server' ? 'server' : 'client',
+    groupModel: cloneGroupModel(grouping.groupModel),
+    aggregations: cloneGroupAggregations(grouping.aggregations),
+    defaultExpanded: grouping.defaultExpanded !== false
+  };
+}
+
+function mergeGroupingOptions(
+  currentOptions: GridOptions['grouping'],
+  nextOptions: GridConfig['grouping']
+): GridOptions['grouping'] {
+  if (!nextOptions) {
+    return currentOptions ? cloneGroupingOptions(currentOptions) : undefined;
+  }
+
+  const base = cloneGroupingOptions(currentOptions) ?? {
+    mode: 'client' as GroupingMode,
+    groupModel: [],
+    aggregations: [],
+    defaultExpanded: true
+  };
+
+  if (nextOptions.mode === 'client' || nextOptions.mode === 'server') {
+    base.mode = nextOptions.mode;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'groupModel')) {
+    base.groupModel = cloneGroupModel(nextOptions.groupModel);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'aggregations')) {
+    base.aggregations = cloneGroupAggregations(nextOptions.aggregations);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'defaultExpanded')) {
+    base.defaultExpanded = nextOptions.defaultExpanded !== false;
+  }
+
+  return base;
 }
 
 function clampIndicatorWidth(width: number): number {
@@ -198,6 +318,7 @@ function normalizeOptions(config?: GridConfig): GridOptions {
   return {
     columns: normalizeSpecialColumns(config?.columns ?? [], rowIndicator),
     columnGroups: cloneColumnGroups(config?.columnGroups),
+    grouping: mergeGroupingOptions(undefined, config?.grouping),
     dataProvider,
     rowModel,
     height: config?.height,
@@ -228,23 +349,36 @@ function isRemoteDataProvider(dataProvider: GridOptions['dataProvider']): dataPr
 
 export class Grid {
   private options: GridOptions;
+  private sourceDataProvider: GridOptions['dataProvider'];
+  private groupedDataProvider: GroupedDataProvider | null = null;
   private readonly columnModel: ColumnModel;
   private readonly rowModel: RowModel;
   private readonly eventBus: EventBus;
   private readonly renderer: DomRenderer;
   private readonly sortExecutor: SortExecutor;
   private readonly filterExecutor: FilterExecutor;
+  private readonly groupExecutor: GroupExecutor;
   private sortModel: SortModelItem[] = [];
   private filterModel: GridFilterModel = {};
+  private groupModel: GroupModelItem[] = [];
+  private groupAggregations: GroupAggregationDef[] = [];
+  private groupingMode: GroupingMode = 'client';
+  private groupDefaultExpanded = true;
+  private groupExpansionState: Record<string, boolean> = {};
+  private groupRows: GroupViewRow[] = [];
+  private groupKeys: string[] = [];
   private sortOperationToken = 0;
   private filterOperationToken = 0;
+  private groupOperationToken = 0;
   private sortMapping: Int32Array | null = null;
+  private filterMapping: Int32Array | null = null;
   private dataProviderUnsubscribe: (() => void) | null = null;
 
   public constructor(container: HTMLElement, config?: GridConfig) {
     const normalizedOptions = normalizeOptions(config);
     this.rowModel = normalizedOptions.rowModel;
     this.columnModel = new ColumnModel(normalizedOptions.columns);
+    this.sourceDataProvider = normalizedOptions.dataProvider;
     this.options = {
       ...normalizedOptions,
       columns: this.columnModel.getColumns()
@@ -252,25 +386,32 @@ export class Grid {
     this.eventBus = new EventBus();
     this.eventBus.on('columnResize', this.handleColumnResize);
     this.eventBus.on('columnReorder', this.handleColumnReorder);
+    this.eventBus.on('cellClick', this.handleCellClickForGrouping);
+    this.eventBus.on('editCommit', this.handleEditCommitForGrouping);
     this.sortExecutor = new CooperativeSortExecutor();
     this.filterExecutor = new CooperativeFilterExecutor();
+    this.groupExecutor = new CooperativeGroupExecutor();
+    this.groupModel = this.normalizeGroupModel(this.options.grouping?.groupModel ?? []);
+    this.groupAggregations = this.normalizeGroupAggregations(this.options.grouping?.aggregations ?? []);
+    this.groupingMode = this.options.grouping?.mode === 'server' ? 'server' : 'client';
+    this.groupDefaultExpanded = this.options.grouping?.defaultExpanded !== false;
     this.renderer = new DomRenderer(container, this.getRendererOptions(), this.eventBus);
-    this.bindDataProvider(this.options.dataProvider);
+    this.bindDataProvider(this.sourceDataProvider);
+    void this.rebuildDerivedView();
   }
 
   public setColumns(columns: ColumnDef[]): void {
     this.columnModel.setColumns(normalizeSpecialColumns(columns, this.options.rowIndicator));
     this.syncColumnsToRenderer();
-    if (this.sortModel.length > 0) {
-      void this.setSortModel(this.sortModel);
-    } else if (this.hasActiveFilterModel()) {
-      void this.setFilterModel(this.filterModel);
-    }
+    this.groupModel = this.normalizeGroupModel(this.groupModel);
+    this.groupAggregations = this.normalizeGroupAggregations(this.groupAggregations);
+    void this.rebuildDerivedView();
   }
 
   public setOptions(options: GridConfig): void {
     const nextRowIndicator = mergeRowIndicatorOptions(this.options.rowIndicator, options.rowIndicator);
     const nextStateColumn = mergeStateColumnOptions(this.options.stateColumn, options.stateColumn);
+    const nextGrouping = mergeGroupingOptions(this.options.grouping, options.grouping);
 
     if (options.columns || options.rowIndicator) {
       const sourceColumns = options.columns ?? this.columnModel.getColumns();
@@ -278,21 +419,33 @@ export class Grid {
     }
 
     const hasProviderOption = Boolean(options.dataProvider || options.rowData);
-    const previousDataProvider = this.options.dataProvider;
+    const previousSourceDataProvider = this.sourceDataProvider;
     const nextDataProvider = hasProviderOption
       ? options.dataProvider ?? new LocalDataProvider(options.rowData ?? [])
-      : this.options.dataProvider;
+      : this.sourceDataProvider;
 
     if (hasProviderOption) {
       this.sortOperationToken += 1;
       this.filterOperationToken += 1;
+      this.groupOperationToken += 1;
       this.sortMapping = null;
-      this.rowModel.setRowCount(nextDataProvider.getRowCount());
+      this.filterMapping = null;
+      this.groupRows = [];
+      this.groupKeys = [];
+      this.groupedDataProvider = null;
+      this.groupExpansionState = {};
+      this.sourceDataProvider = nextDataProvider;
+      this.rowModel.setRowCount(this.sourceDataProvider.getRowCount());
     }
 
     if (options.rowModelOptions) {
       this.rowModel.setOptions(options.rowModelOptions);
     }
+
+    this.groupingMode = nextGrouping?.mode === 'server' ? 'server' : 'client';
+    this.groupDefaultExpanded = nextGrouping?.defaultExpanded !== false;
+    this.groupModel = this.normalizeGroupModel(nextGrouping?.groupModel ?? this.groupModel);
+    this.groupAggregations = this.normalizeGroupAggregations(nextGrouping?.aggregations ?? this.groupAggregations);
 
     this.options = {
       ...this.options,
@@ -308,23 +461,17 @@ export class Grid {
       rowIndicator: nextRowIndicator,
       stateColumn: nextStateColumn,
       columnGroups: options.columnGroups ? cloneColumnGroups(options.columnGroups) : this.options.columnGroups,
-      dataProvider: nextDataProvider,
+      grouping: nextGrouping,
+      dataProvider: this.options.dataProvider,
       rowModel: this.rowModel,
       columns: this.columnModel.getColumns()
     };
-    this.renderer.setOptions(this.getRendererOptions());
 
-    if (previousDataProvider !== nextDataProvider) {
-      this.bindDataProvider(nextDataProvider);
+    if (previousSourceDataProvider !== this.sourceDataProvider) {
+      this.bindDataProvider(this.sourceDataProvider);
     }
 
-    if (hasProviderOption) {
-      if (this.sortModel.length > 0) {
-        void this.setSortModel(this.sortModel);
-      } else if (this.hasActiveFilterModel()) {
-        void this.setFilterModel(this.filterModel);
-      }
-    }
+    void this.rebuildDerivedView();
   }
 
   public setRowOrder(viewToData: ViewToDataMapping): void {
@@ -338,7 +485,7 @@ export class Grid {
   }
 
   public resetRowOrder(): void {
-    this.rowModel.resetToIdentity(this.options.dataProvider.getRowCount());
+    this.rowModel.resetToIdentity(this.sourceDataProvider.getRowCount());
     this.renderer.setOptions(this.getRendererOptions());
   }
 
@@ -370,38 +517,48 @@ export class Grid {
   public async setSortModel(sortModel: SortModelItem[]): Promise<void> {
     const normalizedSortModel = this.normalizeSortModel(sortModel);
     this.sortModel = normalizedSortModel;
-    if (isRemoteDataProvider(this.options.dataProvider)) {
+    if (isRemoteDataProvider(this.sourceDataProvider)) {
       this.sortOperationToken += 1;
       this.filterOperationToken += 1;
+      this.groupOperationToken += 1;
       this.sortMapping = null;
-      this.options.dataProvider.setQueryModel({
+      this.filterMapping = null;
+      this.sourceDataProvider.setQueryModel({
         sortModel: normalizedSortModel,
-        filterModel: this.filterModel
+        filterModel: this.filterModel,
+        groupModel: this.shouldUseServerGrouping() ? this.groupModel : undefined
       });
-      const rowCount = this.options.dataProvider.getRowCount();
+      const rowCount = this.sourceDataProvider.getRowCount();
       if (this.rowModel.getState().rowCount !== rowCount) {
         this.rowModel.setRowCount(rowCount);
       } else {
         this.rowModel.setBaseIdentityMapping();
         this.rowModel.setFilterViewToData(null);
       }
+      this.options = {
+        ...this.options,
+        dataProvider: this.sourceDataProvider
+      };
+      this.groupRows = [];
+      this.groupKeys = [];
+      this.groupedDataProvider = null;
       this.renderer.setOptions(this.getRendererOptions());
       return;
     }
 
-    const rowCount = this.options.dataProvider.getRowCount();
+    const rowCount = this.sourceDataProvider.getRowCount();
     this.filterOperationToken += 1;
+    this.groupOperationToken += 1;
     const operationToken = ++this.sortOperationToken;
     const opId = `sort-${operationToken}`;
 
     if (normalizedSortModel.length === 0 || rowCount <= 0) {
       this.sortMapping = null;
-      this.rowModel.setBaseIdentityMapping();
       if (this.hasActiveFilterModel() && rowCount > 0) {
         await this.applyFilterModelInternal();
       } else {
-        this.rowModel.setFilterViewToData(null);
-        this.renderer.setOptions(this.getRendererOptions());
+        this.filterMapping = null;
+        await this.applyDerivedViewToRenderer();
       }
       return;
     }
@@ -412,7 +569,7 @@ export class Grid {
         rowCount,
         sortModel: normalizedSortModel,
         columns: this.columnModel.getColumns(),
-        dataProvider: this.options.dataProvider
+        dataProvider: this.sourceDataProvider
       },
       {
         isCanceled: () => operationToken !== this.sortOperationToken
@@ -432,12 +589,11 @@ export class Grid {
     }
 
     this.sortMapping = new Int32Array(response.result.mapping);
-    this.rowModel.setBaseViewToData(this.sortMapping);
     if (this.hasActiveFilterModel()) {
       await this.applyFilterModelInternal();
     } else {
-      this.rowModel.setFilterViewToData(null);
-      this.renderer.setOptions(this.getRendererOptions());
+      this.filterMapping = null;
+      await this.applyDerivedViewToRenderer();
     }
   }
 
@@ -451,21 +607,31 @@ export class Grid {
 
   public async setFilterModel(filterModel: GridFilterModel): Promise<void> {
     this.filterModel = this.normalizeFilterModel(filterModel);
-    if (isRemoteDataProvider(this.options.dataProvider)) {
+    if (isRemoteDataProvider(this.sourceDataProvider)) {
       this.sortMapping = null;
+      this.filterMapping = null;
       this.sortOperationToken += 1;
       this.filterOperationToken += 1;
-      this.options.dataProvider.setQueryModel({
+      this.groupOperationToken += 1;
+      this.sourceDataProvider.setQueryModel({
         sortModel: this.sortModel,
-        filterModel: this.filterModel
+        filterModel: this.filterModel,
+        groupModel: this.shouldUseServerGrouping() ? this.groupModel : undefined
       });
-      const rowCount = this.options.dataProvider.getRowCount();
+      const rowCount = this.sourceDataProvider.getRowCount();
       if (this.rowModel.getState().rowCount !== rowCount) {
         this.rowModel.setRowCount(rowCount);
       } else {
         this.rowModel.setBaseIdentityMapping();
         this.rowModel.setFilterViewToData(null);
       }
+      this.options = {
+        ...this.options,
+        dataProvider: this.sourceDataProvider
+      };
+      this.groupRows = [];
+      this.groupKeys = [];
+      this.groupedDataProvider = null;
       this.renderer.setOptions(this.getRendererOptions());
       return;
     }
@@ -475,6 +641,146 @@ export class Grid {
 
   public async clearFilterModel(): Promise<void> {
     await this.setFilterModel({});
+  }
+
+  public getGroupModel(): GroupModelItem[] {
+    return cloneGroupModel(this.groupModel);
+  }
+
+  public async setGroupModel(groupModel: GroupModelItem[]): Promise<void> {
+    this.groupModel = this.normalizeGroupModel(groupModel);
+    this.groupExpansionState = {};
+    this.options = {
+      ...this.options,
+      grouping: {
+        ...(this.options.grouping ?? {}),
+        mode: this.groupingMode,
+        groupModel: cloneGroupModel(this.groupModel),
+        aggregations: cloneGroupAggregations(this.groupAggregations),
+        defaultExpanded: this.groupDefaultExpanded
+      }
+    };
+    await this.rebuildDerivedView();
+  }
+
+  public async clearGroupModel(): Promise<void> {
+    await this.setGroupModel([]);
+  }
+
+  public getGroupAggregations(): GroupAggregationDef[] {
+    return cloneGroupAggregations(this.groupAggregations);
+  }
+
+  public async setGroupAggregations(aggregations: GroupAggregationDef[]): Promise<void> {
+    this.groupAggregations = this.normalizeGroupAggregations(aggregations);
+    this.options = {
+      ...this.options,
+      grouping: {
+        ...(this.options.grouping ?? {}),
+        mode: this.groupingMode,
+        groupModel: cloneGroupModel(this.groupModel),
+        aggregations: cloneGroupAggregations(this.groupAggregations),
+        defaultExpanded: this.groupDefaultExpanded
+      }
+    };
+    await this.rebuildDerivedView();
+  }
+
+  public getGroupExpansionState(): Record<string, boolean> {
+    return cloneGroupExpansionState(this.groupExpansionState);
+  }
+
+  public async setGroupExpanded(groupKey: string, expanded: boolean): Promise<void> {
+    if (typeof groupKey !== 'string' || groupKey.length === 0) {
+      return;
+    }
+
+    const nextExpanded = expanded === true;
+    const currentExpanded = this.groupExpansionState[groupKey];
+    if (currentExpanded === nextExpanded) {
+      return;
+    }
+
+    this.groupExpansionState[groupKey] = nextExpanded;
+    await this.applyGroupingViewInternal();
+  }
+
+  public async toggleGroupExpanded(groupKey: string): Promise<void> {
+    if (typeof groupKey !== 'string' || groupKey.length === 0) {
+      return;
+    }
+
+    const currentExpanded = this.groupExpansionState[groupKey];
+    const defaultExpanded = this.groupDefaultExpanded;
+    await this.setGroupExpanded(groupKey, currentExpanded === undefined ? !defaultExpanded : !currentExpanded);
+  }
+
+  public async expandAllGroups(): Promise<void> {
+    const nextState: Record<string, boolean> = {};
+    for (let index = 0; index < this.groupKeys.length; index += 1) {
+      nextState[this.groupKeys[index]] = true;
+    }
+    this.groupExpansionState = nextState;
+    await this.applyGroupingViewInternal();
+  }
+
+  public async collapseAllGroups(): Promise<void> {
+    const nextState: Record<string, boolean> = {};
+    for (let index = 0; index < this.groupKeys.length; index += 1) {
+      nextState[this.groupKeys[index]] = false;
+    }
+    this.groupExpansionState = nextState;
+    await this.applyGroupingViewInternal();
+  }
+
+  public getGroupingMode(): GroupingMode {
+    return this.groupingMode;
+  }
+
+  public async setGroupingMode(mode: GroupingMode): Promise<void> {
+    const nextMode: GroupingMode = mode === 'server' ? 'server' : 'client';
+    if (nextMode === this.groupingMode) {
+      return;
+    }
+
+    this.groupingMode = nextMode;
+    this.options = {
+      ...this.options,
+      grouping: {
+        ...(this.options.grouping ?? {}),
+        mode: this.groupingMode,
+        groupModel: cloneGroupModel(this.groupModel),
+        aggregations: cloneGroupAggregations(this.groupAggregations),
+        defaultExpanded: this.groupDefaultExpanded
+      }
+    };
+    await this.rebuildDerivedView();
+  }
+
+  public getGroupedRowsSnapshot(): GroupViewRow[] {
+    const snapshot = new Array<GroupViewRow>(this.groupRows.length);
+    for (let index = 0; index < this.groupRows.length; index += 1) {
+      const row = this.groupRows[index];
+      if (row.kind === 'data') {
+        snapshot[index] = {
+          kind: 'data',
+          dataIndex: row.dataIndex
+        };
+        continue;
+      }
+
+      snapshot[index] = {
+        kind: 'group',
+        groupKey: row.groupKey,
+        level: row.level,
+        columnId: row.columnId,
+        value: row.value,
+        leafCount: row.leafCount,
+        isExpanded: row.isExpanded,
+        values: { ...row.values }
+      };
+    }
+    return snapshot;
   }
 
   public setColumnOrder(columnIds: string[]): void {
@@ -520,12 +826,15 @@ export class Grid {
       ...rendererState,
       columnOrder: this.getColumnOrder(),
       hiddenColumnIds,
-      pinnedColumns
+      pinnedColumns,
+      groupModel: cloneGroupModel(this.groupModel),
+      groupExpansionState: cloneGroupExpansionState(this.groupExpansionState)
     };
   }
 
   public setState(state: GridState): void {
     let shouldSyncColumns = false;
+    let shouldRefreshGrouping = false;
 
     if (Array.isArray(state.columnOrder) && state.columnOrder.length > 0) {
       this.columnModel.setColumnOrder(state.columnOrder);
@@ -556,9 +865,37 @@ export class Grid {
       this.syncColumnsToRenderer();
     }
 
+    if (Array.isArray(state.groupModel)) {
+      const nextGroupModel = this.normalizeGroupModel(state.groupModel);
+      const isSameGroupModel = JSON.stringify(nextGroupModel) === JSON.stringify(this.groupModel);
+      if (!isSameGroupModel) {
+        this.groupModel = nextGroupModel;
+        this.options = {
+          ...this.options,
+          grouping: {
+            ...(this.options.grouping ?? {}),
+            mode: this.groupingMode,
+            groupModel: cloneGroupModel(this.groupModel),
+            aggregations: cloneGroupAggregations(this.groupAggregations),
+            defaultExpanded: this.groupDefaultExpanded
+          }
+        };
+        shouldRefreshGrouping = true;
+      }
+    }
+
+    if (state.groupExpansionState && typeof state.groupExpansionState === 'object') {
+      this.groupExpansionState = cloneGroupExpansionState(state.groupExpansionState);
+      shouldRefreshGrouping = true;
+    }
+
     this.renderer.setState({
       scrollTop: state.scrollTop
     });
+
+    if (shouldRefreshGrouping) {
+      void this.applyGroupingViewInternal();
+    }
   }
 
   public getSelection(): GridSelection {
@@ -589,6 +926,8 @@ export class Grid {
     this.unbindDataProvider();
     this.eventBus.off('columnResize', this.handleColumnResize);
     this.eventBus.off('columnReorder', this.handleColumnReorder);
+    this.eventBus.off('cellClick', this.handleCellClickForGrouping);
+    this.eventBus.off('editCommit', this.handleEditCommitForGrouping);
     this.renderer.destroy();
   }
 
@@ -619,14 +958,32 @@ export class Grid {
   }
 
   private handleDataProviderRowsChanged = (): void => {
-    const dataProvider = this.options.dataProvider;
-    const rowCount = dataProvider.getRowCount();
+    const rowCount = this.sourceDataProvider.getRowCount();
     if (this.rowModel.getState().rowCount !== rowCount) {
       this.rowModel.setRowCount(rowCount);
-      if (isRemoteDataProvider(dataProvider)) {
+      if (isRemoteDataProvider(this.sourceDataProvider)) {
         this.sortMapping = null;
+        this.filterMapping = null;
       }
     }
+
+    if (this.sortModel.length > 0 || this.hasActiveFilterModel() || this.hasActiveClientGrouping()) {
+      void this.rebuildDerivedView();
+      return;
+    }
+
+    if (this.shouldUseServerGrouping() && isRemoteDataProvider(this.sourceDataProvider)) {
+      this.sourceDataProvider.setQueryModel({
+        sortModel: this.sortModel,
+        filterModel: this.filterModel,
+        groupModel: this.groupModel
+      });
+    }
+
+    this.options = {
+      ...this.options,
+      dataProvider: this.sourceDataProvider
+    };
     this.renderer.setOptions(this.getRendererOptions());
   };
 
@@ -653,6 +1010,35 @@ export class Grid {
     this.syncColumnsToRenderer();
   };
 
+  private handleCellClickForGrouping = (event: GridEventMap['cellClick']): void => {
+    if (!this.hasActiveClientGrouping()) {
+      return;
+    }
+
+    if (!(this.options.dataProvider instanceof GroupedDataProvider)) {
+      return;
+    }
+
+    const groupRow = this.options.dataProvider.getGroupRow(event.dataIndex);
+    if (!groupRow) {
+      return;
+    }
+
+    if (event.columnId !== groupRow.columnId) {
+      return;
+    }
+
+    void this.toggleGroupExpanded(groupRow.groupKey);
+  };
+
+  private handleEditCommitForGrouping = (): void => {
+    if (!this.hasActiveClientGrouping()) {
+      return;
+    }
+
+    void this.applyGroupingViewInternal();
+  };
+
   private getColumnOrder(): string[] {
     return this.columnModel.getColumns().map((column) => column.id);
   }
@@ -667,6 +1053,98 @@ export class Grid {
 
   private hasActiveFilterModel(): boolean {
     return Object.keys(this.filterModel).length > 0;
+  }
+
+  private hasActiveGroupModel(): boolean {
+    return this.groupModel.length > 0;
+  }
+
+  private hasActiveClientGrouping(): boolean {
+    return this.hasActiveGroupModel() && !isRemoteDataProvider(this.sourceDataProvider);
+  }
+
+  private shouldUseServerGrouping(): boolean {
+    return this.groupingMode === 'server' && isRemoteDataProvider(this.sourceDataProvider);
+  }
+
+  private getCurrentSourceOrder(rowCount: number): Int32Array {
+    if (this.filterMapping) {
+      return this.filterMapping;
+    }
+
+    if (this.sortMapping) {
+      return this.sortMapping;
+    }
+
+    return createIdentityMapping(rowCount);
+  }
+
+  private normalizeGroupModel(groupModel: GroupModelItem[]): GroupModelItem[] {
+    if (!Array.isArray(groupModel) || groupModel.length === 0) {
+      return [];
+    }
+
+    const knownColumnIds = new Set<string>();
+    const columns = this.columnModel.getColumns();
+    for (let index = 0; index < columns.length; index += 1) {
+      knownColumnIds.add(columns[index].id);
+    }
+
+    const seen = new Set<string>();
+    const normalized: GroupModelItem[] = [];
+    for (let index = 0; index < groupModel.length; index += 1) {
+      const item = groupModel[index];
+      if (!item || typeof item.columnId !== 'string') {
+        continue;
+      }
+
+      const columnId = item.columnId.trim();
+      if (columnId.length === 0 || !knownColumnIds.has(columnId) || seen.has(columnId)) {
+        continue;
+      }
+
+      seen.add(columnId);
+      normalized.push({ columnId });
+    }
+
+    return normalized;
+  }
+
+  private normalizeGroupAggregations(aggregations: GroupAggregationDef[]): GroupAggregationDef[] {
+    if (!Array.isArray(aggregations) || aggregations.length === 0) {
+      return [];
+    }
+
+    const knownColumnIds = new Set<string>();
+    const columns = this.columnModel.getColumns();
+    for (let index = 0; index < columns.length; index += 1) {
+      knownColumnIds.add(columns[index].id);
+    }
+
+    const seen = new Set<string>();
+    const normalized: GroupAggregationDef[] = [];
+    for (let index = 0; index < aggregations.length; index += 1) {
+      const item = aggregations[index];
+      if (!item || typeof item.columnId !== 'string') {
+        continue;
+      }
+
+      const columnId = item.columnId.trim();
+      if (columnId.length === 0 || !knownColumnIds.has(columnId) || seen.has(columnId)) {
+        continue;
+      }
+
+      const hasReducer = typeof item.reducer === 'function';
+      const type = item.type ?? (hasReducer ? undefined : 'count');
+      normalized.push({
+        columnId,
+        type,
+        reducer: hasReducer ? item.reducer : undefined
+      });
+      seen.add(columnId);
+    }
+
+    return normalized;
   }
 
   private normalizeFilterModel(filterModel: GridFilterModel): GridFilterModel {
@@ -710,13 +1188,13 @@ export class Grid {
   }
 
   private async applyFilterModelInternal(): Promise<void> {
-    const rowCount = this.options.dataProvider.getRowCount();
+    const rowCount = this.sourceDataProvider.getRowCount();
     const operationToken = ++this.filterOperationToken;
     const opId = `filter-${operationToken}`;
 
     if (!this.hasActiveFilterModel() || rowCount <= 0) {
-      this.rowModel.setFilterViewToData(null);
-      this.renderer.setOptions(this.getRendererOptions());
+      this.filterMapping = null;
+      await this.applyDerivedViewToRenderer();
       return;
     }
 
@@ -726,7 +1204,7 @@ export class Grid {
         rowCount,
         filterModel: this.filterModel,
         columns: this.columnModel.getColumns(),
-        dataProvider: this.options.dataProvider,
+        dataProvider: this.sourceDataProvider,
         sourceOrder: this.sortMapping ?? createIdentityMapping(rowCount)
       },
       {
@@ -746,8 +1224,200 @@ export class Grid {
       throw new Error(response.result.message);
     }
 
-    this.rowModel.setFilterViewToData(response.result.mapping);
+    this.filterMapping = new Int32Array(response.result.mapping);
+    await this.applyDerivedViewToRenderer();
+  }
+
+  private async rebuildDerivedView(): Promise<void> {
+    if (isRemoteDataProvider(this.sourceDataProvider)) {
+      this.sortOperationToken += 1;
+      this.filterOperationToken += 1;
+      this.groupOperationToken += 1;
+      this.sortMapping = null;
+      this.filterMapping = null;
+      this.groupRows = [];
+      this.groupKeys = [];
+      this.groupedDataProvider = null;
+      this.sourceDataProvider.setQueryModel({
+        sortModel: this.sortModel,
+        filterModel: this.filterModel,
+        groupModel: this.shouldUseServerGrouping() ? this.groupModel : undefined
+      });
+
+      const sourceRowCount = this.sourceDataProvider.getRowCount();
+      this.rowModel.setRowCount(sourceRowCount);
+      this.rowModel.setBaseIdentityMapping();
+      this.rowModel.setFilterViewToData(null);
+      this.options = {
+        ...this.options,
+        dataProvider: this.sourceDataProvider
+      };
+      this.renderer.setOptions(this.getRendererOptions());
+      return;
+    }
+
+    const sourceRowCount = this.sourceDataProvider.getRowCount();
+    if (this.sortModel.length > 0 && sourceRowCount > 0) {
+      const operationToken = ++this.sortOperationToken;
+      const response = await this.sortExecutor.execute(
+        {
+          opId: `sort-${operationToken}`,
+          rowCount: sourceRowCount,
+          sortModel: this.sortModel,
+          columns: this.columnModel.getColumns(),
+          dataProvider: this.sourceDataProvider
+        },
+        {
+          isCanceled: () => operationToken !== this.sortOperationToken
+        }
+      );
+
+      if (operationToken !== this.sortOperationToken) {
+        return;
+      }
+
+      if (response.status === 'error') {
+        throw new Error(response.result.message);
+      }
+
+      if (response.status === 'ok') {
+        this.sortMapping = new Int32Array(response.result.mapping);
+      } else {
+        this.sortMapping = null;
+      }
+    } else {
+      this.sortMapping = null;
+    }
+
+    if (this.hasActiveFilterModel() && sourceRowCount > 0) {
+      const operationToken = ++this.filterOperationToken;
+      const response = await this.filterExecutor.execute(
+        {
+          opId: `filter-${operationToken}`,
+          rowCount: sourceRowCount,
+          filterModel: this.filterModel,
+          columns: this.columnModel.getColumns(),
+          dataProvider: this.sourceDataProvider,
+          sourceOrder: this.sortMapping ?? createIdentityMapping(sourceRowCount)
+        },
+        {
+          isCanceled: () => operationToken !== this.filterOperationToken
+        }
+      );
+
+      if (operationToken !== this.filterOperationToken) {
+        return;
+      }
+
+      if (response.status === 'error') {
+        throw new Error(response.result.message);
+      }
+
+      if (response.status === 'ok') {
+        this.filterMapping = new Int32Array(response.result.mapping);
+      } else {
+        this.filterMapping = null;
+      }
+    } else {
+      this.filterMapping = null;
+    }
+
+    await this.applyDerivedViewToRenderer();
+  }
+
+  private async applyDerivedViewToRenderer(): Promise<void> {
+    if (this.hasActiveClientGrouping()) {
+      await this.applyGroupingViewInternal();
+      return;
+    }
+
+    const sourceRowCount = this.sourceDataProvider.getRowCount();
+    this.groupRows = [];
+    this.groupKeys = [];
+    this.groupedDataProvider = null;
+    this.options = {
+      ...this.options,
+      dataProvider: this.sourceDataProvider
+    };
+
+    if (this.rowModel.getState().rowCount !== sourceRowCount) {
+      this.rowModel.setRowCount(sourceRowCount);
+    }
+
+    if (this.sortMapping) {
+      this.rowModel.setBaseViewToData(this.sortMapping);
+    } else {
+      this.rowModel.setBaseIdentityMapping();
+    }
+
+    this.rowModel.setFilterViewToData(this.filterMapping);
     this.renderer.setOptions(this.getRendererOptions());
+  }
+
+  private async applyGroupingViewInternal(): Promise<void> {
+    if (!this.hasActiveClientGrouping()) {
+      await this.applyDerivedViewToRenderer();
+      return;
+    }
+
+    const sourceRowCount = this.sourceDataProvider.getRowCount();
+    const operationToken = ++this.groupOperationToken;
+    const opId = `group-${operationToken}`;
+    const response = await this.groupExecutor.execute(
+      {
+        opId,
+        rowCount: sourceRowCount,
+        groupModel: this.groupModel,
+        aggregations: this.groupAggregations,
+        columns: this.columnModel.getColumns(),
+        dataProvider: this.sourceDataProvider,
+        sourceOrder: this.getCurrentSourceOrder(sourceRowCount),
+        groupExpansionState: this.groupExpansionState,
+        defaultExpanded: this.groupDefaultExpanded
+      },
+      {
+        isCanceled: () => operationToken !== this.groupOperationToken
+      }
+    );
+
+    if (operationToken !== this.groupOperationToken) {
+      return;
+    }
+
+    if (response.status === 'canceled') {
+      return;
+    }
+
+    if (response.status === 'error') {
+      throw new Error(response.result.message);
+    }
+
+    this.applyGroupingResult(response.result);
+    this.renderer.setOptions(this.getRendererOptions());
+  }
+
+  private applyGroupingResult(result: GroupExecutionResult): void {
+    this.groupRows = result.rows;
+    this.groupKeys = result.groupKeys.slice();
+
+    if (!this.groupedDataProvider) {
+      this.groupedDataProvider = new GroupedDataProvider(this.sourceDataProvider);
+    } else {
+      this.groupedDataProvider.setSourceDataProvider(this.sourceDataProvider);
+    }
+
+    this.groupedDataProvider.applySnapshot({
+      rows: result.rows,
+      groupKeys: result.groupKeys
+    });
+
+    this.options = {
+      ...this.options,
+      dataProvider: this.groupedDataProvider
+    };
+    this.rowModel.setRowCount(this.groupedDataProvider.getRowCount());
+    this.rowModel.setBaseIdentityMapping();
+    this.rowModel.setFilterViewToData(null);
   }
 
   private normalizeSortModel(sortModel: SortModelItem[]): SortModelItem[] {

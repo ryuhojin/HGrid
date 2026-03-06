@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 31 - Grouping</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 20px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      #grid {
+        width: 1200px;
+        max-width: 100%;
+      }
+
+      #log {
+        margin-top: 10px;
+        height: 120px;
+        overflow: auto;
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        padding: 8px;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 31 - Grouping</h1>
+    <div class="toolbar">
+      <button id="group-region">Group: Region</button>
+      <button id="group-region-status">Group: Region + Status</button>
+      <button id="clear-group">Clear Group</button>
+      <button id="collapse-all">Collapse All</button>
+      <button id="expand-all">Expand All</button>
+      <button id="mode-client">Mode: Client</button>
+      <button id="mode-server">Mode: Server</button>
+    </div>
+    <div id="grid"></div>
+    <pre id="log" aria-live="polite"></pre>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 96, type: 'number' },
+        { id: 'region', header: 'Region', width: 120, type: 'text' },
+        { id: 'status', header: 'Status', width: 120, type: 'text' },
+        { id: 'locale', header: 'Locale', width: 120, type: 'text' },
+        { id: 'game', header: 'Game', width: 180, type: 'text' },
+        { id: 'balance', header: 'Balance', width: 140, type: 'number' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 240, type: 'date' }
+      ];
+
+      const regions = ['KR', 'US', 'JP', 'DE'];
+      const statuses = ['active', 'idle'];
+      const locales = ['ko-KR', 'en-US', 'ja-JP', 'de-DE'];
+      const games = ['Chess', 'Go', 'Shogi', 'Checkers', 'Nine Men\'s Morris'];
+
+      const rowData = Array.from({ length: 5000 }, (_, index) => {
+        const region = regions[index % regions.length];
+        const locale = locales[index % locales.length];
+        const status = statuses[index % statuses.length];
+        return {
+          id: index + 1,
+          region,
+          status,
+          locale,
+          game: games[index % games.length],
+          balance: (index * 173) % 100000,
+          score: (index * 31) % 500,
+          updatedAt: new Date(Date.now() - index * 13000).toISOString()
+        };
+      });
+
+      const logElement = document.getElementById('log');
+      const appendLog = (message) => {
+        const text = `[${new Date().toISOString()}] ${message}`;
+        logElement.textContent = `${text}\n${logElement.textContent}`.slice(0, 12000);
+      };
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        grouping: {
+          mode: 'client',
+          groupModel: [{ columnId: 'region' }],
+          aggregations: [
+            { columnId: 'balance', type: 'sum' },
+            { columnId: 'score', type: 'avg' },
+            { columnId: 'id', type: 'count' }
+          ],
+          defaultExpanded: true
+        },
+        height: 460,
+        rowHeight: 30,
+        overscan: 8
+      });
+
+      const applyGroupModel = async (groupModel) => {
+        await grid.setGroupModel(groupModel);
+        await grid.setGroupAggregations([
+          { columnId: 'balance', type: 'sum' },
+          { columnId: 'score', type: 'avg' },
+          { columnId: 'id', type: 'count' }
+        ]);
+
+        const groupRows = grid.getGroupedRowsSnapshot().filter((row) => row.kind === 'group').length;
+        appendLog(`setGroupModel(${JSON.stringify(groupModel)}) => groupRows=${groupRows}`);
+      };
+
+      document.getElementById('group-region').addEventListener('click', () => {
+        void applyGroupModel([{ columnId: 'region' }]);
+      });
+
+      document.getElementById('group-region-status').addEventListener('click', () => {
+        void applyGroupModel([{ columnId: 'region' }, { columnId: 'status' }]);
+      });
+
+      document.getElementById('clear-group').addEventListener('click', () => {
+        void (async () => {
+          await grid.clearGroupModel();
+          appendLog('clearGroupModel()');
+        })();
+      });
+
+      document.getElementById('collapse-all').addEventListener('click', () => {
+        void (async () => {
+          await grid.collapseAllGroups();
+          appendLog('collapseAllGroups()');
+        })();
+      });
+
+      document.getElementById('expand-all').addEventListener('click', () => {
+        void (async () => {
+          await grid.expandAllGroups();
+          appendLog('expandAllGroups()');
+        })();
+      });
+
+      document.getElementById('mode-client').addEventListener('click', () => {
+        void (async () => {
+          await grid.setGroupingMode('client');
+          appendLog('setGroupingMode(client)');
+        })();
+      });
+
+      document.getElementById('mode-server').addEventListener('click', () => {
+        void (async () => {
+          await grid.setGroupingMode('server');
+          appendLog('setGroupingMode(server)');
+        })();
+      });
+
+      grid.on('cellClick', (event) => {
+        if (event.columnId) {
+          appendLog(`cellClick row=${event.rowIndex} col=${event.columnId}`);
+        }
+      });
+
+      window.__example31 = {
+        getSnapshot() {
+          const groupedRows = grid.getGroupedRowsSnapshot();
+          const groupRows = groupedRows.filter((row) => row.kind === 'group');
+          return {
+            groupingMode: grid.getGroupingMode(),
+            groupModel: grid.getGroupModel(),
+            totalRows: groupedRows.length,
+            groupRowCount: groupRows.length,
+            firstGroupKey: groupRows.length > 0 ? groupRows[0].groupKey : null,
+            firstGroupExpanded: groupRows.length > 0 ? groupRows[0].isExpanded : null,
+            firstCenterCellText: document.querySelector('.hgrid__row--center .hgrid__cell')?.textContent ?? ''
+          };
+        },
+        async collapseFirstGroup() {
+          const groupedRows = grid.getGroupedRowsSnapshot();
+          const first = groupedRows.find((row) => row.kind === 'group');
+          if (!first || first.kind !== 'group') {
+            return false;
+          }
+          await grid.setGroupExpanded(first.groupKey, false);
+          return true;
+        },
+        async expandFirstGroup() {
+          const groupedRows = grid.getGroupedRowsSnapshot();
+          const first = groupedRows.find((row) => row.kind === 'group');
+          if (!first || first.kind !== 'group') {
+            return false;
+          }
+          await grid.setGroupExpanded(first.groupKey, true);
+          return true;
+        }
+      };
+
+      appendLog('Grouping example initialized');
+    </script>
+  </body>
+</html>

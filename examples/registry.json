@@ -307,11 +307,22 @@
     {
       "number": 28,
       "file": "example28.html",
-      "title": "Example 28 - Selection Indicator State Columns",
+      "title": "Example 28 - Selection Indicator Columns",
       "tags": [
         "phase7",
         "selection-indicator",
-        "state-column",
+        "indicator-columns",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 29,
+      "file": "example29.html",
+      "title": "Example 29 - Column Group Header",
+      "tags": [
+        "phase7",
+        "column-group-header",
         "umd"
       ],
       "plugins": []

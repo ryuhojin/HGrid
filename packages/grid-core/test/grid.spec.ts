@@ -1087,6 +1087,118 @@ describe('Grid DOM pooling', () => {
     grid.destroy();
   });
 
+  it('renders multi-level column group headers and keeps them aligned across pin/hide/reorder', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 1180, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 96, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'language', header: 'Language', width: 140, type: 'text' },
+        { id: 'country', header: 'Country', width: 140, type: 'text' },
+        { id: 'game', header: 'Game', width: 170, type: 'text' },
+        { id: 'balance', header: 'Balance', width: 150, type: 'number' },
+        { id: 'rating', header: 'Rating', width: 120, type: 'number' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 210, type: 'date', pinned: 'right' }
+      ],
+      columnGroups: [
+        {
+          groupId: 'participant',
+          header: 'Participant',
+          children: [
+            'name',
+            {
+              groupId: 'locale',
+              header: 'Locale',
+              children: ['language', 'country']
+            }
+          ]
+        },
+        {
+          groupId: 'performance',
+          header: 'Performance',
+          children: ['game', 'balance']
+        },
+        {
+          groupId: 'metrics',
+          header: 'Metrics',
+          children: ['rating', 'score']
+        },
+        {
+          groupId: 'audit',
+          header: 'Audit',
+          children: ['updatedAt']
+        }
+      ],
+      rowData: Array.from({ length: 300 }, (_value, index) => ({
+        id: index + 1,
+        name: `customer-${index + 1}`,
+        language: ['English', 'Spanish', 'French', 'German'][index % 4],
+        country: ['KR', 'US', 'JP', 'DE'][index % 4],
+        game: ['Chess', 'Go', 'Shogi', 'Checkers'][index % 4],
+        balance: (index * 97) % 9000,
+        rating: (index % 5) + 1,
+        score: (index * 13) % 1000,
+        updatedAt: new Date(Date.now() - index * 60000).toISOString()
+      })),
+      height: 220,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    await waitForFrame();
+
+    const groupRows = container.querySelectorAll('.hgrid__header-row--group');
+    expect(groupRows.length).toBeGreaterThan(0);
+
+    const groupCells = container.querySelectorAll('.hgrid__header-cell--group');
+    expect(groupCells.length).toBeGreaterThan(0);
+
+    const centerGroupCells = Array.from(
+      container.querySelectorAll('.hgrid__header-center .hgrid__header-cell--group')
+    ) as HTMLDivElement[];
+    expect(centerGroupCells.some((cell) => cell.textContent === 'Participant')).toBe(true);
+    expect(centerGroupCells.some((cell) => cell.dataset.groupId === 'locale')).toBe(true);
+    expect(centerGroupCells.every((cell) => cell.getAttribute('aria-colspan') !== null)).toBe(true);
+    expect(centerGroupCells.every((cell) => !cell.dataset.columnId)).toBe(true);
+
+    const rootStyle = getComputedStyle(container.querySelector('.hgrid') as HTMLElement);
+    expect(rootStyle.getPropertyValue('--hgrid-header-height').trim()).toBe('96px');
+    expect(rootStyle.getPropertyValue('--hgrid-header-row-height').trim()).toBe('32px');
+
+    grid.setColumnPin('country', 'right');
+    await waitForFrame();
+    const rightLeafColumnsAfterPin = Array.from(
+      container.querySelectorAll('.hgrid__header-right .hgrid__header-row--leaf .hgrid__header-cell--leaf')
+    ).map((cell) => (cell as HTMLDivElement).dataset.columnId);
+    expect(rightLeafColumnsAfterPin.indexOf('country')).toBeGreaterThanOrEqual(0);
+    expect(
+      Array.from(container.querySelectorAll('.hgrid__header-right .hgrid__header-cell--group')).some(
+        (cell) => (cell as HTMLDivElement).dataset.groupId === 'locale'
+      )
+    ).toBe(true);
+
+    grid.setColumnVisibility('balance', false);
+    await waitForFrame();
+    const centerLeafColumnsAfterHide = Array.from(
+      container.querySelectorAll('.hgrid__header-center .hgrid__header-row--leaf .hgrid__header-cell--leaf')
+    ).map((cell) => (cell as HTMLDivElement).dataset.columnId);
+    expect(centerLeafColumnsAfterHide.indexOf('balance')).toBe(-1);
+
+    grid.setColumnOrder(['id', 'name', 'country', 'game', 'balance', 'rating', 'score', 'language', 'updatedAt']);
+    await waitForFrame();
+    const centerLeafColumnsAfterReorder = Array.from(
+      container.querySelectorAll('.hgrid__header-center .hgrid__header-row--leaf .hgrid__header-cell--leaf')
+    ).map((cell) => (cell as HTMLDivElement).dataset.columnId);
+    expect(centerLeafColumnsAfterReorder[centerLeafColumnsAfterReorder.length - 1]).toBe('language');
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('swaps data providers without changing Grid API', () => {
     const container = document.createElement('div');
     document.body.append(container);

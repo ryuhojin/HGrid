@@ -1,5 +1,6 @@
 import { EventBus } from '../core/event-bus';
 import type {
+  ColumnGroupDef,
   ColumnDef,
   GridOptions,
   GridState,
@@ -88,6 +89,32 @@ interface HorizontalWindow {
   end: number;
 }
 
+interface HeaderGroupCellLayout {
+  groupId: string;
+  header: string;
+  startColIndex: number;
+  endColIndex: number;
+  leafSpan: number;
+  isCollapsed: boolean;
+}
+
+interface HeaderGroupRowLayout {
+  level: number;
+  cells: HeaderGroupCellLayout[];
+}
+
+interface HeaderLeafSpanLayout {
+  columnId: string;
+  colIndex: number;
+  startRow: number;
+  rowSpan: number;
+}
+
+interface HeaderLeafSpanMetrics {
+  spansByRow: Map<number, HeaderLeafSpanLayout[]>;
+  hiddenLeafColumnIds: Set<string>;
+}
+
 type StateColumnTone = RowStatusTone | 'dirty' | 'commit';
 
 interface NormalizedStateColumnResult {
@@ -173,6 +200,8 @@ const DEFAULT_INDICATOR_STATUS_WIDTH = 96;
 const MIN_INDICATOR_WIDTH = 44;
 const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 104;
+const DEFAULT_HEADER_ROW_HEIGHT = 32;
+const MAX_GROUP_HEADER_DEPTH = 8;
 const STATE_TONE_DIRTY = 'dirty';
 const STATE_TONE_COMMIT = 'commit';
 const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
@@ -262,6 +291,12 @@ export class DomRenderer {
   private centerCellCapacity = 0;
   private centerHeaderCellPool: HTMLDivElement[] = [];
   private centerHeaderCellStates: CellRenderState[] = [];
+  private headerGroupRowCount = 0;
+  private leafSpanHiddenColumnsByZone: Record<ColumnZoneName, Set<string>> = {
+    left: new Set<string>(),
+    center: new Set<string>(),
+    right: new Set<string>()
+  };
   private readonly rowHeightMap: RowHeightMap;
   private readonly selectionModel: SelectionModel;
   private pointerSelectionSession: PointerSelectionSession | null = null;
@@ -455,6 +490,7 @@ export class DomRenderer {
     this.rootElement.className = 'hgrid';
     this.rootElement.setAttribute('role', 'grid');
     this.rootElement.tabIndex = 0;
+    this.setHeaderRowCount(0);
 
     this.headerElement.className = 'hgrid__header';
     this.headerLeftElement.className = 'hgrid__header-left';
@@ -614,6 +650,206 @@ export class DomRenderer {
 
     const fallbackValue = row.__indicatorStatus ?? row.__state ?? row.state ?? row.status;
     return typeof fallbackValue === 'string' ? fallbackValue : '';
+  }
+
+  private getHeaderRowHeight(): number {
+    return DEFAULT_HEADER_ROW_HEIGHT;
+  }
+
+  private getColumnGroups(): ColumnGroupDef[] {
+    if (!Array.isArray(this.options.columnGroups)) {
+      return [];
+    }
+
+    return this.options.columnGroups;
+  }
+
+  private getZoneGroupRowLayouts(columns: ColumnDef[]): HeaderGroupRowLayout[] {
+    const columnGroups = this.getColumnGroups();
+    if (columns.length === 0 || columnGroups.length === 0) {
+      return [];
+    }
+
+    const columnIndexById = new Map<string, number>();
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      columnIndexById.set(columns[columnIndex].id, columnIndex);
+    }
+
+    const rowMap = new Map<number, HeaderGroupCellLayout[]>();
+    const collectIndicesFromNode = (node: string | ColumnGroupDef, level: number): number[] => {
+      if (typeof node === 'string') {
+        const matchedIndex = columnIndexById.get(node);
+        return matchedIndex === undefined ? [] : [matchedIndex];
+      }
+
+      if (!node || typeof node !== 'object' || level >= MAX_GROUP_HEADER_DEPTH) {
+        return [];
+      }
+
+      const children = Array.isArray(node.children) ? node.children : [];
+      if (children.length === 0) {
+        return [];
+      }
+
+      const indexSet = new Set<number>();
+      for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+        const childIndices = collectIndicesFromNode(children[childIndex], level + 1);
+        for (let index = 0; index < childIndices.length; index += 1) {
+          indexSet.add(childIndices[index]);
+        }
+      }
+
+      if (indexSet.size === 0) {
+        return [];
+      }
+
+      const sortedIndices = Array.from(indexSet).sort((left, right) => left - right);
+      const groupIdText = typeof node.groupId === 'string' && node.groupId.length > 0 ? node.groupId : `group-${level}`;
+      const headerText = typeof node.header === 'string' && node.header.length > 0 ? node.header : groupIdText;
+      let segmentStart = sortedIndices[0];
+      let segmentEnd = sortedIndices[0];
+      for (let index = 1; index < sortedIndices.length; index += 1) {
+        const nextIndex = sortedIndices[index];
+        if (nextIndex === segmentEnd + 1) {
+          segmentEnd = nextIndex;
+          continue;
+        }
+
+        const rowCells = rowMap.get(level) ?? [];
+        rowCells.push({
+          groupId: groupIdText,
+          header: headerText,
+          startColIndex: segmentStart,
+          endColIndex: segmentEnd + 1,
+          leafSpan: segmentEnd - segmentStart + 1,
+          isCollapsed: node.collapsed === true
+        });
+        rowMap.set(level, rowCells);
+        segmentStart = nextIndex;
+        segmentEnd = nextIndex;
+      }
+
+      const rowCells = rowMap.get(level) ?? [];
+      rowCells.push({
+        groupId: groupIdText,
+        header: headerText,
+        startColIndex: segmentStart,
+        endColIndex: segmentEnd + 1,
+        leafSpan: segmentEnd - segmentStart + 1,
+        isCollapsed: node.collapsed === true
+      });
+      rowMap.set(level, rowCells);
+      return sortedIndices;
+    };
+
+    for (let rootIndex = 0; rootIndex < columnGroups.length; rootIndex += 1) {
+      collectIndicesFromNode(columnGroups[rootIndex], 0);
+    }
+
+    const rowLevels = Array.from(rowMap.keys()).sort((left, right) => left - right);
+    const layouts: HeaderGroupRowLayout[] = [];
+    for (let rowIndex = 0; rowIndex < rowLevels.length; rowIndex += 1) {
+      const level = rowLevels[rowIndex];
+      const cells = (rowMap.get(level) ?? []).slice().sort((left, right) => left.startColIndex - right.startColIndex);
+      if (cells.length === 0) {
+        continue;
+      }
+      layouts.push({
+        level,
+        cells
+      });
+    }
+
+    return layouts;
+  }
+
+  private getZoneLeafSpanMetrics(
+    columns: ColumnDef[],
+    groupRows: HeaderGroupRowLayout[],
+    maxGroupRowCount: number
+  ): HeaderLeafSpanMetrics {
+    const deepestGroupLevelByColumn = new Array<number>(columns.length);
+    for (let colIndex = 0; colIndex < columns.length; colIndex += 1) {
+      deepestGroupLevelByColumn[colIndex] = -1;
+    }
+
+    for (let rowIndex = 0; rowIndex < groupRows.length; rowIndex += 1) {
+      const rowLayout = groupRows[rowIndex];
+      const level = rowLayout.level;
+      for (let cellIndex = 0; cellIndex < rowLayout.cells.length; cellIndex += 1) {
+        const groupCell = rowLayout.cells[cellIndex];
+        const startCol = Math.max(0, groupCell.startColIndex);
+        const endCol = Math.min(columns.length, groupCell.endColIndex);
+        for (let colIndex = startCol; colIndex < endCol; colIndex += 1) {
+          deepestGroupLevelByColumn[colIndex] = Math.max(deepestGroupLevelByColumn[colIndex], level);
+        }
+      }
+    }
+
+    const spansByRow = new Map<number, HeaderLeafSpanLayout[]>();
+    const hiddenLeafColumnIds = new Set<string>();
+    for (let colIndex = 0; colIndex < columns.length; colIndex += 1) {
+      const column = columns[colIndex];
+      const leafStartRow = deepestGroupLevelByColumn[colIndex] + 1;
+      const rowSpan = maxGroupRowCount - leafStartRow + 1;
+      if (rowSpan <= 1) {
+        continue;
+      }
+
+      const rowSpans = spansByRow.get(leafStartRow) ?? [];
+      rowSpans.push({
+        columnId: column.id,
+        colIndex,
+        startRow: leafStartRow,
+        rowSpan
+      });
+      spansByRow.set(leafStartRow, rowSpans);
+      hiddenLeafColumnIds.add(column.id);
+    }
+
+    return {
+      spansByRow,
+      hiddenLeafColumnIds
+    };
+  }
+
+  private populateHeaderLeafCell(headerCellElement: HTMLDivElement, column: ColumnDef, asPlaceholder: boolean): void {
+    headerCellElement.className = 'hgrid__header-cell hgrid__header-cell--leaf';
+    headerCellElement.dataset.columnId = column.id;
+    headerCellElement.setAttribute('role', 'columnheader');
+    if (asPlaceholder) {
+      headerCellElement.classList.add('hgrid__header-cell--leaf-placeholder');
+      headerCellElement.textContent = '';
+      headerCellElement.style.display = 'none';
+      return;
+    }
+
+    if (this.isIndicatorCheckboxColumnId(column.id)) {
+      const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
+      headerCellElement.classList.add('hgrid__header-cell--indicator', 'hgrid__header-cell--indicator-checkbox');
+      const checkbox = document.createElement('input');
+      checkbox.className = 'hgrid__indicator-checkall';
+      checkbox.type = 'checkbox';
+      checkbox.tabIndex = -1;
+      checkbox.checked = false;
+      checkbox.style.display = rowIndicatorOptions.showCheckbox ? '' : 'none';
+      checkbox.disabled = !rowIndicatorOptions.showCheckbox;
+      checkbox.setAttribute('aria-label', `Select all rows (${rowIndicatorOptions.checkAllScope})`);
+      headerCellElement.append(checkbox);
+      this.indicatorHeaderCheckAllElement = checkbox;
+      return;
+    }
+
+    headerCellElement.textContent = column.header;
+  }
+
+  private setHeaderRowCount(groupRowCount: number): void {
+    const normalizedGroupRowCount = Math.max(0, Math.min(MAX_GROUP_HEADER_DEPTH, groupRowCount));
+    this.headerGroupRowCount = normalizedGroupRowCount;
+    const rowHeight = this.getHeaderRowHeight();
+    const totalHeight = rowHeight * (normalizedGroupRowCount + 1);
+    this.rootElement.style.setProperty('--hgrid-header-row-height', `${rowHeight}px`);
+    this.rootElement.style.setProperty('--hgrid-header-height', `${totalHeight}px`);
   }
 
   private normalizeStateTone(value: unknown): StateColumnTone | null {
@@ -1039,48 +1275,207 @@ export class DomRenderer {
 
   private rebuildHeader(): void {
     this.indicatorHeaderCheckAllElement = null;
-    this.buildHeaderRow(this.headerRowLeftElement, this.columnsByZone.left, 'left');
-    this.buildHeaderRow(this.headerRowCenterElement, this.columnsByZone.center, 'center');
-    this.buildHeaderRow(this.headerRowRightElement, this.columnsByZone.right, 'right');
+    const leftGroupRows = this.getZoneGroupRowLayouts(this.columnsByZone.left);
+    const centerGroupRows = this.getZoneGroupRowLayouts(this.columnsByZone.center);
+    const rightGroupRows = this.getZoneGroupRowLayouts(this.columnsByZone.right);
+    const maxGroupRowCount = Math.max(leftGroupRows.length, centerGroupRows.length, rightGroupRows.length);
+    const leftLeafSpanMetrics = this.getZoneLeafSpanMetrics(this.columnsByZone.left, leftGroupRows, maxGroupRowCount);
+    const centerLeafSpanMetrics = this.getZoneLeafSpanMetrics(this.columnsByZone.center, centerGroupRows, maxGroupRowCount);
+    const rightLeafSpanMetrics = this.getZoneLeafSpanMetrics(this.columnsByZone.right, rightGroupRows, maxGroupRowCount);
+    this.leafSpanHiddenColumnsByZone.left = leftLeafSpanMetrics.hiddenLeafColumnIds;
+    this.leafSpanHiddenColumnsByZone.center = centerLeafSpanMetrics.hiddenLeafColumnIds;
+    this.leafSpanHiddenColumnsByZone.right = rightLeafSpanMetrics.hiddenLeafColumnIds;
+    this.setHeaderRowCount(maxGroupRowCount);
+
+    this.buildHeaderZone(
+      this.headerLeftElement,
+      this.headerRowLeftElement,
+      this.columnsByZone.left,
+      'left',
+      leftGroupRows,
+      maxGroupRowCount,
+      leftLeafSpanMetrics,
+      this.leftColumnLeft,
+      this.leftColumnWidth,
+      this.leftPinnedWidth
+    );
+    this.buildHeaderZone(
+      this.headerCenterViewportElement,
+      this.headerRowCenterElement,
+      this.columnsByZone.center,
+      'center',
+      centerGroupRows,
+      maxGroupRowCount,
+      centerLeafSpanMetrics,
+      this.centerColumnLeft,
+      this.centerColumnWidth,
+      this.centerColumnsWidth
+    );
+    this.buildHeaderZone(
+      this.headerRightElement,
+      this.headerRowRightElement,
+      this.columnsByZone.right,
+      'right',
+      rightGroupRows,
+      maxGroupRowCount,
+      rightLeafSpanMetrics,
+      this.rightColumnLeft,
+      this.rightColumnWidth,
+      this.rightPinnedWidth
+    );
     this.syncIndicatorHeaderCheckAllState();
   }
 
-  private buildHeaderRow(rowElement: HTMLDivElement, columns: ColumnDef[], zoneName: ColumnZoneName): void {
-    if (zoneName === 'center') {
-      this.buildCenterHeaderRow(rowElement);
-      return;
+  private buildHeaderZone(
+    zoneContainer: HTMLDivElement,
+    leafRowElement: HTMLDivElement,
+    columns: ColumnDef[],
+    zoneName: ColumnZoneName,
+    groupRows: HeaderGroupRowLayout[],
+    maxGroupRowCount: number,
+    leafSpanMetrics: HeaderLeafSpanMetrics,
+    columnLeft: number[],
+    columnWidth: number[],
+    zoneWidth: number
+  ): void {
+    zoneContainer.replaceChildren();
+    for (let rowIndex = 0; rowIndex < maxGroupRowCount; rowIndex += 1) {
+      const groupRowLayout = groupRows[rowIndex] ?? null;
+      const groupRowElement = this.createHeaderGroupRow(
+        zoneName,
+        groupRowLayout,
+        columnLeft,
+        columnWidth,
+        zoneWidth,
+        rowIndex,
+        leafSpanMetrics,
+        columns
+      );
+      zoneContainer.append(groupRowElement);
     }
 
+    if (zoneName === 'center') {
+      this.buildCenterHeaderRow(leafRowElement);
+    } else {
+      this.buildPinnedHeaderLeafRow(leafRowElement, columns, zoneName, columnLeft, zoneWidth);
+    }
+    zoneContainer.append(leafRowElement);
+  }
+
+  private createHeaderGroupRow(
+    zoneName: ColumnZoneName,
+    rowLayout: HeaderGroupRowLayout | null,
+    columnLeft: number[],
+    columnWidth: number[],
+    zoneWidth: number,
+    rowIndex: number,
+    leafSpanMetrics: HeaderLeafSpanMetrics,
+    columns: ColumnDef[]
+  ): HTMLDivElement {
+    const rowElement = document.createElement('div');
+    rowElement.className = `hgrid__header-row hgrid__header-row--${zoneName} hgrid__header-row--group`;
+    rowElement.setAttribute('role', 'row');
+    rowElement.style.display = 'block';
+    rowElement.style.position = 'relative';
+    rowElement.style.width = `${Math.max(1, zoneWidth)}px`;
+
+    if (rowLayout) {
+      for (let cellIndex = 0; cellIndex < rowLayout.cells.length; cellIndex += 1) {
+        const cellLayout = rowLayout.cells[cellIndex];
+        const startColIndex = cellLayout.startColIndex;
+        const endColIndex = cellLayout.endColIndex - 1;
+        if (
+          startColIndex < 0 ||
+          endColIndex < startColIndex ||
+          startColIndex >= columnLeft.length ||
+          endColIndex >= columnLeft.length
+        ) {
+          continue;
+        }
+
+        const left = columnLeft[startColIndex];
+        const right = columnLeft[endColIndex] + columnWidth[endColIndex];
+        const width = Math.max(0, right - left);
+        if (width <= 0) {
+          continue;
+        }
+
+        const headerCellElement = document.createElement('div');
+        headerCellElement.className = 'hgrid__header-cell hgrid__header-cell--group';
+        if (cellLayout.isCollapsed) {
+          headerCellElement.classList.add('hgrid__header-cell--group-collapsed');
+        }
+        headerCellElement.style.position = 'absolute';
+        headerCellElement.style.left = `${left}px`;
+        headerCellElement.style.width = `${width}px`;
+        headerCellElement.dataset.groupId = cellLayout.groupId;
+        headerCellElement.setAttribute('role', 'columnheader');
+        headerCellElement.setAttribute('aria-colspan', String(cellLayout.leafSpan));
+        headerCellElement.textContent = cellLayout.header;
+        rowElement.append(headerCellElement);
+      }
+    }
+
+    const leafSpanRows = leafSpanMetrics.spansByRow.get(rowIndex) ?? [];
+    if (leafSpanRows.length > 0) {
+      const rowHeight = this.getHeaderRowHeight();
+      for (let spanIndex = 0; spanIndex < leafSpanRows.length; spanIndex += 1) {
+        const spanLayout = leafSpanRows[spanIndex];
+        const column = columns[spanLayout.colIndex];
+        if (!column) {
+          continue;
+        }
+
+        const left = columnLeft[spanLayout.colIndex];
+        const width = columnWidth[spanLayout.colIndex];
+        if (!Number.isFinite(left) || !Number.isFinite(width) || width <= 0) {
+          continue;
+        }
+
+        const headerCellElement = document.createElement('div');
+        this.populateHeaderLeafCell(headerCellElement, column, false);
+        headerCellElement.classList.add('hgrid__header-cell--leaf-span');
+        headerCellElement.style.position = 'absolute';
+        headerCellElement.style.left = `${left}px`;
+        headerCellElement.style.width = `${width}px`;
+        headerCellElement.style.height = `${Math.max(1, spanLayout.rowSpan * rowHeight)}px`;
+        rowElement.append(headerCellElement);
+      }
+    }
+
+    return rowElement;
+  }
+
+  private buildPinnedHeaderLeafRow(
+    rowElement: HTMLDivElement,
+    columns: ColumnDef[],
+    zoneName: ColumnZoneName,
+    columnLeft: number[],
+    zoneWidth: number
+  ): void {
     rowElement.replaceChildren();
+    rowElement.classList.add('hgrid__header-row--leaf');
+    rowElement.setAttribute('role', 'row');
+    rowElement.style.display = 'block';
+    rowElement.style.position = 'relative';
+    rowElement.style.width = `${Math.max(1, zoneWidth)}px`;
+    const hiddenColumns = this.leafSpanHiddenColumnsByZone[zoneName];
 
     for (let colIndex = 0; colIndex < columns.length; colIndex += 1) {
       const column = columns[colIndex];
       const headerCellElement = document.createElement('div');
-      headerCellElement.className = 'hgrid__header-cell';
-      headerCellElement.dataset.columnId = column.id;
+      this.populateHeaderLeafCell(headerCellElement, column, hiddenColumns.has(column.id));
+      headerCellElement.style.position = 'absolute';
+      headerCellElement.style.left = `${columnLeft[colIndex] ?? 0}px`;
       headerCellElement.style.width = `${column.width}px`;
-      if (this.isIndicatorCheckboxColumnId(column.id)) {
-        const rowIndicatorOptions = this.getResolvedRowIndicatorOptions();
-        headerCellElement.classList.add('hgrid__header-cell--indicator', 'hgrid__header-cell--indicator-checkbox');
-        const checkbox = document.createElement('input');
-        checkbox.className = 'hgrid__indicator-checkall';
-        checkbox.type = 'checkbox';
-        checkbox.tabIndex = -1;
-        checkbox.checked = false;
-        checkbox.style.display = rowIndicatorOptions.showCheckbox ? '' : 'none';
-        checkbox.disabled = !rowIndicatorOptions.showCheckbox;
-        checkbox.setAttribute('aria-label', `Select all rows (${rowIndicatorOptions.checkAllScope})`);
-        headerCellElement.append(checkbox);
-        this.indicatorHeaderCheckAllElement = checkbox;
-      } else {
-        headerCellElement.textContent = column.header;
-      }
       rowElement.append(headerCellElement);
     }
   }
 
   private buildCenterHeaderRow(rowElement: HTMLDivElement): void {
     rowElement.replaceChildren();
+    rowElement.classList.add('hgrid__header-row--leaf');
+    rowElement.setAttribute('role', 'row');
     rowElement.style.display = 'block';
     rowElement.style.position = 'relative';
     rowElement.style.width = `${Math.max(1, this.centerColumnsWidth)}px`;
@@ -1089,10 +1484,11 @@ export class DomRenderer {
 
     for (let slotIndex = 0; slotIndex < this.centerCellCapacity; slotIndex += 1) {
       const headerCellElement = document.createElement('div');
-      headerCellElement.className = 'hgrid__header-cell hgrid__header-cell--center';
+      headerCellElement.className = 'hgrid__header-cell hgrid__header-cell--center hgrid__header-cell--leaf';
       headerCellElement.style.position = 'absolute';
       headerCellElement.style.left = '0px';
       headerCellElement.style.display = 'none';
+      headerCellElement.setAttribute('role', 'columnheader');
       rowElement.append(headerCellElement);
       this.centerHeaderCellPool.push(headerCellElement);
       this.centerHeaderCellStates.push({
@@ -2370,6 +2766,7 @@ export class DomRenderer {
     }
 
     const centerColumns = this.columnsByZone.center;
+    const hiddenColumns = this.leafSpanHiddenColumnsByZone.center;
     let slotIndex = 0;
 
     for (let colIndex = horizontalWindow.start; colIndex < horizontalWindow.end; colIndex += 1) {
@@ -2377,6 +2774,16 @@ export class DomRenderer {
       const headerCell = this.centerHeaderCellPool[slotIndex];
       if (!headerCell) {
         break;
+      }
+
+      if (hiddenColumns.has(column.id)) {
+        this.bindCell(headerCell, this.centerHeaderCellStates[slotIndex], {
+          isVisible: false,
+          columnId: '',
+          textContent: ''
+        });
+        slotIndex += 1;
+        continue;
       }
 
       this.bindCell(headerCell, this.centerHeaderCellStates[slotIndex], {
@@ -2826,7 +3233,7 @@ export class DomRenderer {
       return null;
     }
 
-    const headerCell = target.closest('.hgrid__header-cell') as HTMLDivElement | null;
+    const headerCell = target.closest('.hgrid__header-cell--leaf') as HTMLDivElement | null;
     if (!headerCell || !this.headerElement.contains(headerCell)) {
       return null;
     }
@@ -2913,7 +3320,7 @@ export class DomRenderer {
       return null;
     }
 
-    const headerCell = target.closest('.hgrid__header-cell') as HTMLDivElement | null;
+    const headerCell = target.closest('.hgrid__header-cell--leaf') as HTMLDivElement | null;
     if (!headerCell || !this.headerElement.contains(headerCell)) {
       return null;
     }
@@ -2951,7 +3358,7 @@ export class DomRenderer {
       }
     }
 
-    const headerCells = this.headerElement.querySelectorAll('.hgrid__header-cell');
+    const headerCells = this.headerElement.querySelectorAll('.hgrid__header-cell--leaf');
     for (let cellIndex = 0; cellIndex < headerCells.length; cellIndex += 1) {
       const headerCell = headerCells[cellIndex] as HTMLDivElement;
       if (headerCell.style.display === 'none') {

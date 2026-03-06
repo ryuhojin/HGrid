@@ -9,6 +9,7 @@
   --hgrid-selection-bg: rgba(59, 130, 246, 0.14);
   --hgrid-row-selection-bg: rgba(59, 130, 246, 0.08);
   --hgrid-active-border: rgba(37, 99, 235, 0.9);
+  --hgrid-header-row-height: 32px;
   --hgrid-header-height: 32px;
   --hgrid-v-scrollbar-width: 0px;
   --hgrid-h-scrollbar-height: 0px;
@@ -103,7 +104,7 @@
 
 .hgrid__header-row {
   display: flex;
-  height: var(--hgrid-header-height);
+  height: var(--hgrid-header-row-height);
 }
 
 .hgrid__header-row--center {
@@ -113,7 +114,7 @@
 .hgrid__header-cell {
   box-sizing: border-box;
   position: relative;
-  height: var(--hgrid-header-height);
+  height: var(--hgrid-header-row-height);
   padding: 8px;
   border-right: 1px solid var(--hgrid-border-color);
   border-bottom: 0;
@@ -141,7 +142,7 @@
 }
 
 .hgrid__header-cell--resize-hover::after,
-.hgrid--column-resizing .hgrid__header-cell::after {
+.hgrid--column-resizing .hgrid__header-cell--leaf::after {
   background: rgba(148, 163, 184, 0.85);
 }
 
@@ -156,6 +157,37 @@
   justify-content: center;
   gap: 6px;
   padding: 4px 6px;
+}
+
+.hgrid__header-row--group .hgrid__header-cell {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  background-color: #f3f6fb;
+  border-bottom: 1px solid var(--hgrid-border-color);
+}
+
+.hgrid__header-cell--group {
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4px 8px;
+}
+
+.hgrid__header-cell--group-collapsed {
+  letter-spacing: 0.02em;
+}
+
+.hgrid__header-cell--leaf-span {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+}
+
+.hgrid__header-cell--leaf-placeholder {
+  color: transparent;
 }
 
 .hgrid__indicator-checkall,

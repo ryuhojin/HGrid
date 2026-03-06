@@ -2,6 +2,7 @@ export { Grid } from '../core/grid';
 export type {
   ColumnComparator,
   ColumnDef,
+  ColumnGroupDef,
   ColumnFormatter,
   ColumnPinPosition,
   ColumnValueGetter,

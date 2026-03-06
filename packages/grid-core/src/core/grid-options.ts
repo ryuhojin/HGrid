@@ -61,6 +61,13 @@ export interface StateColumnOptions {
   render?: StateColumnRenderer;
 }
 
+export interface ColumnGroupDef {
+  groupId: string;
+  header: string;
+  children: Array<string | ColumnGroupDef>;
+  collapsed?: boolean;
+}
+
 export interface ColumnDef {
   id: string;
   header: string;
@@ -84,6 +91,7 @@ export interface ScrollbarPolicy {
 
 export interface GridOptions {
   columns: ColumnDef[];
+  columnGroups?: ColumnGroupDef[];
   dataProvider: DataProvider;
   rowModel: RowModel;
   height?: number;

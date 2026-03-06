@@ -614,23 +614,33 @@
   - `examples/example28.html`, `scripts/run-e2e.mjs` Example28 시나리오.
 
 ## 7.6 Column Group Header (신규)
-- [ ] `ColumnGroupDef` 스키마 확정:
-  - [ ] `groupId`, `header`, `children`, `collapsed?`
-- [ ] 멀티라인 header row(2-depth+) 레이아웃 엔진
-- [ ] group leaf와 resize/reorder/pin/hide 연동
-- [ ] center 가로 가상화에서 group clipping/label 정합 보장
-- [ ] header a11y:
-  - [ ] group/leaf role 매핑
-  - [ ] `aria-colspan` 매핑
+- [x] `ColumnGroupDef` 스키마 확정:
+  - [x] `groupId`, `header`, `children`, `collapsed?`
+- [x] 멀티라인 header row(2-depth+) 레이아웃 엔진
+- [x] group leaf와 resize/reorder/pin/hide 연동
+- [x] center 가로 가상화에서 group clipping/label 정합 보장
+- [x] header a11y:
+  - [x] group/leaf role 매핑
+  - [x] `aria-colspan` 매핑
 
 ### 수용 기준
-- [ ] pinned left/center/right 혼합에서도 group header 경계 깨짐 없음
-- [ ] 고속 가로 스크롤 시 group header/body misalign 0
+- [x] pinned left/center/right 혼합에서도 group header 경계 깨짐 없음
+- [x] 고속 가로 스크롤 시 group header/body misalign 0
+
+### 코어 변경 코멘트 (7.6 반영, 2026-03-06)
+- `GridConfig/GridOptions`에 `columnGroups`를 추가하고 `ColumnGroupDef` 트리(`string | ColumnGroupDef`)를 지원한다.
+- header는 `group rows + leaf row` 구조로 렌더링하며, zone별(left/center/right) visible column metric 기반으로 group cell의 `left/width`를 계산해 정렬한다.
+- leaf header는 기존 center 가상화 경로를 유지하고, group row는 zone별 static row로 유지해 스크롤 transform과 정합되게 동기화한다.
+- resize/reorder hit-test는 `.hgrid__header-cell--leaf`만 대상으로 제한해 group cell과 충돌하지 않게 했다.
+- a11y로 group/leaf 모두 `role="columnheader"`를 갖고, group cell에는 `aria-colspan`을 매핑한다.
+- 검증:
+  - `packages/grid-core/test/grid.spec.ts` (multi-level group + pin/hide/reorder 정합)
+  - `examples/example29.html`, `scripts/run-e2e.mjs` Example29 시나리오
 
 ## 7.7 예제 (신규)
 - [x] `example{N}.html`: row indicator checkbox + header checkAll(indeterminate)
 - [x] `example{N}.html`: row indicator + state 컬럼
-- [ ] `example{N}.html`: multi-level column group header
+- [x] `example{N}.html`: multi-level column group header
 
 ---
 

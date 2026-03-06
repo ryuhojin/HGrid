@@ -2537,6 +2537,114 @@ async function runExample28Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample29Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example29.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__header-row--group .hgrid__header-cell--group', { timeout: 20_000, state: 'attached' });
+
+  async function waitForLogLabel(label) {
+    await page.waitForFunction(
+      (expectedLabel) => {
+        const logElement = document.querySelector('#log');
+        if (!logElement || !logElement.textContent) {
+          return false;
+        }
+        try {
+          const payload = JSON.parse(logElement.textContent);
+          return payload.label === expectedLabel;
+        } catch (_error) {
+          return false;
+        }
+      },
+      label,
+      { timeout: 20_000 }
+    );
+  }
+
+  async function readSnapshot() {
+    return page.evaluate(() => {
+      const exampleApi = window.__example29;
+      if (!exampleApi || typeof exampleApi.getSnapshot !== 'function') {
+        throw new Error('Missing window.__example29.getSnapshot');
+      }
+      return exampleApi.getSnapshot();
+    });
+  }
+
+  await waitForLogLabel('initial');
+  const initialSnapshot = await readSnapshot();
+  assert.ok(initialSnapshot.groupRowCount > 0, 'example29 should render group header rows');
+  assert.ok(initialSnapshot.groupCellCount > 0, 'example29 should render group header cells');
+  assert.equal(initialSnapshot.cssHeaderRowHeight, '32px', 'example29 header row height token mismatch');
+  assert.equal(initialSnapshot.headerZones.left.groupRows.length >= 1, true, 'example29 left zone group rows missing');
+  assert.equal(initialSnapshot.headerZones.center.groupRows.length >= 1, true, 'example29 center zone group rows missing');
+  assert.ok(
+    initialSnapshot.headerZones.center.groupRows[0].some((cell) => cell.text === 'Participant'),
+    'example29 center top group row should include Participant'
+  );
+  assert.ok(
+    initialSnapshot.headerZones.center.groupRows[0].every((cell) => cell.ariaColspan !== null),
+    'example29 group cells should include aria-colspan'
+  );
+  assert.equal(
+    initialSnapshot.headerZones.left.visibleLeafColumns.includes('id'),
+    true,
+    'example29 left pinned leaf should include id'
+  );
+  assert.equal(
+    initialSnapshot.headerZones.right.visibleLeafColumns.includes('updatedAt'),
+    true,
+    'example29 right pinned leaf should include updatedAt'
+  );
+
+  await page.click('#pin-country-right');
+  await waitForLogLabel('pin-country-right');
+  const pinnedSnapshot = await readSnapshot();
+  assert.equal(
+    pinnedSnapshot.headerZones.right.visibleLeafColumns.includes('country'),
+    true,
+    'example29 country should move to right pinned leaf columns'
+  );
+  assert.equal(
+    pinnedSnapshot.headerZones.center.visibleLeafColumns.includes('country'),
+    false,
+    'example29 country should leave center leaf columns after pin'
+  );
+
+  await page.click('#toggle-balance');
+  await waitForLogLabel('hide-balance');
+  const hiddenSnapshot = await readSnapshot();
+  assert.equal(
+    hiddenSnapshot.headerZones.center.visibleLeafColumns.includes('balance'),
+    false,
+    'example29 balance should be hidden from center leaf columns'
+  );
+
+  await page.click('#reorder-language');
+  await waitForLogLabel('reorder-language');
+  const reorderSnapshot = await readSnapshot();
+  const centerLeafColumns = reorderSnapshot.headerZones.center.visibleLeafColumns;
+  assert.equal(
+    centerLeafColumns[centerLeafColumns.length - 1],
+    'language',
+    `example29 language should move to center tail, got ${centerLeafColumns.join(',')}`
+  );
+
+  await page.click('#reset');
+  await waitForLogLabel('reset');
+  const resetSnapshot = await readSnapshot();
+  assert.equal(
+    resetSnapshot.headerZones.center.visibleLeafColumns.includes('country'),
+    true,
+    'example29 reset should restore country center pin'
+  );
+  assert.equal(
+    resetSnapshot.headerZones.center.visibleLeafColumns.includes('balance'),
+    true,
+    'example29 reset should restore balance visibility'
+  );
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -2625,6 +2733,8 @@ async function main() {
     await runExample27Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample28Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample29Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

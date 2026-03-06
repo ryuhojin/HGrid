@@ -33,6 +33,11 @@
   - `hiddenColumnIds?` stores hidden column ids.
   - `pinnedColumns?` stores per-column pin state (`left`/`right`).
 - `ColumnDef`: includes formatter/comparator/valueGetter/valueSetter hooks.
+- `ColumnGroupDef`:
+  - `groupId: string`
+  - `header: string`
+  - `children: Array<string | ColumnGroupDef>`
+  - `collapsed?: boolean`
 - `DataProvider`: pluggable row access abstraction (`LocalDataProvider` default).
 - `RowModelOptions`: row-model runtime options (`enableDataToViewIndex` can be toggled at runtime).
 - `GridConfig` runtime virtualization options:
@@ -54,6 +59,9 @@
     - `__indicator` (legacy alias of `__indicatorCheckbox`)
 - `stateColumn` (Phase 7.5):
   - `render?(context) => string | { text?, ariaLabel?, tooltip?, tone? }`
+- `columnGroups` (Phase 7.6):
+  - multi-level header group schema
+  - group row layout is recalculated after pin/hide/reorder
 
 ## Wrapper Contract
 `@hgrid/grid-react` and `@hgrid/grid-vue` expose thin adapters with the same control API:

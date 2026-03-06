@@ -2,6 +2,7 @@ import { EventBus } from './event-bus';
 import type { ColumnReorderEvent, ColumnResizeEvent, GridEventMap, GridEventName } from './event-bus';
 import type {
   ColumnDef,
+  ColumnGroupDef,
   ColumnPinPosition,
   GridConfig,
   GridOptions,
@@ -148,6 +149,47 @@ function normalizeSpecialColumns(columns: ColumnDef[], rowIndicatorOptions?: Row
   return normalizedColumns;
 }
 
+function cloneColumnGroup(group: ColumnGroupDef): ColumnGroupDef {
+  const children = Array.isArray(group.children) ? group.children : [];
+  const clonedChildren: Array<string | ColumnGroupDef> = [];
+  for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+    const child = children[childIndex];
+    if (typeof child === 'string') {
+      clonedChildren.push(child);
+      continue;
+    }
+
+    if (child && typeof child === 'object') {
+      clonedChildren.push(cloneColumnGroup(child));
+    }
+  }
+
+  return {
+    groupId: String(group.groupId),
+    header: String(group.header),
+    children: clonedChildren,
+    collapsed: group.collapsed === true
+  };
+}
+
+function cloneColumnGroups(columnGroups?: ColumnGroupDef[]): ColumnGroupDef[] | undefined {
+  if (!Array.isArray(columnGroups)) {
+    return undefined;
+  }
+
+  const clonedGroups: ColumnGroupDef[] = [];
+  for (let groupIndex = 0; groupIndex < columnGroups.length; groupIndex += 1) {
+    const group = columnGroups[groupIndex];
+    if (!group || typeof group !== 'object') {
+      continue;
+    }
+
+    clonedGroups.push(cloneColumnGroup(group));
+  }
+
+  return clonedGroups;
+}
+
 function normalizeOptions(config?: GridConfig): GridOptions {
   const dataProvider = config?.dataProvider ?? new LocalDataProvider(config?.rowData ?? []);
   const rowModel = new RowModel(dataProvider.getRowCount(), config?.rowModelOptions);
@@ -155,6 +197,7 @@ function normalizeOptions(config?: GridConfig): GridOptions {
 
   return {
     columns: normalizeSpecialColumns(config?.columns ?? [], rowIndicator),
+    columnGroups: cloneColumnGroups(config?.columnGroups),
     dataProvider,
     rowModel,
     height: config?.height,
@@ -257,6 +300,7 @@ export class Grid {
       scrollbarPolicy: mergeScrollbarPolicy(this.options.scrollbarPolicy, options.scrollbarPolicy),
       rowIndicator: nextRowIndicator,
       stateColumn: nextStateColumn,
+      columnGroups: options.columnGroups ? cloneColumnGroups(options.columnGroups) : this.options.columnGroups,
       dataProvider: nextDataProvider,
       rowModel: this.rowModel,
       columns: this.columnModel.getColumns()

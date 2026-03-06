@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 29 - Column Group Header</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      #log {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1220px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 29 - Column Group Header</h1>
+    <div class="controls">
+      <button id="pin-country-right" type="button">pin country right</button>
+      <button id="toggle-balance" type="button">toggle balance hidden</button>
+      <button id="reorder-language" type="button">reorder language</button>
+      <button id="reset" type="button">reset</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const defaultColumnOrder = [
+        'id',
+        'name',
+        'language',
+        'country',
+        'game',
+        'balance',
+        'rating',
+        'score',
+        'updatedAt'
+      ];
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 96, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'language', header: 'Language', width: 140, type: 'text' },
+        { id: 'country', header: 'Country', width: 140, type: 'text' },
+        { id: 'game', header: 'Game', width: 170, type: 'text' },
+        { id: 'balance', header: 'Balance', width: 150, type: 'number' },
+        { id: 'rating', header: 'Rating', width: 120, type: 'number' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 210, type: 'date', pinned: 'right' }
+      ];
+
+      const columnGroups = [
+        {
+          groupId: 'participant',
+          header: 'Participant',
+          children: [
+            'name',
+            {
+              groupId: 'locale',
+              header: 'Locale',
+              children: ['language', 'country']
+            }
+          ]
+        },
+        {
+          groupId: 'performance',
+          header: 'Performance',
+          children: ['game', 'balance']
+        },
+        {
+          groupId: 'metrics',
+          header: 'Metrics',
+          children: ['rating', 'score']
+        },
+        {
+          groupId: 'audit',
+          header: 'Audit',
+          children: ['updatedAt']
+        }
+      ];
+
+      const rowData = Array.from({ length: 5000 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        language: ['English', 'Spanish', 'French', 'German'][index % 4],
+        country: ['KR', 'US', 'JP', 'DE'][index % 4],
+        game: ['Chess', 'Go', 'Shogi', 'Checkers'][index % 4],
+        balance: (index * 1237) % 200000,
+        rating: (index % 5) + 1,
+        score: (index * 17) % 1000,
+        updatedAt: new Date(Date.now() - index * 13000).toISOString()
+      }));
+
+      const logElement = document.getElementById('log');
+      let isBalanceHidden = false;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function collectZoneSnapshot(zoneSelector) {
+        const zoneElement = document.querySelector(zoneSelector);
+        if (!zoneElement) {
+          return null;
+        }
+
+        const groupRows = Array.from(zoneElement.querySelectorAll('.hgrid__header-row--group')).map((rowElement) =>
+          Array.from(rowElement.querySelectorAll('.hgrid__header-cell--group')).map((cellElement) => ({
+            groupId: cellElement.dataset.groupId || null,
+            text: cellElement.textContent || '',
+            ariaColspan: cellElement.getAttribute('aria-colspan')
+          }))
+        );
+
+        const leafColumns = Array.from(zoneElement.querySelectorAll('.hgrid__header-row--leaf .hgrid__header-cell--leaf')).map(
+          (cellElement) => cellElement.dataset.columnId || ''
+        );
+        const visibleLeafColumns = Array.from(zoneElement.querySelectorAll('.hgrid__header-cell--leaf'))
+          .filter((cellElement) => getComputedStyle(cellElement).display !== 'none')
+          .map((cellElement) => cellElement.dataset.columnId || '');
+
+        return {
+          groupRows,
+          leafColumns,
+          visibleLeafColumns
+        };
+      }
+
+      function getSnapshot() {
+        const rootElement = document.querySelector('.hgrid');
+        return {
+          cssHeaderHeight: rootElement ? getComputedStyle(rootElement).getPropertyValue('--hgrid-header-height').trim() : null,
+          cssHeaderRowHeight: rootElement ? getComputedStyle(rootElement).getPropertyValue('--hgrid-header-row-height').trim() : null,
+          headerRowsTotal: document.querySelectorAll('.hgrid__header-row').length,
+          groupRowCount: document.querySelectorAll('.hgrid__header-row--group').length,
+          groupCellCount: document.querySelectorAll('.hgrid__header-cell--group').length,
+          leafCellCount: document.querySelectorAll('.hgrid__header-cell--leaf').length,
+          headerZones: {
+            left: collectZoneSnapshot('.hgrid__header-left'),
+            center: collectZoneSnapshot('.hgrid__header-center'),
+            right: collectZoneSnapshot('.hgrid__header-right')
+          }
+        };
+      }
+
+      function writeLog(label) {
+        logElement.textContent = JSON.stringify({
+          label,
+          snapshot: getSnapshot()
+        });
+      }
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        columnGroups,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        overscanCols: 2
+      });
+
+      document.getElementById('pin-country-right').addEventListener('click', async () => {
+        grid.setColumnPin('country', 'right');
+        await waitFrame();
+        writeLog('pin-country-right');
+      });
+
+      document.getElementById('toggle-balance').addEventListener('click', async () => {
+        isBalanceHidden = !isBalanceHidden;
+        grid.setColumnVisibility('balance', !isBalanceHidden);
+        await waitFrame();
+        writeLog(isBalanceHidden ? 'hide-balance' : 'show-balance');
+      });
+
+      document.getElementById('reorder-language').addEventListener('click', async () => {
+        grid.setColumnOrder(['id', 'name', 'country', 'game', 'balance', 'rating', 'score', 'language', 'updatedAt']);
+        await waitFrame();
+        writeLog('reorder-language');
+      });
+
+      document.getElementById('reset').addEventListener('click', async () => {
+        isBalanceHidden = false;
+        grid.setColumnVisibility('balance', true);
+        grid.setColumnPin('country', undefined);
+        grid.setColumnOrder(defaultColumnOrder);
+        await waitFrame();
+        writeLog('reset');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect');
+      });
+
+      window.__example29 = {
+        getSnapshot() {
+          return getSnapshot();
+        }
+      };
+
+      writeLog('initial');
+    </script>
+  </body>
+</html>

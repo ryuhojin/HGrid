@@ -5,8 +5,8 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 ## 프로젝트 상태 (2026-03-06)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1`
-- 다음 범위: `Phase 9.2+` (tree/pivot/aggregation 확장)
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`
+- 다음 범위: `Phase 9.4+` (pivot 확장, import/export, theme)
 - 상세 기준: `checklist.md`
 
 구현 완료 핵심:
@@ -26,7 +26,10 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Column feature pack (resize/reorder/pin/hide) + selection indicator columns
 - Multi-level column group header
 - Grouping pipeline (group model + key 기반 expand/collapse + sum/avg/min/max/count/custom aggregation)
-- RemoteDataProvider block cache/LRU/prefetch + server-side query model(sort/filter/groupModel)
+- Tree data pipeline (parentId model + key expansion state + lazy children load)
+- Pivot pipeline (로컬 pivot matrix + 동적 컬럼 생성 + 서버 pivot query model)
+- RemoteDataProvider block cache/LRU/prefetch + server-side query model(sort/filter/group/pivot)
+- 성능 스모크(e2e heartbeat max gap)로 그룹/트리/피벗 UI freeze 회귀 점검
 
 ## 핵심 원칙
 
@@ -138,6 +141,36 @@ await grid.expandAllGroups();
 await grid.setGroupingMode('server');
 ```
 
+### Tree API
+
+```ts
+await grid.setTreeDataOptions({
+  enabled: true,
+  mode: 'client',
+  idField: 'id',
+  parentIdField: 'parentId',
+  hasChildrenField: 'hasChildren',
+  treeColumnId: 'name',
+  defaultExpanded: false
+});
+
+await grid.setTreeExpanded(100, true);
+await grid.collapseAllTreeNodes();
+await grid.expandAllTreeNodes();
+```
+
+### Pivot API
+
+```ts
+await grid.setPivotingMode('client');
+await grid.setGroupModel([{ columnId: 'region' }]); // row axis
+await grid.setPivotModel([{ columnId: 'month' }]);  // column axis
+await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
+
+await grid.clearPivotModel();
+await grid.setPivotValues([]);
+```
+
 ## 루트 스크립트
 
 - `pnpm build`
@@ -151,7 +184,7 @@ await grid.setGroupingMode('server');
 - `pnpm bench`
 - `pnpm ci:phase0`
 
-## Examples (현재 1~31)
+## Examples (현재 1~33)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -175,6 +208,8 @@ await grid.setGroupingMode('server');
 - `example29`: multi-level column group header
 - `example30`: remote datasource + block cache + server sort/filter
 - `example31`: grouping + aggregation + expand/collapse + mode 전환
+- `example32`: tree data(parentId) + expand/collapse + server lazy children
+- `example33`: local pivot matrix(가로 집계 컬럼) + server pivot query model
 
 기능 추가 시 규칙:
 
@@ -212,6 +247,8 @@ await grid.setGroupingMode('server');
 - `docs/column-group-header-phase7.md`
 - `docs/remote-data-provider-phase8.md`
 - `docs/grouping-phase9.md`
+- `docs/tree-data-phase9.md`
+- `docs/pivot-phase9.md`
 
 ## 라이선스
 

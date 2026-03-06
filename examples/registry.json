@@ -351,6 +351,33 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 32,
+      "file": "example32.html",
+      "title": "Example 32 - Tree Data",
+      "tags": [
+        "phase9",
+        "tree-data",
+        "parent-id",
+        "lazy-load",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 33,
+      "file": "example33.html",
+      "title": "Example 33 - Local Pivot Matrix",
+      "tags": [
+        "phase9",
+        "pivot",
+        "local-pivot",
+        "pivot-matrix",
+        "server-pivot-model",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

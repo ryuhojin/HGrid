@@ -365,6 +365,10 @@
   padding-left: var(--hgrid-group-indent, 10px);
 }
 
+.hgrid__cell--tree {
+  padding-left: var(--hgrid-tree-indent, 10px);
+}
+
 .hgrid__indicator-cell {
   display: flex;
   align-items: center;

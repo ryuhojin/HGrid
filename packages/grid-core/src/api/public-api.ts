@@ -11,6 +11,15 @@ export type {
   GroupModelItem,
   GroupingMode,
   GroupingOptions,
+  PivotModelItem,
+  PivotValueDef,
+  PivotingMode,
+  PivotingOptions,
+  TreeDataMode,
+  TreeDataOptions,
+  TreeLoadChildren,
+  TreeLoadChildrenContext,
+  TreeLoadChildrenResult,
   ColumnPinPosition,
   ColumnValueGetter,
   ColumnValueSetter,
@@ -101,6 +110,13 @@ export type {
   GroupViewGroupRow,
   GroupViewRow
 } from '../data/group-executor';
+export { CooperativePivotExecutor } from '../data/pivot-executor';
+export type {
+  PivotExecutionContext,
+  PivotExecutionRequest,
+  PivotExecutionResult,
+  PivotExecutor
+} from '../data/pivot-executor';
 export {
   GROUP_ROW_COLUMN_ID_FIELD,
   GROUP_ROW_EXPANDED_FIELD,
@@ -113,6 +129,29 @@ export {
   isGroupRowData
 } from '../data/grouped-data-provider';
 export type { GroupedDataProviderSnapshot } from '../data/grouped-data-provider';
+export { CooperativeTreeExecutor, toTreeNodeKeyToken } from '../data/tree-executor';
+export type {
+  TreeExecutionContext,
+  TreeExecutionRequest,
+  TreeExecutionResult,
+  TreeExecutor,
+  TreeLazyChildrenBatch,
+  TreeViewRow
+} from '../data/tree-executor';
+export {
+  TREE_ROW_DEPTH_FIELD,
+  TREE_ROW_EXPANDED_FIELD,
+  TREE_ROW_HAS_CHILDREN_FIELD,
+  TREE_ROW_KIND_FIELD,
+  TREE_ROW_NODE_KEY_FIELD,
+  TREE_ROW_NODE_KEY_TOKEN_FIELD,
+  TREE_ROW_PARENT_NODE_KEY_FIELD,
+  TREE_ROW_TREE_COLUMN_ID_FIELD,
+  TreeDataProvider,
+  getTreeRowDepth,
+  isTreeRowData
+} from '../data/tree-data-provider';
+export type { TreeDataProviderSnapshot } from '../data/tree-data-provider';
 export {
   collectTransferables,
   createWorkerCancelRequest,

@@ -102,6 +102,72 @@
         };
       });
 
+      class SyntheticGroupingProvider {
+        constructor(rowCount) {
+          this.rowCount = rowCount;
+        }
+
+        getRowCount() {
+          return this.rowCount;
+        }
+
+        getRowKey(dataIndex) {
+          return dataIndex + 1;
+        }
+
+        getValue(dataIndex, columnId) {
+          if (columnId === 'id') {
+            return dataIndex + 1;
+          }
+
+          if (columnId === 'region') {
+            return regions[dataIndex % regions.length];
+          }
+
+          if (columnId === 'status') {
+            return statuses[dataIndex % statuses.length];
+          }
+
+          if (columnId === 'locale') {
+            return locales[dataIndex % locales.length];
+          }
+
+          if (columnId === 'game') {
+            return games[dataIndex % games.length];
+          }
+
+          if (columnId === 'balance') {
+            return (dataIndex * 173) % 100000;
+          }
+
+          if (columnId === 'score') {
+            return (dataIndex * 31) % 500;
+          }
+
+          if (columnId === 'updatedAt') {
+            return new Date(Date.now() - dataIndex * 13000).toISOString();
+          }
+
+          return undefined;
+        }
+
+        getRow(dataIndex) {
+          return {
+            id: dataIndex + 1,
+            region: this.getValue(dataIndex, 'region'),
+            status: this.getValue(dataIndex, 'status'),
+            locale: this.getValue(dataIndex, 'locale'),
+            game: this.getValue(dataIndex, 'game'),
+            balance: this.getValue(dataIndex, 'balance'),
+            score: this.getValue(dataIndex, 'score'),
+            updatedAt: this.getValue(dataIndex, 'updatedAt')
+          };
+        }
+
+        setValue() {}
+        applyTransactions() {}
+      }
+
       const logElement = document.getElementById('log');
       const appendLog = (message) => {
         const text = `[${new Date().toISOString()}] ${message}`;
@@ -218,6 +284,22 @@
           }
           await grid.setGroupExpanded(first.groupKey, true);
           return true;
+        },
+        async runPerfScenario() {
+          const provider = new SyntheticGroupingProvider(120000);
+          grid.setOptions({ dataProvider: provider });
+          await grid.setGroupingMode('client');
+          await grid.setGroupModel([{ columnId: 'region' }, { columnId: 'status' }]);
+          await grid.setGroupAggregations([
+            { columnId: 'balance', type: 'sum' },
+            { columnId: 'score', type: 'avg' },
+            { columnId: 'id', type: 'count' }
+          ]);
+          const groupedRows = grid.getGroupedRowsSnapshot();
+          return {
+            rowCount: groupedRows.length,
+            groupRows: groupedRows.filter((row) => row.kind === 'group').length
+          };
         }
       };
 

@@ -5,6 +5,12 @@ import type {
   GroupAggregationDef,
   GroupModelItem,
   GroupingMode,
+  PivotModelItem,
+  PivotValueDef,
+  PivotingMode,
+  TreeDataOptions,
+  TreeViewRow,
+  RowKey,
   GridConfig,
   GridSelection,
   GridSelectionInput,
@@ -23,6 +29,12 @@ export type {
   GroupAggregationDef,
   GroupModelItem,
   GroupingMode,
+  PivotModelItem,
+  PivotValueDef,
+  PivotingMode,
+  TreeDataOptions,
+  TreeViewRow,
+  RowKey,
   GridConfig,
   GridEventMap,
   GridEventName,
@@ -112,6 +124,66 @@ export class VueGridAdapter {
 
   public setGroupingMode(mode: GroupingMode): Promise<void> {
     return this.grid.setGroupingMode(mode);
+  }
+
+  public getPivotModel(): PivotModelItem[] {
+    return this.grid.getPivotModel();
+  }
+
+  public setPivotModel(pivotModel: PivotModelItem[]): Promise<void> {
+    return this.grid.setPivotModel(pivotModel);
+  }
+
+  public clearPivotModel(): Promise<void> {
+    return this.grid.clearPivotModel();
+  }
+
+  public getPivotValues(): PivotValueDef[] {
+    return this.grid.getPivotValues();
+  }
+
+  public setPivotValues(values: PivotValueDef[]): Promise<void> {
+    return this.grid.setPivotValues(values);
+  }
+
+  public getPivotingMode(): PivotingMode {
+    return this.grid.getPivotingMode();
+  }
+
+  public setPivotingMode(mode: PivotingMode): Promise<void> {
+    return this.grid.setPivotingMode(mode);
+  }
+
+  public getTreeDataOptions(): TreeDataOptions {
+    return this.grid.getTreeDataOptions();
+  }
+
+  public setTreeDataOptions(treeData: TreeDataOptions): Promise<void> {
+    return this.grid.setTreeDataOptions(treeData);
+  }
+
+  public getTreeExpansionState(): Record<string, boolean> {
+    return this.grid.getTreeExpansionState();
+  }
+
+  public setTreeExpanded(nodeKey: RowKey, expanded: boolean): Promise<void> {
+    return this.grid.setTreeExpanded(nodeKey, expanded);
+  }
+
+  public toggleTreeExpanded(nodeKey: RowKey): Promise<void> {
+    return this.grid.toggleTreeExpanded(nodeKey);
+  }
+
+  public expandAllTreeNodes(): Promise<void> {
+    return this.grid.expandAllTreeNodes();
+  }
+
+  public collapseAllTreeNodes(): Promise<void> {
+    return this.grid.collapseAllTreeNodes();
+  }
+
+  public getTreeRowsSnapshot(): TreeViewRow[] {
+    return this.grid.getTreeRowsSnapshot();
   }
 
   public setRowOrder(viewToData: ViewToDataMapping): void {

@@ -62,7 +62,9 @@ class MockRemoteGroupingProvider implements DataProvider {
   private queryModel: RemoteQueryModel = {
     sortModel: [],
     filterModel: {},
-    groupModel: undefined
+    groupModel: undefined,
+    pivotModel: undefined,
+    pivotValues: undefined
   };
 
   public constructor(rows: GridRowData[]) {
@@ -103,6 +105,12 @@ class MockRemoteGroupingProvider implements DataProvider {
       filterModel: queryModel.filterModel && typeof queryModel.filterModel === 'object' ? { ...queryModel.filterModel } : {},
       groupModel: Array.isArray(queryModel.groupModel)
         ? queryModel.groupModel.map((item) => ({ ...item }))
+        : undefined,
+      pivotModel: Array.isArray(queryModel.pivotModel)
+        ? queryModel.pivotModel.map((item) => ({ ...item }))
+        : undefined,
+      pivotValues: Array.isArray(queryModel.pivotValues)
+        ? queryModel.pivotValues.map((item) => ({ ...item, reducer: undefined }))
         : undefined
     };
   }
@@ -113,6 +121,12 @@ class MockRemoteGroupingProvider implements DataProvider {
       filterModel: { ...this.queryModel.filterModel },
       groupModel: Array.isArray(this.queryModel.groupModel)
         ? this.queryModel.groupModel.map((item) => ({ ...item }))
+        : undefined,
+      pivotModel: Array.isArray(this.queryModel.pivotModel)
+        ? this.queryModel.pivotModel.map((item) => ({ ...item }))
+        : undefined,
+      pivotValues: Array.isArray(this.queryModel.pivotValues)
+        ? this.queryModel.pivotValues.map((item) => ({ ...item, reducer: undefined }))
         : undefined
     };
   }
@@ -2528,6 +2542,219 @@ describe('Grid DOM pooling', () => {
     const queryAfterSort = provider.getQueryModel();
     expect(queryAfterSort.sortModel).toEqual([{ columnId: 'score', direction: 'desc' }]);
     expect(queryAfterSort.groupModel).toEqual([{ columnId: 'region' }]);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('passes pivot model to remote query when pivoting mode is server', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const provider = new MockRemoteGroupingProvider([
+      { id: 1, region: 'KR', month: 'Jan', score: 10 },
+      { id: 2, region: 'US', month: 'Feb', score: 20 }
+    ]);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'month', header: 'Month', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ],
+      dataProvider: provider,
+      pivoting: {
+        mode: 'server'
+      },
+      height: 160,
+      rowHeight: 28
+    });
+
+    await grid.setPivotModel([{ columnId: 'month' }]);
+    await grid.setPivotValues([{ columnId: 'score', type: 'sum' }]);
+    await waitForFrame();
+
+    const queryAfterPivot = provider.getQueryModel();
+    expect(queryAfterPivot.pivotModel).toEqual([{ columnId: 'month' }]);
+    expect(queryAfterPivot.pivotValues).toEqual([{ columnId: 'score', type: 'sum' }]);
+
+    await grid.setSortModel([{ columnId: 'score', direction: 'desc' }]);
+    await waitForFrame();
+    const queryAfterSort = provider.getQueryModel();
+    expect(queryAfterSort.sortModel).toEqual([{ columnId: 'score', direction: 'desc' }]);
+    expect(queryAfterSort.pivotModel).toEqual([{ columnId: 'month' }]);
+    expect(queryAfterSort.pivotValues).toEqual([{ columnId: 'score', type: 'sum' }]);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('renders local pivot with horizontal aggregated columns', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'month', header: 'Month', width: 120, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 120, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, region: 'KR', month: 'Jan', sales: 100 },
+        { id: 2, region: 'KR', month: 'Feb', sales: 60 },
+        { id: 3, region: 'KR', month: 'Jan', sales: 40 },
+        { id: 4, region: 'US', month: 'Jan', sales: 25 },
+        { id: 5, region: 'US', month: 'Feb', sales: 75 }
+      ],
+      height: 180,
+      rowHeight: 28
+    });
+
+    await grid.setGroupModel([{ columnId: 'region' }]);
+    await grid.setPivotingMode('client');
+    await grid.setPivotModel([{ columnId: 'month' }]);
+    await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
+    await waitForFrame();
+
+    const headers = Array.from(container.querySelectorAll('.hgrid__header-cell'))
+      .map((element) => element.textContent?.trim() ?? '')
+      .filter((text) => text.length > 0);
+
+    expect(headers.some((text) => text.includes('Jan'))).toBe(true);
+    expect(headers.some((text) => text.includes('Feb'))).toBe(true);
+    expect(headers.some((text) => text === 'Region')).toBe(true);
+
+    const bodyTexts = Array.from(container.querySelectorAll('.hgrid__row--center .hgrid__cell'))
+      .map((element) => element.textContent?.trim() ?? '')
+      .filter((text) => text.length > 0);
+
+    expect(bodyTexts.indexOf('KR')).toBeGreaterThan(-1);
+    expect(bodyTexts.indexOf('US')).toBeGreaterThan(-1);
+    expect(bodyTexts.indexOf('140')).toBeGreaterThan(-1);
+    expect(bodyTexts.indexOf('60')).toBeGreaterThan(-1);
+    expect(bodyTexts.indexOf('25')).toBeGreaterThan(-1);
+    expect(bodyTexts.indexOf('75')).toBeGreaterThan(-1);
+
+    await grid.clearPivotModel();
+    await grid.setPivotValues([]);
+    await waitForFrame();
+    const restoredHeaders = Array.from(container.querySelectorAll('.hgrid__header-cell'))
+      .map((element) => element.textContent?.trim() ?? '')
+      .filter((text) => text.length > 0);
+    expect(restoredHeaders.indexOf('Month')).toBeGreaterThan(-1);
+    expect(restoredHeaders.indexOf('Sales')).toBeGreaterThan(-1);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies tree data model from parentId and keeps expansion state', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'parentId', header: 'Parent', width: 120, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, parentId: null, name: 'Root-1', hasChildren: true },
+        { id: 2, parentId: 1, name: 'Child-1-1', hasChildren: false },
+        { id: 3, parentId: 1, name: 'Child-1-2', hasChildren: false },
+        { id: 4, parentId: null, name: 'Root-2', hasChildren: false }
+      ],
+      height: 180,
+      rowHeight: 28
+    });
+
+    await grid.setTreeDataOptions({
+      enabled: true,
+      mode: 'client',
+      idField: 'id',
+      parentIdField: 'parentId',
+      hasChildrenField: 'hasChildren',
+      treeColumnId: 'name',
+      defaultExpanded: true
+    });
+    await waitForFrame();
+
+    const expandedRows = grid.getTreeRowsSnapshot();
+    expect(expandedRows.length).toBe(4);
+    expect(expandedRows[0].nodeKey).toBe(1);
+    expect(expandedRows[1].depth).toBe(1);
+    expect(container.querySelectorAll('.hgrid__cell--tree').length).toBeGreaterThan(0);
+
+    await grid.setTreeExpanded(1, false);
+    await waitForFrame();
+    const collapsedRows = grid.getTreeRowsSnapshot();
+    expect(collapsedRows.length).toBe(2);
+    expect(collapsedRows[0].isExpanded).toBe(false);
+
+    await grid.setTreeExpanded(1, true);
+    await waitForFrame();
+    const restoredRows = grid.getTreeRowsSnapshot();
+    expect(restoredRows.length).toBe(4);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('loads lazy children on expand in tree server mode', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'parentId', header: 'Parent', width: 120, type: 'number' }
+      ],
+      rowData: [{ id: 100, parentId: null, name: 'Root-100', hasChildren: true }],
+      height: 180,
+      rowHeight: 28
+    });
+
+    let loadCount = 0;
+    await grid.setTreeDataOptions({
+      enabled: true,
+      mode: 'server',
+      idField: 'id',
+      parentIdField: 'parentId',
+      hasChildrenField: 'hasChildren',
+      treeColumnId: 'name',
+      defaultExpanded: false,
+      loadChildren: async ({ parentNodeKey }) => {
+        loadCount += 1;
+        return {
+          rows: [
+            { id: 101, parentId: parentNodeKey, name: 'Child-100-1', hasChildren: false },
+            { id: 102, parentId: parentNodeKey, name: 'Child-100-2', hasChildren: false }
+          ]
+        };
+      }
+    });
+    await waitForFrame();
+
+    const initialRows = grid.getTreeRowsSnapshot();
+    expect(initialRows.length).toBe(1);
+
+    await grid.setTreeExpanded(100, true);
+    await waitForFrame();
+    await waitForFrame();
+
+    const expandedRows = grid.getTreeRowsSnapshot();
+    expect(loadCount).toBe(1);
+    expect(expandedRows.length).toBe(3);
+    expect(expandedRows[1].parentNodeKey).toBe(100);
+
+    await grid.setTreeExpanded(100, false);
+    await waitForFrame();
+    await grid.setTreeExpanded(100, true);
+    await waitForFrame();
+    expect(loadCount).toBe(1);
 
     grid.destroy();
     container.remove();

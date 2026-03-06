@@ -188,7 +188,9 @@ describe('RemoteDataProvider', () => {
           type: 'set',
           values: ['active']
         }
-      }
+      },
+      pivotModel: [{ columnId: 'status' }],
+      pivotValues: [{ columnId: 'id', type: 'count' }]
     });
 
     provider.getValue(0, 'id');
@@ -202,6 +204,8 @@ describe('RemoteDataProvider', () => {
         values: ['active']
       }
     });
+    expect(latestRequest.queryModel.pivotModel).toEqual([{ columnId: 'status' }]);
+    expect(latestRequest.queryModel.pivotValues).toEqual([{ columnId: 'id', type: 'count' }]);
   });
 
   it('supports loading row policy', () => {
@@ -233,6 +237,36 @@ describe('RemoteDataProvider', () => {
 
     expect(skeletonProvider.isRowLoading(0)).toBe(true);
     expect(noneProvider.isRowLoading(0)).toBe(false);
+  });
+
+  it('clears optional query fields when explicitly set to undefined', () => {
+    const dataSource: RemoteDataSource = {
+      async fetchBlock(_request): Promise<RemoteBlockResponse> {
+        return { rows: [] };
+      }
+    };
+
+    const provider = new RemoteDataProvider({
+      dataSource,
+      rowCount: 10
+    });
+
+    provider.setQueryModel({
+      groupModel: [{ columnId: 'status' }],
+      pivotModel: [{ columnId: 'region' }],
+      pivotValues: [{ columnId: 'id', type: 'count' }]
+    });
+
+    provider.setQueryModel({
+      groupModel: undefined,
+      pivotModel: undefined,
+      pivotValues: undefined
+    });
+
+    const queryModel = provider.getQueryModel();
+    expect(queryModel.groupModel).toBeUndefined();
+    expect(queryModel.pivotModel).toBeUndefined();
+    expect(queryModel.pivotValues).toBeUndefined();
   });
 });
 

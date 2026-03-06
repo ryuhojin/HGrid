@@ -705,20 +705,64 @@
   - 초대용량 로컬 grouping은 cooperative executor(Worker-compatible protocol) 기반으로 UI 프리즈를 완화
 
 ## 9.2 Tree Data
-- [ ] parentId model
-- [ ] lazy load children(서버)
+- [x] parentId model
+- [x] lazy load children(서버)
+
+### 코어 변경 코멘트 (9.2 반영, 2026-03-06)
+- `packages/grid-core/src/data/tree-executor.ts`
+  - `parentId` 기반 트리 플래튼 + expand/collapse key-state 반영
+  - lazy children batch 병합 + cooperative cancel/yield 지원
+- `packages/grid-core/src/data/tree-data-provider.ts`
+  - 트리 view row(DataProvider) + 트리 메타 필드 제공
+- `packages/grid-core/src/core/grid.ts`
+  - 트리 API(`setTreeDataOptions`, `setTreeExpanded`, `expandAllTreeNodes` 등) 추가
+  - `mode=server` + `loadChildren`일 때 expand 시 서버 lazy fetch 반영
+  - 파이프라인 우선순위: `treeData > grouping > base`
+- `packages/grid-core/src/render/dom-renderer.ts`, `grid.css`
+  - 트리 depth 들여쓰기, expand glyph 렌더링
+- 검증:
+  - unit: `packages/grid-core/test/tree-executor.spec.ts`, `packages/grid-core/test/grid.spec.ts`(tree 시나리오)
+  - example/e2e: `examples/example32.html`, `scripts/run-e2e.mjs` Example32
 
 ## 9.3 Pivot
-- [ ] pivot config model
-- [ ] 서버 pivot 우선(로컬은 제한 명시)
+- [x] pivot config model
+- [x] 서버 pivot 우선 + 로컬 pivot(코어 executor)
+
+### 코어 변경 코멘트 (9.3 반영, 2026-03-06)
+- `packages/grid-core/src/core/grid-options.ts`
+  - pivot 옵션 계약 추가: `PivotModelItem`, `PivotValueDef`, `PivotingOptions`, `PivotingMode`
+- `packages/grid-core/src/core/grid.ts`
+  - pivot 상태/API 추가:
+    - `getPivotModel`, `setPivotModel`, `clearPivotModel`
+    - `getPivotValues`, `setPivotValues`
+    - `getPivotingMode`, `setPivotingMode`
+  - remote provider + `pivoting.mode="server"`일 때 `queryModel.pivotModel/pivotValues` 서버 전달
+- local provider:
+  - `rowGroupModel(groupModel)` + `pivotModel` + `pivotValues` 기준으로 로컬 피벗 컬럼/집계 행 생성
+  - cooperative executor(cancel/yield, Worker 호환 메시지 계약) 기반
+- `packages/grid-core/src/data/pivot-executor.ts`
+  - 동적 피벗 컬럼 생성 + 집계(sum/avg/min/max/count/custom reducer) + cancel/yield 지원
+- `packages/grid-core/src/data/remote-data-provider.ts`
+  - `RemoteQueryModel`에 `pivotModel`, `pivotValues` 추가
+  - query clone/equality/cache invalidation 경로를 pivot 필드까지 확장
+- 검증:
+  - unit: `packages/grid-core/test/grid.spec.ts`, `packages/grid-core/test/remote-data-provider.spec.ts`
+  - example/e2e: `examples/example33.html`, `scripts/run-e2e.mjs` Example33
 
 ### 수용 기준
-- [ ] 그룹/트리/피벗이 “UI thread 프리즈 없이” 동작
+- [x] 그룹/트리/피벗이 “UI thread 프리즈 없이” 동작
+  - e2e 성능 스모크: `scripts/run-e2e.mjs`
+  - 측정 방식: `setInterval(16ms)` heartbeat 기반 `maxGap` 측정
+  - 시나리오:
+    - `example31` 대용량 local grouping (`__example31.runPerfScenario`)
+    - `example32` 대용량 client tree (`__example32.runPerfScenario`)
+    - `example33` 대용량 local pivot (`__example33.runPerfScenario`)
+  - 현재 기준: 각 시나리오 `maxGap < 420ms` 통과
 
 ## 9.4 예제
 - [x] `example{N}.html`: grouping
-- [ ] `example{N}.html`: tree
-- [ ] `example{N}.html`: pivot(서버/로컬)
+- [x] `example{N}.html`: tree
+- [x] `example{N}.html`: pivot(local matrix + server query model)
 
 ---
 

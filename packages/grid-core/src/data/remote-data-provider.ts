@@ -1,5 +1,5 @@
 import type { DataProvider, DataTransaction, GridRowData, RowKey, RowsChangedListener } from './data-provider';
-import type { GroupModelItem } from '../core/grid-options';
+import type { GroupModelItem, PivotModelItem, PivotValueDef } from '../core/grid-options';
 
 const DEFAULT_BLOCK_SIZE = 1000;
 const DEFAULT_MAX_BLOCKS = 24;
@@ -19,6 +19,8 @@ export interface RemoteQueryModel {
   sortModel: SortModelItem[];
   filterModel: FilterModel;
   groupModel?: GroupModelItem[];
+  pivotModel?: PivotModelItem[];
+  pivotValues?: PivotValueDef[];
 }
 
 export interface RemoteBlockRequest {
@@ -125,6 +127,67 @@ function cloneSortModel(sortModel: SortModelItem[] | undefined): SortModelItem[]
   return normalizedSortModel;
 }
 
+function cloneGroupModel(groupModel: GroupModelItem[] | undefined): GroupModelItem[] | undefined {
+  if (!Array.isArray(groupModel)) {
+    return undefined;
+  }
+
+  const normalizedGroupModel: GroupModelItem[] = [];
+  for (let index = 0; index < groupModel.length; index += 1) {
+    const item = groupModel[index];
+    if (!item || typeof item.columnId !== 'string' || item.columnId.length === 0) {
+      continue;
+    }
+
+    normalizedGroupModel.push({
+      columnId: item.columnId
+    });
+  }
+
+  return normalizedGroupModel.length > 0 ? normalizedGroupModel : [];
+}
+
+function clonePivotModel(pivotModel: PivotModelItem[] | undefined): PivotModelItem[] | undefined {
+  if (!Array.isArray(pivotModel)) {
+    return undefined;
+  }
+
+  const normalizedPivotModel: PivotModelItem[] = [];
+  for (let index = 0; index < pivotModel.length; index += 1) {
+    const item = pivotModel[index];
+    if (!item || typeof item.columnId !== 'string' || item.columnId.length === 0) {
+      continue;
+    }
+
+    normalizedPivotModel.push({
+      columnId: item.columnId
+    });
+  }
+
+  return normalizedPivotModel.length > 0 ? normalizedPivotModel : [];
+}
+
+function clonePivotValues(pivotValues: PivotValueDef[] | undefined): PivotValueDef[] | undefined {
+  if (!Array.isArray(pivotValues)) {
+    return undefined;
+  }
+
+  const normalizedPivotValues: PivotValueDef[] = [];
+  for (let index = 0; index < pivotValues.length; index += 1) {
+    const item = pivotValues[index];
+    if (!item || typeof item.columnId !== 'string' || item.columnId.length === 0) {
+      continue;
+    }
+
+    normalizedPivotValues.push({
+      columnId: item.columnId,
+      type: item.type
+    });
+  }
+
+  return normalizedPivotValues.length > 0 ? normalizedPivotValues : [];
+}
+
 function cloneFilterModel(filterModel: FilterModel | undefined): FilterModel {
   if (!filterModel || typeof filterModel !== 'object') {
     return {};
@@ -144,7 +207,9 @@ function cloneQueryModel(queryModel: RemoteQueryModel): RemoteQueryModel {
   return {
     sortModel: cloneSortModel(queryModel.sortModel),
     filterModel: cloneFilterModel(queryModel.filterModel),
-    groupModel: queryModel.groupModel
+    groupModel: cloneGroupModel(queryModel.groupModel),
+    pivotModel: clonePivotModel(queryModel.pivotModel),
+    pivotValues: clonePivotValues(queryModel.pivotValues)
   };
 }
 
@@ -165,7 +230,9 @@ function createInitialQueryModel(input?: Partial<RemoteQueryModel>): RemoteQuery
   return {
     sortModel: cloneSortModel(input?.sortModel),
     filterModel: cloneFilterModel(input?.filterModel),
-    groupModel: input?.groupModel
+    groupModel: cloneGroupModel(input?.groupModel),
+    pivotModel: clonePivotModel(input?.pivotModel),
+    pivotValues: clonePivotValues(input?.pivotValues)
   };
 }
 
@@ -218,6 +285,14 @@ function isSameQueryModel(left: RemoteQueryModel, right: RemoteQueryModel): bool
   }
 
   if (JSON.stringify(left.groupModel) !== JSON.stringify(right.groupModel)) {
+    return false;
+  }
+
+  if (JSON.stringify(left.pivotModel) !== JSON.stringify(right.pivotModel)) {
+    return false;
+  }
+
+  if (JSON.stringify(left.pivotValues) !== JSON.stringify(right.pivotValues)) {
     return false;
   }
 
@@ -393,10 +468,18 @@ export class RemoteDataProvider implements DataProvider {
   }
 
   public setQueryModel(queryModel: Partial<RemoteQueryModel>): void {
+    const hasSortModel = Object.prototype.hasOwnProperty.call(queryModel, 'sortModel');
+    const hasFilterModel = Object.prototype.hasOwnProperty.call(queryModel, 'filterModel');
+    const hasGroupModel = Object.prototype.hasOwnProperty.call(queryModel, 'groupModel');
+    const hasPivotModel = Object.prototype.hasOwnProperty.call(queryModel, 'pivotModel');
+    const hasPivotValues = Object.prototype.hasOwnProperty.call(queryModel, 'pivotValues');
+
     const nextQueryModel: RemoteQueryModel = {
-      sortModel: queryModel.sortModel ? cloneSortModel(queryModel.sortModel) : this.queryModel.sortModel,
-      filterModel: queryModel.filterModel ? cloneFilterModel(queryModel.filterModel) : this.queryModel.filterModel,
-      groupModel: queryModel.groupModel !== undefined ? queryModel.groupModel : this.queryModel.groupModel
+      sortModel: hasSortModel ? cloneSortModel(queryModel.sortModel) : this.queryModel.sortModel,
+      filterModel: hasFilterModel ? cloneFilterModel(queryModel.filterModel) : this.queryModel.filterModel,
+      groupModel: hasGroupModel ? cloneGroupModel(queryModel.groupModel) : this.queryModel.groupModel,
+      pivotModel: hasPivotModel ? clonePivotModel(queryModel.pivotModel) : this.queryModel.pivotModel,
+      pivotValues: hasPivotValues ? clonePivotValues(queryModel.pivotValues) : this.queryModel.pivotValues
     };
 
     if (isSameQueryModel(this.queryModel, nextQueryModel)) {

@@ -21,6 +21,14 @@ import {
   isGroupRowData
 } from '../data/grouped-data-provider';
 import {
+  TREE_ROW_DEPTH_FIELD,
+  TREE_ROW_EXPANDED_FIELD,
+  TREE_ROW_HAS_CHILDREN_FIELD,
+  TREE_ROW_TREE_COLUMN_ID_FIELD,
+  getTreeRowDepth,
+  isTreeRowData
+} from '../data/tree-data-provider';
+import {
   SelectionModel,
   type GridSelection,
   type GridSelectionInput,
@@ -70,6 +78,8 @@ interface ZoneRowRenderState {
   isSelected: boolean;
   isGroupRow: boolean;
   groupLevel: number;
+  isTreeRow: boolean;
+  treeLevel: number;
 }
 
 interface ZoneRowItem {
@@ -211,6 +221,7 @@ const DEFAULT_STATE_COLUMN_WIDTH = 104;
 const DEFAULT_HEADER_ROW_HEIGHT = 32;
 const MAX_GROUP_HEADER_DEPTH = 8;
 const MAX_GROUP_ROW_LEVEL = 12;
+const MAX_TREE_ROW_LEVEL = 16;
 const STATE_TONE_DIRTY = 'dirty';
 const STATE_TONE_COMMIT = 'commit';
 const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
@@ -1611,7 +1622,9 @@ export class DomRenderer {
         height: Number.NaN,
         isSelected: false,
         isGroupRow: false,
-        groupLevel: 0
+        groupLevel: 0,
+        isTreeRow: false,
+        treeLevel: 0
       },
       cellStates
     };
@@ -1798,9 +1811,11 @@ export class DomRenderer {
       }
 
       const row = this.resolveRow(dataIndex);
-      const isGroupRow = isGroupRowData(row);
+      const isTreeRow = isTreeRowData(row);
+      const treeLevel = isTreeRow ? Math.min(MAX_TREE_ROW_LEVEL, getTreeRowDepth(row)) : 0;
+      const isGroupRow = !isTreeRow && isGroupRowData(row);
       const groupLevel = isGroupRow ? Math.min(MAX_GROUP_ROW_LEVEL, getGroupRowLevel(row)) : 0;
-      const isRowLoading = !isGroupRow && this.options.dataProvider.isRowLoading?.(dataIndex) === true;
+      const isRowLoading = !isGroupRow && !isTreeRow && this.options.dataProvider.isRowLoading?.(dataIndex) === true;
       const rowHeight = this.resolveRenderedRowHeight(rowIndex, dataIndex);
       const rowTranslateY = this.getRowTop(rowIndex) - viewportOffsetY;
 
@@ -1815,7 +1830,9 @@ export class DomRenderer {
         rowHeight,
         isRowLoading,
         isGroupRow,
-        groupLevel
+        groupLevel,
+        isTreeRow,
+        treeLevel
       );
       this.renderCenterZoneRow(
         poolItem.center,
@@ -1827,7 +1844,9 @@ export class DomRenderer {
         horizontalWindow,
         isRowLoading,
         isGroupRow,
-        groupLevel
+        groupLevel,
+        isTreeRow,
+        treeLevel
       );
       this.renderZoneRow(
         'right',
@@ -1840,7 +1859,9 @@ export class DomRenderer {
         rowHeight,
         isRowLoading,
         isGroupRow,
-        groupLevel
+        groupLevel,
+        isTreeRow,
+        treeLevel
       );
     }
 
@@ -1865,16 +1886,21 @@ export class DomRenderer {
     rowHeight: number,
     isRowLoading: boolean,
     isGroupRow: boolean,
-    groupLevel: number
+    groupLevel: number,
+    isTreeRow: boolean,
+    treeLevel: number
   ): void {
     if (columns.length === 0) {
       this.hidePoolRow(zoneRow);
       return;
     }
 
-    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight, isGroupRow, groupLevel);
+    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight, isGroupRow, groupLevel, isTreeRow, treeLevel);
     const groupColumnId = isGroupRow ? this.resolveGroupRowColumnId(row) : null;
     const isGroupExpanded = isGroupRow ? this.resolveGroupRowExpanded(row) : false;
+    const treeColumnId = isTreeRow ? this.resolveTreeRowColumnId(row) : null;
+    const isTreeExpanded = isTreeRow ? this.resolveTreeRowExpanded(row) : false;
+    const treeHasChildren = isTreeRow ? this.resolveTreeRowHasChildren(row) : false;
 
     for (let colIndex = 0; colIndex < columns.length; colIndex += 1) {
       const column = columns[colIndex];
@@ -1946,8 +1972,19 @@ export class DomRenderer {
         const indentPx = 10 + groupLevel * 14;
         extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--group`.trim();
         cell.style.setProperty('--hgrid-group-indent', `${indentPx}px`);
+      } else if (isTreeRow && treeColumnId && column.id === treeColumnId) {
+        const glyph = treeHasChildren ? (isTreeExpanded ? '▾' : '▸') : '•';
+        textContent = `${glyph} ${textContent}`;
+        const indentPx = 10 + treeLevel * 14;
+        extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--tree`.trim();
+        cell.style.setProperty('--hgrid-tree-indent', `${indentPx}px`);
       } else if (cell.style.getPropertyValue('--hgrid-group-indent').length > 0) {
         cell.style.removeProperty('--hgrid-group-indent');
+        if (cell.style.getPropertyValue('--hgrid-tree-indent').length > 0) {
+          cell.style.removeProperty('--hgrid-tree-indent');
+        }
+      } else if (cell.style.getPropertyValue('--hgrid-tree-indent').length > 0) {
+        cell.style.removeProperty('--hgrid-tree-indent');
       }
 
       this.bindCell(cell, cellState, {
@@ -1973,16 +2010,21 @@ export class DomRenderer {
     horizontalWindow: HorizontalWindow,
     isRowLoading: boolean,
     isGroupRow: boolean,
-    groupLevel: number
+    groupLevel: number,
+    isTreeRow: boolean,
+    treeLevel: number
   ): void {
     if (this.columnsByZone.center.length === 0 || horizontalWindow.end <= horizontalWindow.start) {
       this.hidePoolRow(zoneRow);
       return;
     }
 
-    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight, isGroupRow, groupLevel);
+    this.bindRowPosition(zoneRow, rowIndex, dataIndex, rowTranslateY, rowHeight, isGroupRow, groupLevel, isTreeRow, treeLevel);
     const groupColumnId = isGroupRow ? this.resolveGroupRowColumnId(row) : null;
     const isGroupExpanded = isGroupRow ? this.resolveGroupRowExpanded(row) : false;
+    const treeColumnId = isTreeRow ? this.resolveTreeRowColumnId(row) : null;
+    const isTreeExpanded = isTreeRow ? this.resolveTreeRowExpanded(row) : false;
+    const treeHasChildren = isTreeRow ? this.resolveTreeRowHasChildren(row) : false;
 
     const centerColumns = this.columnsByZone.center;
     let slotIndex = 0;
@@ -2015,8 +2057,19 @@ export class DomRenderer {
         const indentPx = 10 + groupLevel * 14;
         extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--group`.trim();
         cell.style.setProperty('--hgrid-group-indent', `${indentPx}px`);
+      } else if (isTreeRow && treeColumnId && column.id === treeColumnId) {
+        const glyph = treeHasChildren ? (isTreeExpanded ? '▾' : '▸') : '•';
+        textContent = `${glyph} ${textContent}`;
+        const indentPx = 10 + treeLevel * 14;
+        extraClassName = `${extraClassName.length > 0 ? `${extraClassName} ` : ''}hgrid__cell--tree`.trim();
+        cell.style.setProperty('--hgrid-tree-indent', `${indentPx}px`);
       } else if (cell.style.getPropertyValue('--hgrid-group-indent').length > 0) {
         cell.style.removeProperty('--hgrid-group-indent');
+        if (cell.style.getPropertyValue('--hgrid-tree-indent').length > 0) {
+          cell.style.removeProperty('--hgrid-tree-indent');
+        }
+      } else if (cell.style.getPropertyValue('--hgrid-tree-indent').length > 0) {
+        cell.style.removeProperty('--hgrid-tree-indent');
       }
 
       this.bindCell(cell, cellState, {
@@ -2062,6 +2115,11 @@ export class DomRenderer {
       zoneRow.rowState.isGroupRow = false;
       zoneRow.rowState.groupLevel = 0;
     }
+    if (zoneRow.rowState.isTreeRow) {
+      zoneRow.element.classList.remove('hgrid__row--tree');
+      zoneRow.rowState.isTreeRow = false;
+      zoneRow.rowState.treeLevel = 0;
+    }
     zoneRow.rowState.isVisible = false;
     zoneRow.rowState.rowIndex = -1;
     zoneRow.rowState.dataIndex = -1;
@@ -2074,7 +2132,9 @@ export class DomRenderer {
     rowTranslateY: number,
     rowHeight: number,
     isGroupRow: boolean,
-    groupLevel: number
+    groupLevel: number,
+    isTreeRow: boolean,
+    treeLevel: number
   ): void {
     const rowState = zoneRow.rowState;
 
@@ -2121,6 +2181,20 @@ export class DomRenderer {
         delete zoneRow.element.dataset.groupLevel;
       }
       rowState.groupLevel = groupLevel;
+    }
+
+    if (rowState.isTreeRow !== isTreeRow) {
+      zoneRow.element.classList.toggle('hgrid__row--tree', isTreeRow);
+      rowState.isTreeRow = isTreeRow;
+    }
+
+    if (rowState.treeLevel !== treeLevel) {
+      if (isTreeRow) {
+        zoneRow.element.dataset.treeLevel = String(treeLevel);
+      } else {
+        delete zoneRow.element.dataset.treeLevel;
+      }
+      rowState.treeLevel = treeLevel;
     }
   }
 
@@ -4494,6 +4568,23 @@ export class DomRenderer {
 
   private resolveGroupRowExpanded(row: GridRowData): boolean {
     return row[GROUP_ROW_EXPANDED_FIELD] === true;
+  }
+
+  private resolveTreeRowColumnId(row: GridRowData): string | null {
+    const value = row[TREE_ROW_TREE_COLUMN_ID_FIELD];
+    if (typeof value !== 'string' || value.length === 0) {
+      return null;
+    }
+
+    return value;
+  }
+
+  private resolveTreeRowExpanded(row: GridRowData): boolean {
+    return row[TREE_ROW_EXPANDED_FIELD] === true;
+  }
+
+  private resolveTreeRowHasChildren(row: GridRowData): boolean {
+    return row[TREE_ROW_HAS_CHILDREN_FIELD] === true;
   }
 
   private resolveRow(dataIndex: number): GridRowData {

@@ -15,6 +15,70 @@ async function waitAnimationFrame(page) {
   );
 }
 
+async function measureUiThreadLagDuring(page, operationPath, timeoutMs = 120_000) {
+  return page.evaluate(
+    async ({ operationPath, timeoutMs: operationTimeoutMs }) => {
+      function resolveOperation(pathExpression) {
+        const parts = pathExpression.split('.');
+        let cursor = window;
+        for (let index = 0; index < parts.length; index += 1) {
+          cursor = cursor?.[parts[index]];
+        }
+        return cursor;
+      }
+
+      const operation = resolveOperation(operationPath);
+      if (typeof operation !== 'function') {
+        throw new Error(`Missing operation: ${operationPath}`);
+      }
+
+      let maxGapMs = 0;
+      let tickCount = 0;
+      let lastTick = performance.now();
+      const interval = window.setInterval(() => {
+        const now = performance.now();
+        const gap = now - lastTick;
+        if (gap > maxGapMs) {
+          maxGapMs = gap;
+        }
+        lastTick = now;
+        tickCount += 1;
+      }, 16);
+
+      const timeoutPromise = new Promise((_, reject) => {
+        window.setTimeout(() => {
+          reject(new Error(`Operation timeout: ${operationPath}`));
+        }, operationTimeoutMs);
+      });
+
+      try {
+        await new Promise((resolve) => {
+          window.setTimeout(() => {
+            lastTick = performance.now();
+            resolve(true);
+          }, 0);
+        });
+
+        await Promise.race([operation(), timeoutPromise]);
+        await new Promise((resolve) => {
+          requestAnimationFrame(() => resolve(true));
+        });
+      } finally {
+        window.clearInterval(interval);
+      }
+
+      return {
+        maxGapMs,
+        tickCount
+      };
+    },
+    {
+      operationPath,
+      timeoutMs
+    }
+  );
+}
+
 function parseTranslate3d(transformValue) {
   if (!transformValue) {
     return { x: Number.NaN, y: Number.NaN };
@@ -2805,6 +2869,153 @@ async function runExample31Checks(page, serverUrl, pageErrors) {
   await waitAnimationFrame(page);
   const clientModeSnapshot = await readSnapshot();
   assert.equal(clientModeSnapshot.groupingMode, 'client', 'example31 should switch grouping mode back to client');
+
+  const perfMetrics = await measureUiThreadLagDuring(page, '__example31.runPerfScenario');
+  assert.ok(perfMetrics.tickCount > 4, 'example31 perf probe should collect heartbeat ticks');
+  assert.ok(
+    perfMetrics.maxGapMs < 420,
+    `example31 grouping should avoid long UI freeze, maxGap=${perfMetrics.maxGapMs.toFixed(1)}ms`
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample32Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example32.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function readSnapshot() {
+    return page.evaluate(() => {
+      const api = window.__example32;
+      if (!api || typeof api.getSnapshot !== 'function') {
+        throw new Error('Missing window.__example32.getSnapshot');
+      }
+      return api.getSnapshot();
+    });
+  }
+
+  const initialSnapshot = await readSnapshot();
+  assert.equal(initialSnapshot.mode, 'client', 'example32 should start in client mode');
+  assert.ok(initialSnapshot.rowCount >= 4, 'example32 should render client tree rows');
+  assert.equal(initialSnapshot.hasTreeCell, true, 'example32 should render tree cells');
+
+  await page.click('#mode-server');
+  await waitAnimationFrame(page);
+  const serverSnapshot = await readSnapshot();
+  assert.equal(serverSnapshot.mode, 'server', 'example32 should switch to server tree mode');
+
+  await page.click('#expand-root-100');
+  await waitAnimationFrame(page);
+  await waitAnimationFrame(page);
+  await page.waitForFunction(() => {
+    const api = window.__example32;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      return false;
+    }
+    const snapshot = api.getSnapshot();
+    return snapshot.lazyLoadCount > 0 && snapshot.rowCount >= 3;
+  });
+  const expandedSnapshot = await readSnapshot();
+  assert.ok(expandedSnapshot.rowCount >= 3, 'example32 root expand should materialize lazy children');
+  assert.ok(expandedSnapshot.lazyLoadCount >= 1, 'example32 should invoke lazy loader on expand');
+
+  const perfMetrics = await measureUiThreadLagDuring(page, '__example32.runPerfScenario');
+  assert.ok(perfMetrics.tickCount > 4, 'example32 perf probe should collect heartbeat ticks');
+  assert.ok(
+    perfMetrics.maxGapMs < 420,
+    `example32 tree should avoid long UI freeze, maxGap=${perfMetrics.maxGapMs.toFixed(1)}ms`
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample33Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example33.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function readSnapshot() {
+    return page.evaluate(() => {
+      const api = window.__example33;
+      if (!api || typeof api.getSnapshot !== 'function') {
+        throw new Error('Missing window.__example33.getSnapshot');
+      }
+      return api.getSnapshot();
+    });
+  }
+
+  await page.waitForFunction(() => {
+    const api = window.__example33;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      return false;
+    }
+    const snapshot = api.getSnapshot();
+    return (
+      snapshot &&
+      Array.isArray(snapshot.headerTexts) &&
+      snapshot.headerTexts.some((text) => text.includes('Jan'))
+    );
+  });
+  const initialSnapshot = await readSnapshot();
+  assert.equal(initialSnapshot.pivotingMode, 'client', 'example33 should start in client pivot mode');
+  assert.equal(initialSnapshot.pivotModel[0]?.columnId, 'month', 'example33 initial pivot column should be month');
+  assert.equal(initialSnapshot.pivotValues[0]?.columnId, 'sales', 'example33 initial pivot value should target sales');
+  assert.equal(initialSnapshot.groupModel[0]?.columnId, 'region', 'example33 initial row group should be region');
+  assert.ok(initialSnapshot.bodyTexts.includes('KR'), 'example33 should render region aggregate row');
+
+  await page.click('#pivot-product-month');
+  await waitAnimationFrame(page);
+  await page.waitForFunction(() => {
+    const api = window.__example33;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      return false;
+    }
+    const snapshot = api.getSnapshot();
+    return (
+      snapshot &&
+      Array.isArray(snapshot.groupModel) &&
+      snapshot.groupModel[0]?.columnId === 'product' &&
+      Array.isArray(snapshot.pivotValues) &&
+      snapshot.pivotValues[0]?.type === 'avg'
+    );
+  });
+  const productSnapshot = await readSnapshot();
+  assert.equal(productSnapshot.groupModel[0]?.columnId, 'product', 'example33 should switch row group to product');
+  assert.equal(productSnapshot.pivotValues[0]?.type, 'avg', 'example33 should switch pivot aggregate to avg');
+
+  await page.click('#clear-pivot');
+  await waitAnimationFrame(page);
+  await page.waitForFunction(() => {
+    const api = window.__example33;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      return false;
+    }
+    const snapshot = api.getSnapshot();
+    return snapshot && Array.isArray(snapshot.pivotModel) && snapshot.pivotModel.length === 0;
+  });
+  const clearedSnapshot = await readSnapshot();
+  assert.equal(clearedSnapshot.pivotModel.length, 0, 'example33 clear-pivot should reset pivot model');
+  assert.ok(clearedSnapshot.headerTexts.includes('Month'), 'example33 clear should restore base month column');
+
+  await page.click('#set-100k');
+  await waitAnimationFrame(page);
+  await page.click('#pivot-region-month');
+  await waitAnimationFrame(page);
+  await page.waitForFunction(() => {
+    const api = window.__example33;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      return false;
+    }
+    const snapshot = api.getSnapshot();
+    return snapshot && snapshot.pivotModel[0]?.columnId === 'month' && snapshot.groupModel[0]?.columnId === 'region';
+  });
+
+  const perfMetrics = await measureUiThreadLagDuring(page, '__example33.runPerfScenario');
+  assert.ok(perfMetrics.tickCount > 4, 'example33 perf probe should collect heartbeat ticks');
+  assert.ok(
+    perfMetrics.maxGapMs < 420,
+    `example33 pivot should avoid long UI freeze, maxGap=${perfMetrics.maxGapMs.toFixed(1)}ms`
+  );
+
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
@@ -2902,6 +3113,10 @@ async function main() {
     await runExample30Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample31Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample32Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample33Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

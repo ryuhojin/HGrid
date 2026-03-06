@@ -1,4 +1,4 @@
-import type { DataProvider, GridRowData } from '../data/data-provider';
+import type { DataProvider, GridRowData, RowKey } from '../data/data-provider';
 import type { RowModel } from '../data/row-model';
 import type { RowModelOptions } from '../data/row-model';
 
@@ -10,6 +10,8 @@ export type RowIndicatorCheckAllScope = 'all' | 'filtered' | 'viewport';
 export type RowStatusTone = 'inserted' | 'updated' | 'deleted' | 'invalid' | 'error' | 'clean';
 export type GroupingMode = 'client' | 'server';
 export type GroupAggregationType = 'sum' | 'avg' | 'min' | 'max' | 'count';
+export type TreeDataMode = 'client' | 'server';
+export type PivotingMode = 'client' | 'server';
 
 export type ColumnFormatter = (value: unknown, row: GridRowData) => string;
 export type ColumnComparator = (a: unknown, b: unknown) => number;
@@ -90,6 +92,49 @@ export interface GroupingOptions {
   defaultExpanded?: boolean;
 }
 
+export interface PivotModelItem {
+  columnId: string;
+}
+
+export interface PivotValueDef {
+  columnId: string;
+  type?: GroupAggregationType;
+  reducer?: GroupAggregationReducer;
+}
+
+export interface PivotingOptions {
+  mode?: PivotingMode;
+  pivotModel?: PivotModelItem[];
+  values?: PivotValueDef[];
+}
+
+export interface TreeLoadChildrenContext {
+  parentNodeKey: RowKey;
+  parentRow: GridRowData;
+  depth: number;
+  signal?: AbortSignal;
+}
+
+export interface TreeLoadChildrenResult {
+  rows: GridRowData[];
+}
+
+export type TreeLoadChildren = (
+  context: TreeLoadChildrenContext
+) => Promise<TreeLoadChildrenResult | GridRowData[]> | TreeLoadChildrenResult | GridRowData[];
+
+export interface TreeDataOptions {
+  enabled?: boolean;
+  mode?: TreeDataMode;
+  idField?: string;
+  parentIdField?: string;
+  hasChildrenField?: string;
+  treeColumnId?: string;
+  defaultExpanded?: boolean;
+  rootParentValue?: RowKey | null;
+  loadChildren?: TreeLoadChildren;
+}
+
 export interface ColumnGroupDef {
   groupId: string;
   header: string;
@@ -122,6 +167,8 @@ export interface GridOptions {
   columns: ColumnDef[];
   columnGroups?: ColumnGroupDef[];
   grouping?: GroupingOptions;
+  pivoting?: PivotingOptions;
+  treeData?: TreeDataOptions;
   dataProvider: DataProvider;
   rowModel: RowModel;
   height?: number;
@@ -149,7 +196,9 @@ export interface GridState {
   hiddenColumnIds?: string[];
   pinnedColumns?: Record<string, ColumnPinPosition>;
   groupModel?: GroupModelItem[];
+  pivotModel?: PivotModelItem[];
   groupExpansionState?: Record<string, boolean>;
+  treeExpansionState?: Record<string, boolean>;
 }
 
 export interface GridTheme {

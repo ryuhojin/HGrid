@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 33 - Local Pivot Matrix</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #log {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1220px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 33 - Local Pivot Matrix</h1>
+    <div class="controls">
+      <button id="pivot-region-month" type="button">rows: region / columns: month / sum(sales)</button>
+      <button id="pivot-product-month" type="button">rows: product / columns: month / avg(sales)</button>
+      <button id="clear-pivot" type="button">clear pivot</button>
+      <button id="set-100k" type="button">setRowCount 100k (local synthetic)</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const regions = ['KR', 'US', 'JP', 'DE'];
+      const products = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Omega'];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function buildRawRow(index) {
+        return {
+          id: index + 1,
+          region: regions[index % regions.length],
+          product: products[index % products.length],
+          month: months[index % months.length],
+          sales: (index * 31) % 15000,
+          quantity: ((index * 7) % 200) + 1
+        };
+      }
+
+      const rowData = Array.from({ length: 120000 }, (_, index) => buildRawRow(index));
+
+      class SyntheticPivotProvider {
+        constructor(rowCount) {
+          this.rowCount = rowCount;
+        }
+
+        getRowCount() {
+          return this.rowCount;
+        }
+
+        getRowKey(dataIndex) {
+          return dataIndex + 1;
+        }
+
+        getValue(dataIndex, columnId) {
+          if (columnId === 'id') {
+            return dataIndex + 1;
+          }
+
+          if (columnId === 'region') {
+            return regions[dataIndex % regions.length];
+          }
+
+          if (columnId === 'product') {
+            return products[dataIndex % products.length];
+          }
+
+          if (columnId === 'month') {
+            return months[dataIndex % months.length];
+          }
+
+          if (columnId === 'sales') {
+            return (dataIndex * 31) % 15000;
+          }
+
+          if (columnId === 'quantity') {
+            return ((dataIndex * 7) % 200) + 1;
+          }
+
+          return undefined;
+        }
+
+        getRow(dataIndex) {
+          return buildRawRow(dataIndex);
+        }
+
+        setValue() {}
+        applyTransactions() {}
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'product', header: 'Product', width: 140, type: 'text' },
+        { id: 'month', header: 'Month', width: 140, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' },
+        { id: 'quantity', header: 'Qty', width: 120, type: 'number' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        pivoting: {
+          mode: 'client',
+          pivotModel: [{ columnId: 'month' }],
+          values: [{ columnId: 'sales', type: 'sum' }]
+        },
+        grouping: {
+          groupModel: [{ columnId: 'region' }]
+        },
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      const logElement = document.getElementById('log');
+
+      function getSnapshot() {
+        const headerTexts = Array.from(document.querySelectorAll('.hgrid__header-cell'))
+          .map((element) => element.textContent ? element.textContent.trim() : '')
+          .filter((text) => text.length > 0);
+        const bodyTexts = Array.from(document.querySelectorAll('.hgrid__row--center .hgrid__cell'))
+          .map((element) => element.textContent ? element.textContent.trim() : '')
+          .filter((text) => text.length > 0);
+
+        return {
+          pivotingMode: grid.getPivotingMode(),
+          pivotModel: grid.getPivotModel(),
+          pivotValues: grid.getPivotValues().map((item) => ({ columnId: item.columnId, type: item.type })),
+          groupModel: grid.getGroupModel(),
+          state: grid.getState(),
+          headerTexts,
+          bodyTexts
+        };
+      }
+
+      function writeLog(label) {
+        logElement.textContent = JSON.stringify({
+          label,
+          snapshot: getSnapshot()
+        });
+      }
+
+      document.getElementById('pivot-region-month').addEventListener('click', async () => {
+        await grid.setGroupingMode('client');
+        await grid.setPivotingMode('client');
+        await grid.setGroupModel([{ columnId: 'region' }]);
+        await grid.setPivotModel([{ columnId: 'month' }]);
+        await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
+        await waitFrame();
+        writeLog('pivot-region-month');
+      });
+
+      document.getElementById('pivot-product-month').addEventListener('click', async () => {
+        await grid.setGroupingMode('client');
+        await grid.setPivotingMode('client');
+        await grid.setGroupModel([{ columnId: 'product' }]);
+        await grid.setPivotModel([{ columnId: 'month' }]);
+        await grid.setPivotValues([{ columnId: 'sales', type: 'avg' }]);
+        await waitFrame();
+        writeLog('pivot-product-month');
+      });
+
+      document.getElementById('clear-pivot').addEventListener('click', async () => {
+        await grid.clearPivotModel();
+        await grid.setPivotValues([]);
+        await grid.clearGroupModel();
+        await waitFrame();
+        writeLog('clear-pivot');
+      });
+
+      document.getElementById('set-100k').addEventListener('click', async () => {
+        const syntheticRows = Array.from({ length: 100000 }, (_, index) => buildRawRow(index + 200000));
+        grid.setOptions({ rowData: syntheticRows });
+        await waitFrame();
+        writeLog('set-100k');
+      });
+
+      document.getElementById('inspect').addEventListener('click', async () => {
+        await waitFrame();
+        writeLog('inspect');
+      });
+
+      window.__example33 = {
+        getSnapshot() {
+          return getSnapshot();
+        },
+        async applyRegionMonthPivot() {
+          await grid.setGroupingMode('client');
+          await grid.setPivotingMode('client');
+          await grid.setGroupModel([{ columnId: 'region' }]);
+          await grid.setPivotModel([{ columnId: 'month' }]);
+          await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
+        },
+        async clearPivot() {
+          await grid.clearPivotModel();
+          await grid.setPivotValues([]);
+          await grid.clearGroupModel();
+        },
+        async runPerfScenario() {
+          grid.setOptions({
+            dataProvider: new SyntheticPivotProvider(150000)
+          });
+          await grid.setGroupingMode('client');
+          await grid.setPivotingMode('client');
+          await grid.setGroupModel([{ columnId: 'region' }]);
+          await grid.setPivotModel([{ columnId: 'month' }]);
+          await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
+          return {
+            state: grid.getState(),
+            pivotModel: grid.getPivotModel(),
+            groupModel: grid.getGroupModel()
+          };
+        }
+      };
+
+      writeLog('initial');
+    </script>
+  </body>
+</html>

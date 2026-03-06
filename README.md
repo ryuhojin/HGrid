@@ -5,8 +5,8 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 ## 프로젝트 상태 (2026-03-06)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`
-- 다음 범위: `Phase 9.4+` (pivot 확장, import/export, theme)
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`, `Phase 10.1~10.2`
+- 다음 범위: `Phase 10.3+` (Excel import/export, theming, a11y)
 - 상세 기준: `checklist.md`
 
 구현 완료 핵심:
@@ -28,6 +28,8 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Grouping pipeline (group model + key 기반 expand/collapse + sum/avg/min/max/count/custom aggregation)
 - Tree data pipeline (parentId model + key expansion state + lazy children load)
 - Pivot pipeline (로컬 pivot matrix + 동적 컬럼 생성 + 서버 pivot query model)
+- Clipboard pipeline (selection copy TSV + plain text paste + HTML paste 방어)
+- CSV/TSV export pipeline (visible/selection/all + progress + cancel)
 - RemoteDataProvider block cache/LRU/prefetch + server-side query model(sort/filter/group/pivot)
 - 성능 스모크(e2e heartbeat max gap)로 그룹/트리/피벗 UI freeze 회귀 점검
 
@@ -171,6 +173,25 @@ await grid.clearPivotModel();
 await grid.setPivotValues([]);
 ```
 
+### Export API (CSV/TSV)
+
+```ts
+const csvVisible = await grid.exportCsv({ scope: 'visible' });
+const tsvSelection = await grid.exportTsv({ scope: 'selection', includeHeaders: false });
+
+const controller = new AbortController();
+const csvAll = await grid.exportCsv({
+  scope: 'all',
+  chunkSize: 2000,
+  signal: controller.signal,
+  onProgress(event) {
+    if (event.status === 'running' && event.processedRows > 100000) {
+      controller.abort();
+    }
+  }
+});
+```
+
 ## 루트 스크립트
 
 - `pnpm build`
@@ -184,7 +205,7 @@ await grid.setPivotValues([]);
 - `pnpm bench`
 - `pnpm ci:phase0`
 
-## Examples (현재 1~33)
+## Examples (현재 1~35)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -210,6 +231,8 @@ await grid.setPivotValues([]);
 - `example31`: grouping + aggregation + expand/collapse + mode 전환
 - `example32`: tree data(parentId) + expand/collapse + server lazy children
 - `example33`: local pivot matrix(가로 집계 컬럼) + server pivot query model
+- `example34`: clipboard copy/paste(sanitize 포함)
+- `example35`: CSV/TSV export(visible/selection/all + progress/cancel)
 
 기능 추가 시 규칙:
 
@@ -249,6 +272,7 @@ await grid.setPivotValues([]);
 - `docs/grouping-phase9.md`
 - `docs/tree-data-phase9.md`
 - `docs/pivot-phase9.md`
+- `docs/csv-tsv-export-phase10.md`
 
 ## 라이선스
 

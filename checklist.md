@@ -768,14 +768,14 @@
 
 # Phase 10 — Import/Export: Clipboard/CSV/Excel
 ## 10.1 Clipboard
-- [ ] copy selected range → TSV
-- [ ] paste TSV → range update
-- [ ] sanitize(HTML paste 방어)
+- [x] copy selected range → TSV
+- [x] paste TSV → range update
+- [x] sanitize(HTML paste 방어)
 
 ## 10.2 CSV/TSV Export
-- [ ] visible rows
-- [ ] selection only
-- [ ] all rows(대용량 시 progress + cancel)
+- [x] visible rows
+- [x] selection only
+- [x] all rows(대용량 시 progress + cancel)
 
 ## 10.3 Excel(xlsx)
 - [ ] export:
@@ -790,8 +790,8 @@
 - [ ] 엑셀/CSV 기능이 core 성능을 오염시키지 않음(플러그인 분리)
 
 ## 10.4 예제
-- [ ] `example{N}.html`: clipboard
-- [ ] `example{N}.html`: csv export
+- [x] `example{N}.html`: clipboard
+- [x] `example{N}.html`: csv export
 - [ ] `example{N}.html`: excel import/export
 
 ---

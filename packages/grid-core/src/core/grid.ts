@@ -20,7 +20,7 @@ import type {
   RowIndicatorOptions
 } from './grid-options';
 import { DomRenderer } from '../render/dom-renderer';
-import { ColumnModel } from '../data/column-model';
+import { ColumnModel, formatColumnValue } from '../data/column-model';
 import type { ColumnFilterCondition, GridFilterModel } from '../data/filter-executor';
 import { CooperativeFilterExecutor, type FilterExecutor } from '../data/filter-executor';
 import type { GridRowData, RowKey } from '../data/data-provider';
@@ -51,6 +51,8 @@ const DEFAULT_INDICATOR_STATUS_WIDTH = 96;
 const MIN_INDICATOR_WIDTH = 44;
 const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 108;
+const DEFAULT_EXPORT_CHUNK_SIZE = 2000;
+const DEFAULT_EXPORT_LINE_BREAK = '\n';
 
 function isSystemUtilityColumn(columnId: string): boolean {
   return (
@@ -552,6 +554,43 @@ function isRemoteDataProvider(dataProvider: GridOptions['dataProvider']): dataPr
   return typeof (dataProvider as RemoteDataProviderContract).setQueryModel === 'function';
 }
 
+export type GridExportScope = 'visible' | 'selection' | 'all';
+export type GridExportFormat = 'csv' | 'tsv';
+export type GridExportStatus = 'running' | 'completed' | 'canceled';
+
+export interface GridExportOptions {
+  scope?: GridExportScope;
+  includeHeaders?: boolean;
+  includeSystemColumns?: boolean;
+  chunkSize?: number;
+  signal?: AbortSignal;
+  onProgress?: (event: GridExportProgressEvent) => void;
+}
+
+export interface GridExportProgressEvent {
+  operationId: string;
+  format: GridExportFormat;
+  scope: GridExportScope;
+  status: GridExportStatus;
+  processedRows: number;
+  totalRows: number;
+  progress: number;
+}
+
+export interface GridExportResult {
+  operationId: string;
+  format: GridExportFormat;
+  scope: GridExportScope;
+  content: string;
+  rowCount: number;
+  canceled: boolean;
+}
+
+interface ExportRowSegment {
+  startRow: number;
+  endRow: number;
+}
+
 export class Grid {
   private options: GridOptions;
   private sourceDataProvider: GridOptions['dataProvider'];
@@ -590,6 +629,7 @@ export class Grid {
   private treeLazyChildrenByParent = new Map<string, { parentNodeKey: RowKey; rows: GridRowData[] }>();
   private treeLoadingParents = new Set<string>();
   private treeLoadOperationToken = 0;
+  private exportOperationToken = 0;
   private sortOperationToken = 0;
   private filterOperationToken = 0;
   private groupOperationToken = 0;
@@ -1375,6 +1415,14 @@ export class Grid {
     this.renderer.clearSelection();
   }
 
+  public async exportCsv(options: GridExportOptions = {}): Promise<GridExportResult> {
+    return this.exportDelimited('csv', ',', options);
+  }
+
+  public async exportTsv(options: GridExportOptions = {}): Promise<GridExportResult> {
+    return this.exportDelimited('tsv', '\t', options);
+  }
+
   public resetRowHeights(rowIndexes?: number[]): void {
     this.renderer.resetRowHeights(rowIndexes);
   }
@@ -1421,6 +1469,365 @@ export class Grid {
       columns: this.columnModel.getColumns()
     };
     this.renderer.setColumns(this.columnModel.getVisibleColumns());
+  }
+
+  private async exportDelimited(
+    format: GridExportFormat,
+    delimiter: ',' | '\t',
+    options: GridExportOptions
+  ): Promise<GridExportResult> {
+    const scope: GridExportScope = options.scope === 'visible' || options.scope === 'selection' ? options.scope : 'all';
+    const includeHeaders = options.includeHeaders !== false;
+    const includeSystemColumns = options.includeSystemColumns === true;
+    const rawChunkSize = Number(options.chunkSize);
+    const chunkSize = Number.isFinite(rawChunkSize) ? Math.max(1, Math.floor(rawChunkSize)) : DEFAULT_EXPORT_CHUNK_SIZE;
+    const operationId = `export-${++this.exportOperationToken}`;
+
+    const columns = this.resolveExportColumns(scope, includeSystemColumns);
+    const rowSegments = this.resolveExportRowSegments(scope);
+    const totalRows = this.countExportRows(rowSegments);
+
+    if (columns.length === 0) {
+      this.emitExportProgress(options.onProgress, {
+        operationId,
+        format,
+        scope,
+        status: 'completed',
+        processedRows: 0,
+        totalRows,
+        progress: 1
+      });
+      return {
+        operationId,
+        format,
+        scope,
+        content: '',
+        rowCount: 0,
+        canceled: false
+      };
+    }
+
+    const lines: string[] = [];
+    if (includeHeaders) {
+      lines.push(this.serializeExportHeader(columns, delimiter));
+    }
+
+    let processedRows = 0;
+    let canceled = options.signal?.aborted === true;
+    if (!canceled && totalRows > 0) {
+      this.emitExportProgress(options.onProgress, {
+        operationId,
+        format,
+        scope,
+        status: 'running',
+        processedRows: 0,
+        totalRows,
+        progress: 0
+      });
+    }
+
+    outer: for (let segmentIndex = 0; segmentIndex < rowSegments.length; segmentIndex += 1) {
+      const segment = rowSegments[segmentIndex];
+      for (let rowIndex = segment.startRow; rowIndex <= segment.endRow; rowIndex += 1) {
+        if (options.signal?.aborted) {
+          canceled = true;
+          break outer;
+        }
+
+        lines.push(this.serializeExportRow(rowIndex, columns, delimiter));
+        processedRows += 1;
+
+        if (processedRows % chunkSize === 0) {
+          this.emitExportProgress(options.onProgress, {
+            operationId,
+            format,
+            scope,
+            status: 'running',
+            processedRows,
+            totalRows,
+            progress: totalRows > 0 ? Math.min(1, processedRows / totalRows) : 1
+          });
+          await this.yieldExportFrame();
+          if (options.signal?.aborted) {
+            canceled = true;
+            break outer;
+          }
+        }
+      }
+    }
+
+    const completedStatus: GridExportStatus = canceled ? 'canceled' : 'completed';
+    this.emitExportProgress(options.onProgress, {
+      operationId,
+      format,
+      scope,
+      status: completedStatus,
+      processedRows,
+      totalRows,
+      progress: totalRows > 0 ? Math.min(1, processedRows / totalRows) : 1
+    });
+
+    return {
+      operationId,
+      format,
+      scope,
+      content: lines.join(DEFAULT_EXPORT_LINE_BREAK),
+      rowCount: processedRows,
+      canceled
+    };
+  }
+
+  private emitExportProgress(
+    onProgress: GridExportOptions['onProgress'],
+    event: GridExportProgressEvent
+  ): void {
+    if (typeof onProgress !== 'function') {
+      return;
+    }
+
+    onProgress(event);
+  }
+
+  private async yieldExportFrame(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  }
+
+  private getVisibleColumnsInRendererOrder(): ColumnDef[] {
+    const visibleColumns = this.columnModel.getVisibleColumns();
+    const leftColumns: ColumnDef[] = [];
+    const centerColumns: ColumnDef[] = [];
+    const rightColumns: ColumnDef[] = [];
+
+    for (let index = 0; index < visibleColumns.length; index += 1) {
+      const column = visibleColumns[index];
+      if (column.pinned === 'left') {
+        leftColumns.push(column);
+      } else if (column.pinned === 'right') {
+        rightColumns.push(column);
+      } else {
+        centerColumns.push(column);
+      }
+    }
+
+    return [...leftColumns, ...centerColumns, ...rightColumns];
+  }
+
+  private resolveSelectionColumnIndexes(totalColumnCount: number): number[] | null {
+    if (totalColumnCount <= 0) {
+      return null;
+    }
+
+    const selection = this.renderer.getSelection();
+    const primaryRange = selection.cellRanges[0];
+    if (primaryRange) {
+      const startCol = Math.max(0, Math.min(totalColumnCount - 1, Math.min(primaryRange.c1, primaryRange.c2)));
+      const endCol = Math.max(0, Math.min(totalColumnCount - 1, Math.max(primaryRange.c1, primaryRange.c2)));
+      const indexes: number[] = [];
+      for (let colIndex = startCol; colIndex <= endCol; colIndex += 1) {
+        indexes.push(colIndex);
+      }
+      return indexes;
+    }
+
+    if (selection.activeCell) {
+      const clampedCol = Math.max(0, Math.min(totalColumnCount - 1, selection.activeCell.colIndex));
+      return [clampedCol];
+    }
+
+    return null;
+  }
+
+  private resolveExportColumns(scope: GridExportScope, includeSystemColumns: boolean): ColumnDef[] {
+    const rendererOrderedColumns = this.getVisibleColumnsInRendererOrder();
+    const baseColumns = includeSystemColumns
+      ? rendererOrderedColumns
+      : rendererOrderedColumns.filter((column) => !isSystemUtilityColumn(column.id));
+
+    if (scope !== 'selection') {
+      return baseColumns;
+    }
+
+    const selectedColumnIndexes = this.resolveSelectionColumnIndexes(rendererOrderedColumns.length);
+    if (!selectedColumnIndexes || selectedColumnIndexes.length === 0) {
+      return baseColumns;
+    }
+
+    const selectedColumns: ColumnDef[] = [];
+    for (let index = 0; index < selectedColumnIndexes.length; index += 1) {
+      const selectedColumnIndex = selectedColumnIndexes[index];
+      const column = rendererOrderedColumns[selectedColumnIndex];
+      if (!column) {
+        continue;
+      }
+
+      if (!includeSystemColumns && isSystemUtilityColumn(column.id)) {
+        continue;
+      }
+
+      selectedColumns.push(column);
+    }
+
+    return selectedColumns.length > 0 ? selectedColumns : baseColumns;
+  }
+
+  private resolveExportRowSegments(scope: GridExportScope): ExportRowSegment[] {
+    const rowCount = this.rowModel.getViewRowCount();
+    if (rowCount <= 0) {
+      return [];
+    }
+
+    if (scope === 'all') {
+      return [{ startRow: 0, endRow: rowCount - 1 }];
+    }
+
+    if (scope === 'visible') {
+      const visibleRange = this.renderer.getVisibleRowRange();
+      if (!visibleRange) {
+        return [];
+      }
+
+      return this.mergeExportRowSegments(
+        [
+          {
+            startRow: visibleRange.startRow,
+            endRow: visibleRange.endRow
+          }
+        ],
+        rowCount
+      );
+    }
+
+    const selection = this.renderer.getSelection();
+    const segments: ExportRowSegment[] = [];
+    const primaryRange = selection.cellRanges[0];
+
+    if (primaryRange) {
+      segments.push({
+        startRow: Math.min(primaryRange.r1, primaryRange.r2),
+        endRow: Math.max(primaryRange.r1, primaryRange.r2)
+      });
+    } else if (selection.rowRanges.length > 0) {
+      for (let rangeIndex = 0; rangeIndex < selection.rowRanges.length; rangeIndex += 1) {
+        const range = selection.rowRanges[rangeIndex];
+        segments.push({
+          startRow: Math.min(range.r1, range.r2),
+          endRow: Math.max(range.r1, range.r2)
+        });
+      }
+    } else if (selection.activeCell) {
+      segments.push({
+        startRow: selection.activeCell.rowIndex,
+        endRow: selection.activeCell.rowIndex
+      });
+    }
+
+    return this.mergeExportRowSegments(segments, rowCount);
+  }
+
+  private mergeExportRowSegments(segments: ExportRowSegment[], rowCount: number): ExportRowSegment[] {
+    if (segments.length === 0 || rowCount <= 0) {
+      return [];
+    }
+
+    const normalized: ExportRowSegment[] = [];
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index];
+      if (!segment) {
+        continue;
+      }
+
+      const startRow = Math.max(0, Math.min(rowCount - 1, Math.min(segment.startRow, segment.endRow)));
+      const endRow = Math.max(0, Math.min(rowCount - 1, Math.max(segment.startRow, segment.endRow)));
+      if (endRow < startRow) {
+        continue;
+      }
+
+      normalized.push({
+        startRow,
+        endRow
+      });
+    }
+
+    normalized.sort((left, right) => left.startRow - right.startRow || left.endRow - right.endRow);
+
+    const merged: ExportRowSegment[] = [];
+    for (let index = 0; index < normalized.length; index += 1) {
+      const current = normalized[index];
+      const previous = merged[merged.length - 1];
+      if (!previous || current.startRow > previous.endRow + 1) {
+        merged.push({ ...current });
+        continue;
+      }
+
+      previous.endRow = Math.max(previous.endRow, current.endRow);
+    }
+
+    return merged;
+  }
+
+  private countExportRows(segments: ExportRowSegment[]): number {
+    let rowCount = 0;
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index];
+      rowCount += Math.max(0, segment.endRow - segment.startRow + 1);
+    }
+    return rowCount;
+  }
+
+  private serializeExportHeader(columns: ColumnDef[], delimiter: ',' | '\t'): string {
+    const cells = new Array<string>(columns.length);
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      cells[columnIndex] = this.escapeDelimitedValue(columns[columnIndex].header, delimiter);
+    }
+
+    return cells.join(delimiter);
+  }
+
+  private serializeExportRow(rowIndex: number, columns: ColumnDef[], delimiter: ',' | '\t'): string {
+    const dataIndex = this.rowModel.getDataIndex(rowIndex);
+    const row = this.buildExportRowData(dataIndex, columns);
+    const cells = new Array<string>(columns.length);
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      const text = formatColumnValue(columns[columnIndex], row);
+      cells[columnIndex] = this.escapeDelimitedValue(text, delimiter);
+    }
+
+    return cells.join(delimiter);
+  }
+
+  private buildExportRowData(dataIndex: number, columns: ColumnDef[]): GridRowData {
+    if (dataIndex < 0) {
+      return {};
+    }
+
+    const providerRow = this.options.dataProvider.getRow?.(dataIndex);
+    if (providerRow) {
+      return providerRow;
+    }
+
+    const fallbackRow: GridRowData = {};
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      const columnId = columns[columnIndex].id;
+      fallbackRow[columnId] = this.options.dataProvider.getValue(dataIndex, columnId);
+    }
+
+    return fallbackRow;
+  }
+
+  private escapeDelimitedValue(value: string, delimiter: ',' | '\t'): string {
+    if (value.length === 0) {
+      return '';
+    }
+
+    const shouldQuote =
+      value.includes(delimiter) || value.includes('"') || value.includes('\n') || value.includes('\r');
+    if (!shouldQuote) {
+      return value;
+    }
+
+    return `"${value.replace(/"/g, '""')}"`;
   }
 
   private captureBaseColumnsForClientPivot(): void {

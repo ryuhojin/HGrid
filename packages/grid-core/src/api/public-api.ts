@@ -1,5 +1,13 @@
 export { Grid } from '../core/grid';
 export type {
+  GridExportFormat,
+  GridExportOptions,
+  GridExportProgressEvent,
+  GridExportResult,
+  GridExportScope,
+  GridExportStatus
+} from '../core/grid';
+export type {
   ColumnComparator,
   ColumnDef,
   ColumnGroupDef,

@@ -21,12 +21,18 @@
 - `getSelection()`
 - `setSelection(selection)`
 - `clearSelection()`
+- `exportCsv(options?)`
+- `exportTsv(options?)`
 - `on(eventName, handler)`
 - `off(eventName, handler)`
 
 ## Config/State Types
 - `GridConfig`: partial runtime configuration for constructor and incremental updates.
 - `GridOptions`: normalized runtime option shape.
+- `GridExportOptions` / `GridExportProgressEvent` / `GridExportResult` (Phase 10.2):
+  - `scope: "visible" | "selection" | "all"`
+  - `signal: AbortSignal` cancel 지원
+  - `onProgress(event)` progress callback
 - `GridState`: serializable view state.
   - `scrollTop` is logical (virtual) vertical offset, not raw native scrollbar offset.
   - `columnOrder?` stores ordered column ids for state restore.
@@ -79,6 +85,8 @@
 - `setColumns`, `setOptions`, `setColumnOrder`, `setColumnVisibility`, `setColumnWidth`
 - `setColumnPin`
 - `setRowOrder`, `setFilteredRowOrder`, `resetRowOrder`, `setRowModelOptions`, `getRowModelState`, `resetRowHeights`
-- `setTheme`, `getState`, `setState`, `getSelection`, `setSelection`, `clearSelection`, `on`, `off`, `destroy`
+- `setTheme`, `getState`, `setState`, `getSelection`, `setSelection`, `clearSelection`
+- `exportCsv`, `exportTsv`
+- `on`, `off`, `destroy`
 
 These wrappers only delegate to `@hgrid/grid-core` and do not access core private internals.

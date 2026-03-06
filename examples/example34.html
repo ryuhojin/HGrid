@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 34 - Clipboard TSV</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #log {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 960px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 34 - Clipboard TSV</h1>
+    <div class="controls">
+      <button id="select-range" type="button">select B2:C4</button>
+      <button id="simulate-copy" type="button">simulate copy</button>
+      <button id="simulate-paste" type="button">simulate paste</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function createClipboardEvent(type, initialData) {
+        const store = new Map();
+        if (initialData && typeof initialData === 'object') {
+          Object.keys(initialData).forEach((mimeType) => {
+            store.set(mimeType, String(initialData[mimeType]));
+          });
+        }
+
+        const event = new Event(type, {
+          bubbles: true,
+          cancelable: true
+        });
+
+        Object.defineProperty(event, 'clipboardData', {
+          configurable: true,
+          value: {
+            getData(mimeType) {
+              return store.get(mimeType) || '';
+            },
+            setData(mimeType, value) {
+              store.set(mimeType, String(value));
+            },
+            clearData(mimeType) {
+              if (typeof mimeType === 'string') {
+                store.delete(mimeType);
+                return;
+              }
+              store.clear();
+            }
+          }
+        });
+
+        return {
+          event,
+          store
+        };
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text', editable: true },
+        { id: 'score', header: 'Score', width: 140, type: 'number', editable: true },
+        { id: 'updatedAt', header: 'Updated At', width: 240, type: 'date' }
+      ];
+
+      const rowData = Array.from({ length: 400 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        status: index % 2 === 0 ? 'active' : 'idle',
+        score: (index * 13) % 1000,
+        updatedAt: new Date(Date.now() - index * 60000).toISOString()
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 440,
+        rowHeight: 28,
+        overscan: 8,
+        overscanCols: 2
+      });
+
+      const logElement = document.getElementById('log');
+
+      function readCell(rowIndex, columnId) {
+        const selector = '.hgrid__row[data-row-index=\"' + rowIndex + '\"] .hgrid__cell[data-column-id=\"' + columnId + '\"]';
+        const cell = document.querySelector(selector);
+        return cell && typeof cell.textContent === 'string' ? cell.textContent.trim() : '';
+      }
+
+      function getSnapshot() {
+        const firstNameCell = document.querySelector(
+          '.hgrid__row[data-row-index=\"0\"] .hgrid__cell[data-column-id=\"name\"]'
+        );
+
+        return {
+          selection: grid.getSelection(),
+          row0: {
+            id: readCell(0, 'id'),
+            name: readCell(0, 'name'),
+            status: readCell(0, 'status'),
+            score: readCell(0, 'score')
+          },
+          row1: {
+            id: readCell(1, 'id'),
+            name: readCell(1, 'name'),
+            status: readCell(1, 'status'),
+            score: readCell(1, 'score')
+          },
+          row2: {
+            id: readCell(2, 'id'),
+            name: readCell(2, 'name'),
+            status: readCell(2, 'status'),
+            score: readCell(2, 'score')
+          },
+          hasInjectedHtmlNode: firstNameCell ? firstNameCell.querySelector('b') !== null : false
+        };
+      }
+
+      function writeLog(label, extra) {
+        logElement.textContent = JSON.stringify(
+          {
+            label,
+            snapshot: getSnapshot(),
+            extra: extra || null
+          },
+          null,
+          2
+        );
+      }
+
+      function selectDemoRange() {
+        grid.setSelection({
+          activeCell: { rowIndex: 1, colIndex: 1 },
+          cellRanges: [{ r1: 1, c1: 1, r2: 3, c2: 2 }],
+          rowRanges: []
+        });
+      }
+
+      function simulateCopy() {
+        const root = document.querySelector('.hgrid');
+        const clipboard = createClipboardEvent('copy');
+        root.dispatchEvent(clipboard.event);
+        return clipboard.store.get('text/plain') || '';
+      }
+
+      async function simulatePaste(tsvText) {
+        const root = document.querySelector('.hgrid');
+        const clipboard = createClipboardEvent('paste', {
+          'text/plain': tsvText,
+          'text/html': '<table><tr><td><b>unsafe</b></td></tr></table>'
+        });
+        root.dispatchEvent(clipboard.event);
+        await waitFrame();
+      }
+
+      document.getElementById('select-range').addEventListener('click', () => {
+        selectDemoRange();
+        writeLog('select-range');
+      });
+
+      document.getElementById('simulate-copy').addEventListener('click', () => {
+        const copied = simulateCopy();
+        writeLog('simulate-copy', { copied });
+      });
+
+      document.getElementById('simulate-paste').addEventListener('click', async () => {
+        await simulatePaste('<b>Safe</b>\tactive\nLiteral\tidle');
+        writeLog('simulate-paste');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect');
+      });
+
+      selectDemoRange();
+      writeLog('ready');
+
+      window.__example34 = {
+        getSnapshot,
+        selectDemoRange,
+        simulateCopy,
+        simulatePaste
+      };
+    </script>
+  </body>
+</html>

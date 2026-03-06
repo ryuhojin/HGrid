@@ -2990,7 +2990,13 @@ async function runExample33Checks(page, serverUrl, pageErrors) {
       return false;
     }
     const snapshot = api.getSnapshot();
-    return snapshot && Array.isArray(snapshot.pivotModel) && snapshot.pivotModel.length === 0;
+    return (
+      snapshot &&
+      Array.isArray(snapshot.pivotModel) &&
+      snapshot.pivotModel.length === 0 &&
+      Array.isArray(snapshot.headerTexts) &&
+      snapshot.headerTexts.includes('Month')
+    );
   });
   const clearedSnapshot = await readSnapshot();
   assert.equal(clearedSnapshot.pivotModel.length, 0, 'example33 clear-pivot should reset pivot model');
@@ -3015,6 +3021,143 @@ async function runExample33Checks(page, serverUrl, pageErrors) {
     perfMetrics.maxGapMs < 420,
     `example33 pivot should avoid long UI freeze, maxGap=${perfMetrics.maxGapMs.toFixed(1)}ms`
   );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample34Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example34.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  async function readSnapshot() {
+    return page.evaluate(() => {
+      const api = window.__example34;
+      if (!api || typeof api.getSnapshot !== 'function') {
+        throw new Error('Missing window.__example34.getSnapshot');
+      }
+      return api.getSnapshot();
+    });
+  }
+
+  const initialSnapshot = await readSnapshot();
+  assert.equal(initialSnapshot.row0.name, 'Customer-1', 'example34 should render initial row0 name');
+  assert.equal(initialSnapshot.row1.name, 'Customer-2', 'example34 should render initial row1 name');
+
+  const copiedTsv = await page.evaluate(() => {
+    const api = window.__example34;
+    if (!api || typeof api.simulateCopy !== 'function') {
+      throw new Error('Missing window.__example34.simulateCopy');
+    }
+    return api.simulateCopy();
+  });
+  assert.equal(
+    copiedTsv,
+    'Customer-2\tidle\nCustomer-3\tactive\nCustomer-4\tidle',
+    'example34 should copy selected B2:C4 range as TSV'
+  );
+
+  await page.evaluate(async () => {
+    const api = window.__example34;
+    if (!api || typeof api.simulatePaste !== 'function') {
+      throw new Error('Missing window.__example34.simulatePaste');
+    }
+    await api.simulatePaste('<b>Safe</b>\tactive\nLiteral\tidle');
+  });
+  await waitAnimationFrame(page);
+
+  const afterPasteSnapshot = await readSnapshot();
+  assert.equal(afterPasteSnapshot.row1.name, '<b>Safe</b>', 'example34 should paste plain text into editable name cell');
+  assert.equal(afterPasteSnapshot.row1.status, 'active', 'example34 should paste status cell');
+  assert.equal(afterPasteSnapshot.row2.name, 'Literal', 'example34 should paste second row name');
+  assert.equal(afterPasteSnapshot.row2.status, 'idle', 'example34 should paste second row status');
+  assert.equal(afterPasteSnapshot.hasInjectedHtmlNode, false, 'example34 should not inject HTML nodes from clipboard');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample35Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example35.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const visibleExportSummary = await page.evaluate(async () => {
+    const api = window.__example35;
+    if (!api || typeof api.exportVisibleCsv !== 'function' || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example35 exportVisibleCsv/getSnapshot');
+    }
+
+    const result = await api.exportVisibleCsv();
+    const snapshot = api.getSnapshot();
+    return {
+      format: result.format,
+      scope: result.scope,
+      rowCount: result.rowCount,
+      canceled: result.canceled,
+      firstLine: result.content.split('\n')[0],
+      preview: snapshot.preview
+    };
+  });
+
+  assert.equal(visibleExportSummary.format, 'csv', 'example35 visible export should produce csv');
+  assert.equal(visibleExportSummary.scope, 'visible', 'example35 visible export should use visible scope');
+  assert.equal(visibleExportSummary.canceled, false, 'example35 visible export should not cancel');
+  assert.ok(visibleExportSummary.rowCount > 0, 'example35 visible export should include rows');
+  assert.ok(visibleExportSummary.rowCount < 30_000, 'example35 visible export should not export all rows');
+  assert.equal(
+    visibleExportSummary.firstLine,
+    'ID,Name,Status,Region,Score,Updated At',
+    'example35 visible export should include csv header'
+  );
+
+  const selectionExportSummary = await page.evaluate(async () => {
+    const api = window.__example35;
+    if (!api || typeof api.selectDemoRange !== 'function' || typeof api.exportSelectionTsv !== 'function') {
+      throw new Error('Missing window.__example35 selection APIs');
+    }
+
+    api.selectDemoRange();
+    const result = await api.exportSelectionTsv();
+    return {
+      format: result.format,
+      scope: result.scope,
+      rowCount: result.rowCount,
+      canceled: result.canceled,
+      firstLine: result.content.split('\n')[0]
+    };
+  });
+
+  assert.equal(selectionExportSummary.format, 'tsv', 'example35 selection export should produce tsv');
+  assert.equal(selectionExportSummary.scope, 'selection', 'example35 selection export should use selection scope');
+  assert.equal(selectionExportSummary.canceled, false, 'example35 selection export should not cancel');
+  assert.equal(selectionExportSummary.rowCount, 5, 'example35 selection export should include selected rows only');
+  assert.ok(
+    selectionExportSummary.firstLine.includes('Customer-11\tactive'),
+    'example35 selection export should start from selected range'
+  );
+
+  const cancelSummary = await page.evaluate(async () => {
+    const api = window.__example35;
+    if (!api || typeof api.runCancelableAllExport !== 'function') {
+      throw new Error('Missing window.__example35.runCancelableAllExport');
+    }
+
+    const outcome = await api.runCancelableAllExport();
+    const snapshot = api.getSnapshot();
+    return {
+      canceled: outcome.result.canceled,
+      rowCount: outcome.result.rowCount,
+      status: outcome.progress.status,
+      processedRows: outcome.progress.processedRows,
+      totalRows: outcome.progress.totalRows,
+      preview: snapshot.preview
+    };
+  });
+
+  assert.equal(cancelSummary.canceled, true, 'example35 all export should support cancellation');
+  assert.ok(cancelSummary.rowCount >= 2000, 'example35 cancel path should process chunked rows before cancellation');
+  assert.ok(cancelSummary.rowCount < 30_000, 'example35 cancel path should stop before all rows');
+  assert.equal(cancelSummary.status, 'canceled', 'example35 cancel path should report canceled progress status');
+  assert.equal(cancelSummary.totalRows, 30_000, 'example35 should report total rows for all export progress');
+  assert.ok(cancelSummary.preview.startsWith('ID,Name,Status,Region,Score,Updated At'), 'example35 preview should show csv header');
 
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
@@ -3117,6 +3260,10 @@ async function main() {
     await runExample32Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample33Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample34Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample35Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

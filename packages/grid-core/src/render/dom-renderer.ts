@@ -13,7 +13,7 @@ import type {
   StateColumnRenderResult
 } from '../core/grid-options';
 import { formatColumnValue, getColumnValue } from '../data/column-model';
-import type { GridRowData, RowKey } from '../data/data-provider';
+import type { DataTransaction, GridRowData, RowKey } from '../data/data-provider';
 import {
   GROUP_ROW_COLUMN_ID_FIELD,
   GROUP_ROW_EXPANDED_FIELD,
@@ -162,6 +162,21 @@ interface EditSession {
   colIndex: number;
   column: ColumnDef;
   originalValue: unknown;
+}
+
+interface SelectionRectangle {
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+}
+
+interface ClipboardCellUpdate {
+  rowIndex: number;
+  dataIndex: number;
+  columnId: string;
+  previousValue: unknown;
+  value: unknown;
 }
 
 interface HeaderResizeHit {
@@ -422,6 +437,10 @@ export class DomRenderer {
     return this.selectionModel.getSelection();
   }
 
+  public getVisibleRowRange(): { startRow: number; endRow: number } | null {
+    return this.getViewportVisibleRowRange();
+  }
+
   public setSelection(selection: GridSelectionInput): void {
     const hasChanged = this.selectionModel.setSelection(selection, this.getSelectionBounds(), this.resolveRowKeyByRowIndex);
     if (!hasChanged) {
@@ -484,6 +503,8 @@ export class DomRenderer {
     this.headerElement.removeEventListener('pointerleave', this.handleHeaderPointerLeave);
     this.bodyElement.removeEventListener('wheel', this.handleBodyWheel);
     this.rootElement.removeEventListener('keydown', this.handleRootKeyDown);
+    this.rootElement.removeEventListener('copy', this.handleRootCopy);
+    this.rootElement.removeEventListener('paste', this.handleRootPaste);
     this.rootElement.removeEventListener('pointerdown', this.handleRootPointerDown);
     this.rootElement.removeEventListener('click', this.handleRootClick);
     this.rootElement.removeEventListener('dblclick', this.handleRootDoubleClick);
@@ -593,6 +614,8 @@ export class DomRenderer {
     this.headerElement.addEventListener('pointerleave', this.handleHeaderPointerLeave, { passive: true });
     this.bodyElement.addEventListener('wheel', this.handleBodyWheel, { passive: false });
     this.rootElement.addEventListener('keydown', this.handleRootKeyDown);
+    this.rootElement.addEventListener('copy', this.handleRootCopy);
+    this.rootElement.addEventListener('paste', this.handleRootPaste);
     this.rootElement.addEventListener('pointerdown', this.handleRootPointerDown);
     this.rootElement.addEventListener('click', this.handleRootClick);
     this.rootElement.addEventListener('dblclick', this.handleRootDoubleClick);
@@ -2603,6 +2626,218 @@ export class DomRenderer {
     return inputText;
   }
 
+  private sanitizeClipboardText(rawText: string): string {
+    return rawText.replace(/\u0000/g, '').replace(/\r\n?/g, '\n');
+  }
+
+  private parseClipboardTsv(rawText: string): string[][] {
+    const normalizedText = this.sanitizeClipboardText(rawText);
+    if (normalizedText.length === 0) {
+      return [];
+    }
+
+    const lines = normalizedText.split('\n');
+    while (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    const matrix: string[][] = [];
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      matrix.push(lines[lineIndex].split('\t'));
+    }
+
+    return matrix;
+  }
+
+  private resolvePrimarySelectionRectangle(): SelectionRectangle | null {
+    const bounds = this.getSelectionBounds();
+    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
+      return null;
+    }
+
+    const selection = this.selectionModel.getSelection();
+    const primaryRange = selection.cellRanges[0];
+    if (primaryRange) {
+      return {
+        startRow: Math.max(0, Math.min(primaryRange.r1, primaryRange.r2)),
+        endRow: Math.min(bounds.rowCount - 1, Math.max(primaryRange.r1, primaryRange.r2)),
+        startCol: Math.max(0, Math.min(primaryRange.c1, primaryRange.c2)),
+        endCol: Math.min(bounds.columnCount - 1, Math.max(primaryRange.c1, primaryRange.c2))
+      };
+    }
+
+    const activeCell = selection.activeCell ?? this.getInitialActiveCell();
+    if (!activeCell) {
+      return null;
+    }
+
+    const clampedCell = this.clampSelectionCell(activeCell);
+    return {
+      startRow: clampedCell.rowIndex,
+      endRow: clampedCell.rowIndex,
+      startCol: clampedCell.colIndex,
+      endCol: clampedCell.colIndex
+    };
+  }
+
+  private readCellTextForClipboard(rowIndex: number, colIndex: number): string {
+    const columnEntry = this.resolveColumnByGlobalIndex(colIndex);
+    if (!columnEntry) {
+      return '';
+    }
+
+    if (columnEntry.column.id === INDICATOR_ROW_NUMBER_COLUMN_ID) {
+      return String(rowIndex + 1);
+    }
+
+    if (this.isIndicatorCheckboxColumnId(columnEntry.column.id)) {
+      return this.selectionModel.isRowSelected(rowIndex) ? 'true' : 'false';
+    }
+
+    const dataIndex = this.options.rowModel.getDataIndex(rowIndex);
+    if (dataIndex < 0) {
+      return '';
+    }
+
+    const row = this.resolveRow(dataIndex);
+    return formatColumnValue(columnEntry.column, row);
+  }
+
+  private buildSelectionTsv(): string | null {
+    const selectionRectangle = this.resolvePrimarySelectionRectangle();
+    if (!selectionRectangle) {
+      return null;
+    }
+
+    const lines: string[] = [];
+    for (let rowIndex = selectionRectangle.startRow; rowIndex <= selectionRectangle.endRow; rowIndex += 1) {
+      const cells: string[] = [];
+      for (let colIndex = selectionRectangle.startCol; colIndex <= selectionRectangle.endCol; colIndex += 1) {
+        cells.push(this.readCellTextForClipboard(rowIndex, colIndex));
+      }
+      lines.push(cells.join('\t'));
+    }
+
+    return lines.join('\n');
+  }
+
+  private writeTextToClipboard(text: string): boolean {
+    const navigatorClipboard = navigator.clipboard;
+    if (!navigatorClipboard || typeof navigatorClipboard.writeText !== 'function') {
+      return false;
+    }
+
+    void navigatorClipboard.writeText(text).catch(() => undefined);
+    return true;
+  }
+
+  private resolvePasteValue(column: ColumnDef, row: GridRowData, dataIndex: number, inputText: string): unknown {
+    const normalizedValue = this.normalizeEditorInputValue(column, inputText);
+    if (!column.valueSetter) {
+      return normalizedValue;
+    }
+
+    const rowForSetter = this.options.dataProvider.getRow ? this.options.dataProvider.getRow(dataIndex) ?? row : row;
+    column.valueSetter(rowForSetter, normalizedValue, column);
+    return getColumnValue(column, rowForSetter);
+  }
+
+  private applyClipboardMatrix(matrix: string[][]): ClipboardCellUpdate[] {
+    const selectionRectangle = this.resolvePrimarySelectionRectangle();
+    if (!selectionRectangle || matrix.length === 0) {
+      return [];
+    }
+
+    let sourceColumnCount = 0;
+    for (let rowIndex = 0; rowIndex < matrix.length; rowIndex += 1) {
+      sourceColumnCount = Math.max(sourceColumnCount, matrix[rowIndex].length);
+    }
+    if (sourceColumnCount <= 0) {
+      return [];
+    }
+
+    const selectedRowCount = selectionRectangle.endRow - selectionRectangle.startRow + 1;
+    const selectedColCount = selectionRectangle.endCol - selectionRectangle.startCol + 1;
+    const shouldFillSelection = matrix.length === 1 && sourceColumnCount === 1 && (selectedRowCount > 1 || selectedColCount > 1);
+    const destinationRowCount = shouldFillSelection ? selectedRowCount : matrix.length;
+    const destinationColCount = shouldFillSelection ? selectedColCount : sourceColumnCount;
+    const selectionBounds = this.getSelectionBounds();
+
+    const transactions: DataTransaction[] = [];
+    const updates: ClipboardCellUpdate[] = [];
+
+    for (let rowOffset = 0; rowOffset < destinationRowCount; rowOffset += 1) {
+      const rowIndex = selectionRectangle.startRow + rowOffset;
+      if (rowIndex < 0 || rowIndex >= selectionBounds.rowCount) {
+        break;
+      }
+
+      const dataIndex = this.options.rowModel.getDataIndex(rowIndex);
+      if (dataIndex < 0) {
+        continue;
+      }
+
+      const row = this.resolveRow(dataIndex);
+      if (isGroupRowData(row)) {
+        continue;
+      }
+
+      for (let colOffset = 0; colOffset < destinationColCount; colOffset += 1) {
+        const colIndex = selectionRectangle.startCol + colOffset;
+        if (colIndex < 0 || colIndex >= selectionBounds.columnCount) {
+          break;
+        }
+
+        const columnEntry = this.resolveColumnByGlobalIndex(colIndex);
+        if (!columnEntry) {
+          continue;
+        }
+
+        const column = columnEntry.column;
+        if (!column.editable) {
+          continue;
+        }
+
+        const sourceRow = shouldFillSelection ? 0 : rowOffset;
+        const sourceCol = shouldFillSelection ? 0 : colOffset;
+        const inputText = matrix[sourceRow]?.[sourceCol];
+        if (typeof inputText !== 'string') {
+          continue;
+        }
+
+        const previousValue = getColumnValue(column, row);
+        const nextValue = this.resolvePasteValue(column, row, dataIndex, inputText);
+        if (Object.is(previousValue, nextValue)) {
+          continue;
+        }
+
+        transactions.push({
+          type: 'updateCell',
+          index: dataIndex,
+          columnId: column.id,
+          value: nextValue
+        });
+        updates.push({
+          rowIndex,
+          dataIndex,
+          columnId: column.id,
+          previousValue,
+          value: nextValue
+        });
+      }
+    }
+
+    if (transactions.length === 0) {
+      return [];
+    }
+
+    this.options.dataProvider.applyTransactions(transactions);
+    this.markDataDirty();
+    this.scheduleRender();
+
+    return updates;
+  }
+
   private startEditingAtCell(
     rowIndex: number,
     colIndex: number,
@@ -4447,6 +4682,10 @@ export class DomRenderer {
       return;
     }
 
+    if (this.handleClipboardCopyShortcut(event)) {
+      return;
+    }
+
     if (event.key === ' ' || event.key === 'Spacebar' || event.key === 'Space') {
       const currentSelection = this.selectionModel.getSelection();
       const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
@@ -4516,6 +4755,82 @@ export class DomRenderer {
       this.scheduleRender();
     }
 
+    event.preventDefault();
+  };
+
+  private handleClipboardCopyShortcut(event: KeyboardEvent): boolean {
+    const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+    if (!isCtrlOrMeta || event.altKey) {
+      return false;
+    }
+
+    if (event.key.toLowerCase() !== 'c') {
+      return false;
+    }
+
+    const selectionTsv = this.buildSelectionTsv();
+    if (selectionTsv === null) {
+      return false;
+    }
+
+    if (!this.writeTextToClipboard(selectionTsv)) {
+      return false;
+    }
+
+    event.preventDefault();
+    return true;
+  }
+
+  private handleRootCopy = (event: ClipboardEvent): void => {
+    if (event.defaultPrevented || this.editSession) {
+      return;
+    }
+
+    const selectionTsv = this.buildSelectionTsv();
+    if (selectionTsv === null) {
+      return;
+    }
+
+    if (event.clipboardData) {
+      event.clipboardData.setData('text/plain', selectionTsv);
+      event.preventDefault();
+      return;
+    }
+
+    if (this.writeTextToClipboard(selectionTsv)) {
+      event.preventDefault();
+    }
+  };
+
+  private handleRootPaste = (event: ClipboardEvent): void => {
+    if (event.defaultPrevented || this.editSession) {
+      return;
+    }
+
+    const clipboardData = event.clipboardData;
+    if (!clipboardData) {
+      return;
+    }
+
+    const plainText = clipboardData.getData('text/plain');
+    if (typeof plainText !== 'string' || plainText.length === 0) {
+      return;
+    }
+
+    const matrix = this.parseClipboardTsv(plainText);
+    const updates = this.applyClipboardMatrix(matrix);
+    if (updates.length === 0) {
+      return;
+    }
+
+    const firstUpdate = updates[0];
+    this.eventBus.emit('editCommit', {
+      rowIndex: firstUpdate.rowIndex,
+      dataIndex: firstUpdate.dataIndex,
+      columnId: firstUpdate.columnId,
+      previousValue: firstUpdate.previousValue,
+      value: firstUpdate.value
+    });
     event.preventDefault();
   };
 

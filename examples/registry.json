@@ -378,6 +378,35 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 34,
+      "file": "example34.html",
+      "title": "Example 34 - Clipboard TSV",
+      "tags": [
+        "phase10",
+        "clipboard",
+        "copy",
+        "paste",
+        "tsv",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 35,
+      "file": "example35.html",
+      "title": "Example 35 - CSV TSV Export",
+      "tags": [
+        "phase10",
+        "csv",
+        "tsv",
+        "export",
+        "progress",
+        "cancel",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

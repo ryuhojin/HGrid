@@ -136,6 +136,50 @@ function waitForFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+function createClipboardEvent(
+  type: 'copy' | 'paste',
+  initialData: Record<string, string> = {}
+): { event: ClipboardEvent; getData: (mimeType: string) => string } {
+  const store = new Map<string, string>();
+  for (const mimeType in initialData) {
+    if (Object.prototype.hasOwnProperty.call(initialData, mimeType)) {
+      store.set(mimeType, initialData[mimeType]);
+    }
+  }
+
+  const event = new Event(type, {
+    bubbles: true,
+    cancelable: true
+  }) as ClipboardEvent;
+
+  Object.defineProperty(event, 'clipboardData', {
+    configurable: true,
+    value: {
+      getData(mimeType: string) {
+        return store.get(mimeType) ?? '';
+      },
+      setData(mimeType: string, value: string) {
+        store.set(mimeType, value);
+      },
+      clearData(mimeType?: string) {
+        if (typeof mimeType === 'string') {
+          store.delete(mimeType);
+          return;
+        }
+
+        store.clear();
+      }
+    }
+  });
+
+  return {
+    event,
+    getData(mimeType: string) {
+      return store.get(mimeType) ?? '';
+    }
+  };
+}
+
 function parseTranslateY(transformValue: string): number {
   const match = transformValue.match(/translate3d\(([-\d.]+)(?:px)?,\s*([-\d.]+)(?:px)?,\s*0(?:px)?\)/);
   if (!match) {
@@ -1884,6 +1928,244 @@ describe('Grid DOM pooling', () => {
     await waitForFrame();
     const homeSelection = grid.getSelection();
     expect(homeSelection.activeCell).toEqual({ rowIndex: 0, colIndex: 0 });
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('copies selected cell range as TSV through clipboard event', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 200, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', status: 'active' },
+        { id: 2, name: 'Beta', status: 'idle' }
+      ],
+      height: 160,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 0 },
+      cellRanges: [{ r1: 0, c1: 0, r2: 1, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    const clipboard = createClipboardEvent('copy');
+    const dispatchResult = root.dispatchEvent(clipboard.event);
+
+    expect(dispatchResult).toBe(false);
+    expect(clipboard.event.defaultPrevented).toBe(true);
+    expect(clipboard.getData('text/plain')).toBe('1\tAlpha\n2\tBeta');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('pastes plain TSV into editable cells and does not render HTML from clipboard', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 140, type: 'text', editable: true }
+      ],
+      rowData: [
+        { id: 1, name: 'User-1', status: 'idle' },
+        { id: 2, name: 'User-2', status: 'idle' }
+      ],
+      height: 180,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 2 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    const clipboard = createClipboardEvent('paste', {
+      'text/plain': '<b>Safe</b>\tactive\nLiteral\tidle',
+      'text/html': '<table><tr><td><b>Unsafe</b></td><td>active</td></tr></table>'
+    });
+    const dispatchResult = root.dispatchEvent(clipboard.event);
+    await waitForFrame();
+
+    expect(dispatchResult).toBe(false);
+    expect(clipboard.event.defaultPrevented).toBe(true);
+
+    const firstNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    const firstStatusCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="status"]'
+    ) as HTMLDivElement;
+    const secondNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    const secondStatusCell = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="status"]'
+    ) as HTMLDivElement;
+
+    expect(firstNameCell.textContent).toBe('<b>Safe</b>');
+    expect(firstNameCell.querySelector('b')).toBeNull();
+    expect(firstStatusCell.textContent).toBe('active');
+    expect(secondNameCell.textContent).toBe('Literal');
+    expect(secondStatusCell.textContent).toBe('idle');
+
+    const firstIdCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="id"]'
+    ) as HTMLDivElement;
+    expect(firstIdCell.textContent).toBe('1');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('exports visible rows as CSV with headers', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: Array.from({ length: 120 }, (_value, index) => ({
+        id: index + 1,
+        name: `User-${index + 1}`,
+        status: index % 2 === 0 ? 'active' : 'idle'
+      })),
+      height: 168,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    const verticalScrollElement = getVerticalScrollElement(container);
+    verticalScrollElement.scrollTop = 28 * 20;
+    verticalScrollElement.dispatchEvent(new Event('scroll'));
+    await waitForFrame();
+
+    const result = await grid.exportCsv({ scope: 'visible' });
+    const lines = result.content.split('\n');
+
+    expect(result.format).toBe('csv');
+    expect(result.scope).toBe('visible');
+    expect(result.canceled).toBe(false);
+    expect(result.rowCount).toBeGreaterThan(0);
+    expect(result.rowCount).toBeLessThan(120);
+    expect(lines[0]).toBe('ID,Name,Status');
+    const firstVisibleId = Number(lines[1].split(',')[0]);
+    expect(firstVisibleId).toBeGreaterThan(1);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('exports selection range as TSV', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', status: 'active' },
+        { id: 2, name: 'Beta', status: 'idle' },
+        { id: 3, name: 'Gamma', status: 'active' }
+      ],
+      height: 160,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 2 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const result = await grid.exportTsv({
+      scope: 'selection',
+      includeHeaders: false
+    });
+
+    expect(result.format).toBe('tsv');
+    expect(result.scope).toBe('selection');
+    expect(result.rowCount).toBe(2);
+    expect(result.content).toBe('Alpha\tactive\nBeta\tidle');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('supports all-row CSV export progress and cancellation via AbortSignal', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' }
+      ],
+      rowData: Array.from({ length: 5000 }, (_value, index) => ({
+        id: index + 1,
+        name: `User-${index + 1}`
+      })),
+      height: 200,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    const controller = new AbortController();
+    const progressEvents: Array<{ status: string; processedRows: number; totalRows: number }> = [];
+    const result = await grid.exportCsv({
+      scope: 'all',
+      chunkSize: 200,
+      signal: controller.signal,
+      onProgress(event) {
+        progressEvents.push({
+          status: event.status,
+          processedRows: event.processedRows,
+          totalRows: event.totalRows
+        });
+
+        if (event.status === 'running' && event.processedRows >= 1000 && !controller.signal.aborted) {
+          controller.abort();
+        }
+      }
+    });
+
+    expect(result.scope).toBe('all');
+    expect(result.canceled).toBe(true);
+    expect(result.rowCount).toBeGreaterThanOrEqual(1000);
+    expect(result.rowCount).toBeLessThan(5000);
+    expect(progressEvents.length).toBeGreaterThan(1);
+    expect(progressEvents[progressEvents.length - 1].status).toBe('canceled');
+    expect(progressEvents[progressEvents.length - 1].totalRows).toBe(5000);
+
+    const exportedLines = result.content.split('\n');
+    expect(exportedLines[0]).toBe('ID,Name');
+    expect(exportedLines.length).toBe(result.rowCount + 1);
 
     grid.destroy();
     container.remove();

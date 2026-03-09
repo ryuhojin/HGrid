@@ -937,25 +937,58 @@
 
 # Phase 14 — Performance Benchmarks & Regression Gates (반드시 CI에 포함)
 ## 14.1 참조 디바이스/브라우저 정의(내부 기준)
-- [ ] 기준 환경 문서화(예: Chrome 최신 / Windows 11 / i5급 또는 Mac M1급)
-- [ ] 벤치 데이터 생성 스크립트 제공
+- [x] 기준 환경 문서화(예: Chrome 최신 / Windows 11 / i5급 또는 Mac M1급)
+- [x] 벤치 데이터 생성 스크립트 제공
+
+### 코어 변경 코멘트 (14.1 반영, 2026-03-09)
+- 참조 환경 문서 추가:
+  - `docs/perf-reference-env-phase14.md`에 Primary(macOS/M1)/Secondary(Windows/i5급) 기준 명시
+  - 실행 프로토콜(재부팅/백그라운드 앱 종료/3회 median) 정의
+- 벤치 데이터 생성 스크립트 제공:
+  - `scripts/generate-bench-data.mjs`
+  - deterministic dataset 생성(`--rows`, `--seed`, `--out`)
+  - 루트 스크립트 `pnpm bench:data` 추가
 
 ## 14.2 벤치 시나리오
-- [ ] initial render: 100k / 1M
-- [ ] scroll FPS: 1M (rowHeight=24, overscan=10)
-- [ ] 100M row model: scroll scaling 매핑 정확성 + 반응성
-- [ ] sort 1M (worker): UI freeze 없는지
-- [ ] filter 1M (worker): UI freeze 없는지
-- [ ] create/destroy 200회: 메모리 누수/이벤트 누수 없음
+- [x] initial render: 100k / 1M
+- [x] scroll FPS: 1M (rowHeight=24, overscan=10)
+- [x] 100M row model: scroll scaling 매핑 정확성 + 반응성
+- [x] sort 1M (worker): UI freeze 없는지
+- [x] filter 1M (worker): UI freeze 없는지
+- [x] create/destroy 200회: 메모리 누수/이벤트 누수 없음
 - [ ] 스크롤 회귀:
-  - [ ] 고속 가로 왕복 스크롤 10초 동안 header/body transform mismatch 0
-  - [ ] pinned 상태에서 휠 스크롤 5천회 입력 후 scroll source 불일치 0
+  - [x] 고속 가로 왕복 스크롤 10초 동안 header/body transform mismatch 0
+  - [x] pinned 상태에서 휠 스크롤 5천회 입력 후 scroll source 불일치 0
   - [ ] macOS/Windows 각 1종에서 스크롤바 가시성/클릭 이동 동작 기록
 
+### 코어 변경 코멘트 (14.2 반영, 2026-03-09)
+- 벤치 러너 확장:
+  - `tests/fixtures/bench-phase14.html`, `tests/fixtures/bench-phase14.js`
+  - `scripts/bench.mjs`가 14.2 전체 자동 시나리오 실행/검증/요약(JSON out) 지원
+- 자동화 시나리오:
+  - initial render(100k/1M), scroll FPS(1M), 100M mapping/드리프트
+  - sort/filter 1M UI gap(max gap) 측정
+  - create/destroy 200 스모크(잔존 DOM/window listener add/remove 통계)
+  - 스크롤 회귀(10초 transform mismatch, pinned wheel 5k mismatch)
+- 문서화:
+  - `docs/perf-bench-scenarios-phase14.md`
+  - macOS/Windows 별 `scrollbarRecord` 저장 절차 명시 (실행 기록은 환경별 별도 수행 필요)
+
 ## 14.3 게이트 기준(예시 — 팀 상황에 맞게 숫자 조정 가능)
-- [ ] 스크롤 중 long task(>50ms) 발생률 임계치 이하
-- [ ] 프레임 타임 p95 < 20ms (참조 환경)
-- [ ] DOM node count 고정(풀 크기 변동 없음)
+- [x] 스크롤 중 long task(>50ms) 발생률 임계치 이하
+- [x] 프레임 타임 p95 < 20ms (참조 환경)
+- [x] DOM node count 고정(풀 크기 변동 없음)
+
+### 코어 변경 코멘트 (14.3 반영, 2026-03-09)
+- `scripts/bench.mjs` 게이트 상수/검증 로직 확정:
+  - `maxScrollLongTaskRate = 0.03`
+  - `maxScrollP95Ms = 20`
+  - `scrollFps1m.domNodeCountFixed === true` 강제
+- `tests/fixtures/bench-phase14.js`의 `scrollFps1m` 결과 확장:
+  - `longTaskRate`, `domNodeCountFixed`
+  - `poolRowsMin/max`, `poolCellsMin/max`, `poolSampleCount`
+- 문서:
+  - `docs/perf-bench-scenarios-phase14.md`에 14.3 게이트값 명시
 
 ---
 

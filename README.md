@@ -3,10 +3,10 @@
 HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 데이터 그리드**입니다.
 `Canvas/WebGL/OffscreenCanvas` 없이 대용량(10M~100M) 스크롤, pinned 컬럼, 수직/수평 가상화, 풀링 렌더를 제공합니다.
 
-## 프로젝트 상태 (2026-03-06)
+## 프로젝트 상태 (2026-03-09)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`, `Phase 10.1~10.4`, `Phase 11.1~11.3`, `Phase 12.1~12.4`, `Phase 13.1~13.3`
-- 다음 범위: `Phase 14+` (benchmark gates, release readiness)
+- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`, `Phase 10.1~10.4`, `Phase 11.1~11.3`, `Phase 12.1~12.4`, `Phase 13.1~13.3`, `Phase 14.1~14.3(자동 게이트)`
+- 다음 범위: `Phase 14.2 OS 기록 보강 + Phase 15` (release readiness)
 - 상세 기준: `checklist.md`
 
 구현 완료 핵심:
@@ -39,6 +39,9 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Keyboard-only pipeline (navigation/selection/editing, `Ctrl/Cmd+A`, `F2`, editor `Tab/Shift+Tab`)
 - i18n pipeline (`localeText` externalization, Intl number/date formatting, RTL direction option)
 - Security/CSP hardening (`unsafeHtml` opt-in + sanitize hook, `editCommit` audit payload 표준화, CSP/정적 보안 스캔)
+- Performance baseline policy (`Phase 14.1` 참조 환경 문서화 + 벤치 데이터 생성 스크립트)
+- Performance scenarios (`Phase 14.2` initial render/FPS/100M mapping/sort/filter/create-destroy/scroll regression)
+- Performance gates (`Phase 14.3` long-task rate/p95/dom-pool 고정 기준 강제)
 
 ## 핵심 원칙
 
@@ -260,8 +263,15 @@ await excel.importXlsx(grid, file, {
 - `pnpm verify:examples`
 - `pnpm new:example`
 - `pnpm check:naming`
+- `pnpm bench:data`
 - `pnpm bench`
 - `pnpm ci:phase0`
+
+벤치 결과 파일 저장:
+
+```bash
+pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
+```
 
 ## Examples (현재 1~41)
 
@@ -344,6 +354,8 @@ await excel.importXlsx(grid, file, {
 - `docs/keyboard-only-phase12.md`
 - `docs/i18n-phase12.md`
 - `docs/security-csp-phase13.md`
+- `docs/perf-reference-env-phase14.md`
+- `docs/perf-bench-scenarios-phase14.md`
 
 ## 라이선스
 

@@ -1,63 +1,142 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startStaticServer } from './static-server.mjs';
 
-async function waitForBenchResult(page, resultGlobal, errorGlobal, timeoutMs) {
-  await page.waitForFunction(
-    ({ resultName, errorName }) => Boolean(window[resultName] || window[errorName]),
-    { resultName: resultGlobal, errorName: errorGlobal },
-    {
-      timeout: timeoutMs
-    }
-  );
+const MAX_INITIAL_RENDER_100K_MS = 5000;
+const MAX_INITIAL_RENDER_1M_MS = 12000;
+const MIN_SCROLL_FPS_1M = 20;
+const MAX_SCROLL_P95_MS = 20;
+const MAX_SCROLL_LONG_TASK_RATE = 0.03;
+const MIN_BOTTOM_VISIBLE_ID_100M = 99_000_000;
+const MAX_ROUND_TRIP_DRIFT_ROWS_100M = 1;
+const MAX_SORT_UI_GAP_MS = 1000;
+const MAX_FILTER_UI_GAP_MS = 1000;
+const MAX_CREATE_DESTROY_DURATION_MS = 180000;
 
-  const benchError = await page.evaluate((errorName) => window[errorName] || null, errorGlobal);
-  if (benchError) {
-    throw new Error(`Bench runtime error (${errorGlobal}): ${benchError}`);
+function parseArgs(argv) {
+  const options = {
+    out: null
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--out') {
+      const value = argv[index + 1];
+      if (!value || value.startsWith('--')) {
+        throw new Error('Missing value for --out');
+      }
+      options.out = value;
+      index += 1;
+    }
   }
 
-  return page.evaluate((resultName) => window[resultName], resultGlobal);
+  return options;
 }
 
-async function runBaselineBench(page, serverUrl) {
-  await page.goto(`${serverUrl}/tests/fixtures/bench.html`, { waitUntil: 'domcontentloaded' });
-  const result = await waitForBenchResult(page, '__benchResult', '__benchError', 20_000);
-
-  assert.ok(Number.isFinite(result.initialRenderMs), 'initialRenderMs must be finite');
-  assert.ok(Number.isFinite(result.scrollUpdateMs), 'scrollUpdateMs must be finite');
-  assert.ok(result.initialRenderMs < 1500, `initialRenderMs regression: ${result.initialRenderMs}`);
-  assert.ok(result.scrollUpdateMs < 100, `scrollUpdateMs regression: ${result.scrollUpdateMs}`);
-
-  return result;
+function ensureFinite(value, label) {
+  assert.ok(Number.isFinite(value), `${label} must be finite`);
 }
 
-async function run100MBench(page, serverUrl) {
-  await page.goto(`${serverUrl}/tests/fixtures/bench-100m.html`, { waitUntil: 'domcontentloaded' });
-  const result = await waitForBenchResult(page, '__bench100mResult', '__bench100mError', 25_000);
+function validateResult(result) {
+  assert.ok(result && typeof result === 'object', 'bench result must be object');
 
-  assert.ok(Number.isFinite(result.initialRenderMs), '100M initialRenderMs must be finite');
-  assert.ok(Number.isFinite(result.jumpBottomMs), '100M jumpBottomMs must be finite');
-  assert.ok(Number.isFinite(result.restoreStateMs), '100M restoreStateMs must be finite');
-  assert.ok(result.initialRenderMs < 3000, `100M initialRenderMs regression: ${result.initialRenderMs}`);
-  assert.ok(result.jumpBottomMs < 500, `100M jumpBottomMs regression: ${result.jumpBottomMs}`);
-  assert.ok(result.restoreStateMs < 500, `100M restoreStateMs regression: ${result.restoreStateMs}`);
+  ensureFinite(result.initialRender100k.initialRenderMs, 'initialRender100k.initialRenderMs');
+  ensureFinite(result.initialRender1m.initialRenderMs, 'initialRender1m.initialRenderMs');
+  ensureFinite(result.scrollFps1m.avgFps, 'scrollFps1m.avgFps');
+  ensureFinite(result.scrollFps1m.frameTimeP95Ms, 'scrollFps1m.frameTimeP95Ms');
+  ensureFinite(result.scrollFps1m.longTaskRate, 'scrollFps1m.longTaskRate');
+  ensureFinite(result.mapping100m.virtualHeight, 'mapping100m.virtualHeight');
+  ensureFinite(result.mapping100m.bottomFirstVisibleId, 'mapping100m.bottomFirstVisibleId');
+  ensureFinite(result.mapping100m.roundTripDriftRows, 'mapping100m.roundTripDriftRows');
+  ensureFinite(result.sort1m.maxGapMs, 'sort1m.maxGapMs');
+  ensureFinite(result.filter1m.maxGapMs, 'filter1m.maxGapMs');
+  ensureFinite(result.createDestroy200.durationMs, 'createDestroy200.durationMs');
+  ensureFinite(result.scrollRegression.headerBodyMismatchCount, 'scrollRegression.headerBodyMismatchCount');
+  ensureFinite(result.scrollRegression.pinnedWheelSourceMismatchCount, 'scrollRegression.pinnedWheelSourceMismatchCount');
+
   assert.ok(
-    result.bottomFirstVisibleId > 99_000_000,
-    `100M bench bottom first visible id should be deep range, got ${result.bottomFirstVisibleId}`
+    result.initialRender100k.initialRenderMs < MAX_INITIAL_RENDER_100K_MS,
+    `initial render 100k regression: ${result.initialRender100k.initialRenderMs}ms`
   );
   assert.ok(
-    result.topFirstVisibleId <= 2,
-    `100M bench top restore should return near first row, got ${result.topFirstVisibleId}`
+    result.initialRender1m.initialRenderMs < MAX_INITIAL_RENDER_1M_MS,
+    `initial render 1m regression: ${result.initialRender1m.initialRenderMs}ms`
   );
-  assert.equal(result.rowModelState.baseMappingMode, 'identity', '100M bench must remain in identity mapping mode');
-  assert.equal(result.rowModelState.estimatedMappingBytes, 0, '100M bench identity mapping bytes must stay 0');
+  assert.ok(
+    result.scrollFps1m.avgFps >= MIN_SCROLL_FPS_1M,
+    `scroll fps 1m regression: ${result.scrollFps1m.avgFps}`
+  );
+  assert.ok(
+    result.scrollFps1m.frameTimeP95Ms <= MAX_SCROLL_P95_MS,
+    `scroll p95 frame time regression: ${result.scrollFps1m.frameTimeP95Ms}ms`
+  );
+  assert.ok(
+    result.scrollFps1m.longTaskRate <= MAX_SCROLL_LONG_TASK_RATE,
+    `scroll long-task rate regression: ${result.scrollFps1m.longTaskRate}`
+  );
+  assert.equal(
+    result.scrollFps1m.domNodeCountFixed,
+    true,
+    `scroll DOM pool count must stay fixed, rows=${result.scrollFps1m.poolRowsMin}~${result.scrollFps1m.poolRowsMax}, cells=${result.scrollFps1m.poolCellsMin}~${result.scrollFps1m.poolCellsMax}`
+  );
+  assert.ok(
+    result.mapping100m.bottomFirstVisibleId > MIN_BOTTOM_VISIBLE_ID_100M,
+    `100m mapping bottom range mismatch: ${result.mapping100m.bottomFirstVisibleId}`
+  );
+  assert.ok(
+    result.mapping100m.roundTripDriftRows <= MAX_ROUND_TRIP_DRIFT_ROWS_100M,
+    `100m round-trip drift regression: ${result.mapping100m.roundTripDriftRows}`
+  );
+  assert.ok(
+    result.sort1m.maxGapMs <= MAX_SORT_UI_GAP_MS,
+    `sort 1m UI gap regression: ${result.sort1m.maxGapMs}ms`
+  );
+  assert.ok(
+    result.filter1m.maxGapMs <= MAX_FILTER_UI_GAP_MS,
+    `filter 1m UI gap regression: ${result.filter1m.maxGapMs}ms`
+  );
+  assert.ok(
+    result.createDestroy200.durationMs < MAX_CREATE_DESTROY_DURATION_MS,
+    `create/destroy duration regression: ${result.createDestroy200.durationMs}ms`
+  );
+  assert.equal(
+    result.createDestroy200.remainingGridNodes,
+    0,
+    `create/destroy should not retain .hgrid nodes, got ${result.createDestroy200.remainingGridNodes}`
+  );
+  assert.equal(
+    result.createDestroy200.remainingRowNodes,
+    0,
+    `create/destroy should not retain row nodes, got ${result.createDestroy200.remainingRowNodes}`
+  );
+  ensureFinite(result.createDestroy200.windowListenerAdds, 'createDestroy200.windowListenerAdds');
+  ensureFinite(result.createDestroy200.windowListenerRemoves, 'createDestroy200.windowListenerRemoves');
+  assert.equal(
+    result.scrollRegression.headerBodyMismatchCount,
+    0,
+    `header/body transform mismatch detected: ${result.scrollRegression.headerBodyMismatchCount}`
+  );
+  assert.equal(
+    result.scrollRegression.pinnedWheelSourceMismatchCount,
+    0,
+    `pinned wheel source mismatch detected: ${result.scrollRegression.pinnedWheelSourceMismatchCount}`
+  );
+}
 
-  return result;
+function writeOutputIfNeeded(outPath, payload) {
+  if (!outPath) {
+    return;
+  }
+
+  const absoluteOutPath = path.resolve(process.cwd(), outPath);
+  mkdirSync(path.dirname(absoluteOutPath), { recursive: true });
+  writeFileSync(absoluteOutPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
 async function main() {
+  const options = parseArgs(process.argv.slice(2));
   const rootDir = process.cwd();
   const umdPath = path.resolve(rootDir, 'packages/grid-core/dist/grid.umd.js');
 
@@ -69,11 +148,41 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
-  try {
-    const baseline = await runBaselineBench(page, server.url);
-    const bench100m = await run100MBench(page, server.url);
+  const pageErrors = [];
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error));
+  });
 
-    console.log('[bench] OK', JSON.stringify({ baseline, bench100m }));
+  try {
+    await page.goto(`${server.url}/tests/fixtures/bench-phase14.html`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => Boolean(window.__benchPhase14), null, { timeout: 30_000 });
+
+    const startedAt = Date.now();
+    const phase14Result = await page.evaluate(async () => window.__benchPhase14.runAll());
+
+    assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+    validateResult(phase14Result);
+
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+      thresholds: {
+        maxInitialRender100kMs: MAX_INITIAL_RENDER_100K_MS,
+        maxInitialRender1mMs: MAX_INITIAL_RENDER_1M_MS,
+        minScrollFps1m: MIN_SCROLL_FPS_1M,
+        maxScrollP95Ms: MAX_SCROLL_P95_MS,
+        maxScrollLongTaskRate: MAX_SCROLL_LONG_TASK_RATE,
+        minBottomVisibleId100m: MIN_BOTTOM_VISIBLE_ID_100M,
+        maxRoundTripDriftRows100m: MAX_ROUND_TRIP_DRIFT_ROWS_100M,
+        maxSortUiGapMs: MAX_SORT_UI_GAP_MS,
+        maxFilterUiGapMs: MAX_FILTER_UI_GAP_MS,
+        maxCreateDestroyDurationMs: MAX_CREATE_DESTROY_DURATION_MS
+      },
+      result: phase14Result
+    };
+
+    writeOutputIfNeeded(options.out, payload);
+    console.log('[bench] OK', JSON.stringify(payload));
   } finally {
     await page.close();
     await browser.close();

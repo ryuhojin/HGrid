@@ -72,9 +72,9 @@
 
 ## E0.2 DomRenderer 분해
 - [ ] `DomRenderer`를 책임별 모듈로 분리
-  - [ ] layout/metrics
+  - [x] layout/metrics
   - [ ] row/cell pooling
-  - [ ] header interactions
+  - [x] header interactions
   - [ ] editor overlay
   - [ ] a11y sync
   - [ ] clipboard/selection render
@@ -91,9 +91,9 @@
 
 ### 변경 대상
 - [x] `packages/grid-core/src/core/grid.ts`
-- [ ] `packages/grid-core/src/render/dom-renderer.ts`
+- [x] `packages/grid-core/src/render/dom-renderer.ts`
 - [x] `packages/grid-core/src/core/*`
-- [ ] `packages/grid-core/src/render/*`
+- [x] `packages/grid-core/src/render/*`
 
 ### 수용 기준
 - [ ] `grid.ts`, `dom-renderer.ts` 단일 파일 비대화가 해소된다.

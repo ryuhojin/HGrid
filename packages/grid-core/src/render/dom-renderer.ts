@@ -10,7 +10,6 @@ import type {
   RowIndicatorOptions,
   RowStatusTone,
   ScrollbarPolicy,
-  ScrollbarVisibility,
   StateColumnRenderResult,
   UnsafeHtmlSanitizeContext
 } from '../core/grid-options';
@@ -50,13 +49,35 @@ import {
   type SelectionRowRangeInput
 } from '../interaction/selection-model';
 import {
-  MAX_SCROLL_PX,
-  createScrollScaleMetrics,
   mapPhysicalToVirtualScrollTop,
   mapVirtualToPhysicalScrollTop
 } from '../virtualization/scroll-scaling';
 import { RowHeightMap } from '../virtualization/row-height-map';
 import type { EditCommitEventPayload, EditCommitSource } from '../core/edit-events';
+import {
+  calculateMaxHorizontalScrollLeft,
+  calculateScrollScaleLayoutMetrics,
+  calculateZoneLayoutMetrics,
+  sumColumnWidths,
+  toCssOverflowValue,
+  type ScrollbarSize
+} from './dom-renderer-layout-metrics';
+import {
+  buildReorderedColumnOrder,
+  clampHeaderDropIndicatorOffset,
+  createColumnReorderSession,
+  createColumnResizeSession,
+  createHeaderDropTarget,
+  findVisibleColumnById,
+  getVisibleColumnIndexById,
+  isHeaderResizeHandleHit,
+  normalizeDropIndexForSource,
+  resolveNextColumnResizeWidth,
+  type ColumnReorderSession,
+  type ColumnResizeSession,
+  type HeaderDropTarget,
+  type HeaderResizeHit
+} from './dom-renderer-header-interactions';
 
 type ColumnZoneName = 'left' | 'center' | 'right';
 
@@ -115,11 +136,6 @@ interface RowPoolItem {
   left: ZoneRowItem;
   center: ZoneRowItem;
   right: ZoneRowItem;
-}
-
-interface ScrollbarSize {
-  vertical: number;
-  horizontal: number;
 }
 
 interface HorizontalWindow {
@@ -203,40 +219,6 @@ interface ClipboardCellUpdate {
   columnId: string;
   previousValue: unknown;
   value: unknown;
-}
-
-interface HeaderResizeHit {
-  columnId: string;
-  column: ColumnDef;
-  headerCell: HTMLDivElement;
-}
-
-interface ColumnResizeSession {
-  pointerId: number;
-  columnId: string;
-  startClientX: number;
-  startWidth: number;
-  minWidth: number;
-  maxWidth: number;
-  pendingClientX: number;
-  lastEmittedWidth: number;
-}
-
-interface HeaderDropTarget {
-  dropIndex: number;
-  targetColumnId: string | null;
-  indicatorClientX: number;
-}
-
-interface ColumnReorderSession {
-  pointerId: number;
-  sourceColumnId: string;
-  sourceIndex: number;
-  pendingClientX: number;
-  pendingClientY: number;
-  pendingTarget: EventTarget | null;
-  currentDropIndex: number;
-  currentTargetColumnId: string | null;
 }
 
 const DEFAULT_HEIGHT = 360;
@@ -1750,9 +1732,9 @@ export class DomRenderer {
 
   private rebuildPool(): void {
     const desiredPoolSize = this.getPoolSize();
-    const leftWidth = this.getColumnsWidth(this.columnsByZone.left);
+    const leftWidth = sumColumnWidths(this.columnsByZone.left);
     const centerWidth = this.centerColumnsWidth;
-    const rightWidth = this.getColumnsWidth(this.columnsByZone.right);
+    const rightWidth = sumColumnWidths(this.columnsByZone.right);
 
     this.rowsLayerLeftElement.replaceChildren();
     this.rowsLayerCenterElement.replaceChildren();
@@ -1879,93 +1861,63 @@ export class DomRenderer {
   }
 
   private applyZoneLayout(): void {
-    const leftWidth = this.getColumnsWidth(this.columnsByZone.left);
-    const centerWidth = this.getColumnsWidth(this.columnsByZone.center);
-    this.centerColumnsWidth = centerWidth;
-    const rightWidth = this.getColumnsWidth(this.columnsByZone.right);
-    this.leftPinnedWidth = leftWidth;
-    this.rightPinnedWidth = rightWidth;
-    const rowTrackHeight = this.getVirtualRowTrackHeight();
-    const viewportHeight = this.getViewportHeight();
-    const rootWidth = this.rootElement.clientWidth || this.container.clientWidth || leftWidth + centerWidth + rightWidth;
     const scrollbarPolicy = this.getResolvedScrollbarPolicy();
-    let verticalScrollbarSourceWidth = 0;
-    let horizontalScrollbarSourceHeight = 0;
-    let verticalScrollbarReservedWidth = 0;
-    let horizontalScrollbarReservedHeight = 0;
-    let centerVisibleWidth = 0;
-    let hasVerticalOverflow = false;
-    let hasHorizontalOverflow = false;
+    const layoutMetrics = calculateZoneLayoutMetrics({
+      leftColumns: this.columnsByZone.left,
+      centerColumns: this.columnsByZone.center,
+      rightColumns: this.columnsByZone.right,
+      rowTrackHeight: this.getVirtualRowTrackHeight(),
+      viewportHeight: this.getViewportHeight(),
+      rootWidth:
+        this.rootElement.clientWidth ||
+        this.container.clientWidth ||
+        sumColumnWidths(this.columnsByZone.left) +
+          sumColumnWidths(this.columnsByZone.center) +
+          sumColumnWidths(this.columnsByZone.right),
+      scrollbarPolicy,
+      scrollbarSize: this.scrollbarSize,
+      invisibleScrollbarFallbackSize: INVISIBLE_SCROLLBAR_FALLBACK_SIZE
+    });
+    this.centerColumnsWidth = layoutMetrics.centerWidth;
+    this.leftPinnedWidth = layoutMetrics.leftWidth;
+    this.rightPinnedWidth = layoutMetrics.rightWidth;
+    this.centerVisibleWidth = layoutMetrics.centerVisibleWidth;
+    this.canUseVerticalScroll = layoutMetrics.shouldShowVerticalBar;
+    this.canUseHorizontalScroll = layoutMetrics.shouldShowHorizontalBar;
 
-    for (let pass = 0; pass < 2; pass += 1) {
-      const viewportVisibleHeight = Math.max(1, viewportHeight - horizontalScrollbarReservedHeight);
-      hasVerticalOverflow = rowTrackHeight > viewportVisibleHeight;
-      verticalScrollbarSourceWidth = this.resolveScrollbarSourceExtent(
-        scrollbarPolicy.vertical,
-        hasVerticalOverflow,
-        this.scrollbarSize.vertical
-      );
-      verticalScrollbarReservedWidth = this.resolveReservedScrollbarExtent(
-        scrollbarPolicy.vertical,
-        hasVerticalOverflow,
-        this.scrollbarSize.vertical,
-        verticalScrollbarSourceWidth
-      );
-
-      centerVisibleWidth = Math.max(0, rootWidth - leftWidth - rightWidth - verticalScrollbarReservedWidth);
-      hasHorizontalOverflow = centerWidth > centerVisibleWidth;
-      horizontalScrollbarSourceHeight = this.resolveScrollbarSourceExtent(
-        scrollbarPolicy.horizontal,
-        hasHorizontalOverflow,
-        this.scrollbarSize.horizontal
-      );
-      horizontalScrollbarReservedHeight = this.resolveReservedScrollbarExtent(
-        scrollbarPolicy.horizontal,
-        hasHorizontalOverflow,
-        this.scrollbarSize.horizontal,
-        horizontalScrollbarSourceHeight
-      );
-    }
-
-    const shouldShowVerticalBar = verticalScrollbarSourceWidth > 0;
-    const shouldShowHorizontalBar = horizontalScrollbarSourceHeight > 0;
-    this.centerVisibleWidth = Math.max(1, centerVisibleWidth);
-
-    this.canUseVerticalScroll = shouldShowVerticalBar;
-    this.canUseHorizontalScroll = shouldShowHorizontalBar;
-
-    const templateColumns = `${leftWidth}px minmax(0, 1fr) ${rightWidth}px`;
-    this.headerElement.style.gridTemplateColumns = templateColumns;
-    this.rootElement.style.setProperty('--hgrid-v-scrollbar-width', `${verticalScrollbarReservedWidth}px`);
-    this.rootElement.style.setProperty('--hgrid-h-scrollbar-height', `${horizontalScrollbarReservedHeight}px`);
+    this.headerElement.style.gridTemplateColumns = layoutMetrics.templateColumns;
+    this.rootElement.style.setProperty('--hgrid-v-scrollbar-width', `${layoutMetrics.verticalScrollbarReservedWidth}px`);
+    this.rootElement.style.setProperty('--hgrid-h-scrollbar-height', `${layoutMetrics.horizontalScrollbarReservedHeight}px`);
     this.viewportElement.style.overflowY = 'hidden';
-    this.verticalScrollElement.style.overflowY = this.toCssOverflowValue(scrollbarPolicy.vertical);
-    this.horizontalScrollElement.style.overflowX = this.toCssOverflowValue(scrollbarPolicy.horizontal);
-    this.verticalScrollElement.style.display = shouldShowVerticalBar ? 'block' : 'none';
-    this.horizontalScrollElement.style.display = shouldShowHorizontalBar ? 'block' : 'none';
-    this.verticalScrollElement.style.width = `${verticalScrollbarSourceWidth}px`;
-    this.horizontalScrollElement.style.height = `${horizontalScrollbarSourceHeight}px`;
+    this.verticalScrollElement.style.overflowY = toCssOverflowValue(scrollbarPolicy.vertical);
+    this.horizontalScrollElement.style.overflowX = toCssOverflowValue(scrollbarPolicy.horizontal);
+    this.verticalScrollElement.style.display = layoutMetrics.shouldShowVerticalBar ? 'block' : 'none';
+    this.horizontalScrollElement.style.display = layoutMetrics.shouldShowHorizontalBar ? 'block' : 'none';
+    this.verticalScrollElement.style.width = `${layoutMetrics.verticalScrollbarSourceWidth}px`;
+    this.horizontalScrollElement.style.height = `${layoutMetrics.horizontalScrollbarSourceHeight}px`;
 
-    this.headerRowLeftElement.style.width = `${leftWidth}px`;
-    this.headerCenterViewportElement.style.width = `${Math.max(1, centerWidth)}px`;
-    this.headerRowRightElement.style.width = `${rightWidth}px`;
+    this.headerRowLeftElement.style.width = `${layoutMetrics.leftWidth}px`;
+    this.headerCenterViewportElement.style.width = `${layoutMetrics.centerWidth}px`;
+    this.headerRowRightElement.style.width = `${layoutMetrics.rightWidth}px`;
 
     this.bodyLeftElement.style.left = '0px';
-    this.bodyLeftElement.style.width = `${leftWidth}px`;
-    this.bodyRightElement.style.right = `${verticalScrollbarReservedWidth}px`;
-    this.bodyRightElement.style.width = `${rightWidth}px`;
+    this.bodyLeftElement.style.width = `${layoutMetrics.leftWidth}px`;
+    this.bodyRightElement.style.right = `${layoutMetrics.verticalScrollbarReservedWidth}px`;
+    this.bodyRightElement.style.width = `${layoutMetrics.rightWidth}px`;
 
-    this.rowsViewportCenterElement.style.left = `${leftWidth}px`;
-    this.rowsViewportCenterElement.style.width = `${Math.max(1, centerWidth)}px`;
-    this.rowsViewportLeftElement.style.width = `${leftWidth}px`;
-    this.rowsViewportRightElement.style.width = `${rightWidth}px`;
+    this.rowsViewportCenterElement.style.left = `${layoutMetrics.leftWidth}px`;
+    this.rowsViewportCenterElement.style.width = `${layoutMetrics.centerWidth}px`;
+    this.rowsViewportLeftElement.style.width = `${layoutMetrics.leftWidth}px`;
+    this.rowsViewportRightElement.style.width = `${layoutMetrics.rightWidth}px`;
 
-    this.rowsLayerLeftElement.style.width = `${leftWidth}px`;
-    this.rowsLayerCenterElement.style.width = `${Math.max(1, centerWidth)}px`;
-    this.rowsLayerRightElement.style.width = `${rightWidth}px`;
+    this.rowsLayerLeftElement.style.width = `${layoutMetrics.leftWidth}px`;
+    this.rowsLayerCenterElement.style.width = `${layoutMetrics.centerWidth}px`;
+    this.rowsLayerRightElement.style.width = `${layoutMetrics.rightWidth}px`;
 
-    this.horizontalScrollElement.style.left = `${leftWidth}px`;
-    this.horizontalScrollElement.style.right = `${rightWidth + verticalScrollbarReservedWidth}px`;
+    this.horizontalScrollElement.style.left = `${layoutMetrics.leftWidth}px`;
+    this.horizontalScrollElement.style.right = `${
+      layoutMetrics.rightWidth + layoutMetrics.verticalScrollbarReservedWidth
+    }px`;
     this.verticalScrollElement.style.right = '0px';
   }
 
@@ -1981,30 +1933,24 @@ export class DomRenderer {
   }
 
   private updateSpacerSize(): void {
-    const rowCount = this.options.rowModel.getViewRowCount();
-    const baseRowHeight = this.getBaseRowHeight();
-    const virtualHeight = this.getVirtualRowTrackHeight();
-    const configuredViewportHeight = this.getViewportHeight();
-    const measuredViewportHeight =
-      this.viewportElement.clientHeight || this.verticalScrollElement.clientHeight || configuredViewportHeight;
-    const metrics = createScrollScaleMetrics({
-      rowCount,
-      rowHeight: baseRowHeight,
-      virtualHeight,
-      viewportHeight: measuredViewportHeight,
-      maxScrollPx: MAX_SCROLL_PX
+    const metrics = calculateScrollScaleLayoutMetrics({
+      rowCount: this.options.rowModel.getViewRowCount(),
+      rowHeight: this.getBaseRowHeight(),
+      virtualHeight: this.getVirtualRowTrackHeight(),
+      viewportHeight: this.viewportElement.clientHeight || this.verticalScrollElement.clientHeight || this.getViewportHeight(),
+      centerColumnsWidth: this.centerColumnsWidth
     });
-    this.virtualScrollHeight = metrics.virtualHeight;
-    this.physicalScrollHeight = metrics.scrollHeight;
+    this.virtualScrollHeight = metrics.virtualScrollHeight;
+    this.physicalScrollHeight = metrics.physicalScrollHeight;
     this.virtualMaxScrollTop = metrics.virtualMaxScrollTop;
     this.physicalMaxScrollTop = metrics.physicalMaxScrollTop;
-    this.scrollScale = metrics.scale;
+    this.scrollScale = metrics.scrollScale;
 
     this.spacerElement.style.width = '1px';
-    this.spacerElement.style.height = `${metrics.scrollHeight}px`;
+    this.spacerElement.style.height = `${metrics.spacerHeight}px`;
     this.verticalSpacerElement.style.width = '1px';
-    this.verticalSpacerElement.style.height = `${metrics.scrollHeight}px`;
-    this.horizontalSpacerElement.style.width = `${Math.max(1, this.centerColumnsWidth)}px`;
+    this.verticalSpacerElement.style.height = `${metrics.spacerHeight}px`;
+    this.horizontalSpacerElement.style.width = `${metrics.horizontalSpacerWidth}px`;
   }
 
   private renderRows(scrollTop: number, scrollLeft: number): void {
@@ -2776,16 +2722,6 @@ export class DomRenderer {
       'aria-label',
       isGroupRow ? this.localeText.groupingRow : this.localizeText(this.localeText.selectRow, { row: rowIndex + 1 })
     );
-  }
-
-  private getColumnsWidth(columns: ColumnDef[]): number {
-    let totalWidth = 0;
-
-    for (let colIndex = 0; colIndex < columns.length; colIndex += 1) {
-      totalWidth += columns[colIndex].width;
-    }
-
-    return totalWidth;
   }
 
   private splitColumns(columns: ColumnDef[]): ColumnsByZone {
@@ -4102,15 +4038,7 @@ export class DomRenderer {
     }
 
     const cellRect = headerCell.getBoundingClientRect();
-    if (clientY < cellRect.top || clientY > cellRect.bottom) {
-      return null;
-    }
-
-    if (clientX < cellRect.left || clientX > cellRect.right + HEADER_RESIZE_HIT_SLOP_PX) {
-      return null;
-    }
-
-    if (cellRect.right - clientX > HEADER_RESIZE_HIT_SLOP_PX) {
+    if (!isHeaderResizeHandleHit(clientX, clientY, cellRect, HEADER_RESIZE_HIT_SLOP_PX)) {
       return null;
     }
 
@@ -4119,7 +4047,7 @@ export class DomRenderer {
       return null;
     }
 
-    const column = this.findVisibleColumnById(columnId);
+    const column = findVisibleColumnById(this.options.columns, columnId);
     if (!column) {
       return null;
     }
@@ -4129,33 +4057,6 @@ export class DomRenderer {
       column,
       headerCell
     };
-  }
-
-  private findVisibleColumnById(columnId: string): ColumnDef | null {
-    for (let columnIndex = 0; columnIndex < this.options.columns.length; columnIndex += 1) {
-      const column = this.options.columns[columnIndex];
-      if (column.id === columnId) {
-        return column;
-      }
-    }
-
-    return null;
-  }
-
-  private resolveColumnWidthBounds(column: ColumnDef): { minWidth: number; maxWidth: number } {
-    const rawMinWidth = Number(column.minWidth);
-    const minWidth = Number.isFinite(rawMinWidth) ? Math.max(1, rawMinWidth) : 1;
-    const rawMaxWidth = Number(column.maxWidth);
-    const maxWidth = Number.isFinite(rawMaxWidth) ? Math.max(minWidth, rawMaxWidth) : Number.POSITIVE_INFINITY;
-
-    return {
-      minWidth,
-      maxWidth
-    };
-  }
-
-  private clampColumnWidth(width: number, minWidth: number, maxWidth: number): number {
-    return Math.min(maxWidth, Math.max(minWidth, width));
   }
 
   private setHeaderResizeHoverCell(nextCell: HTMLDivElement | null): void {
@@ -4194,16 +4095,6 @@ export class DomRenderer {
     }
 
     return headerCell;
-  }
-
-  private getVisibleColumnIndexById(columnId: string): number {
-    for (let columnIndex = 0; columnIndex < this.options.columns.length; columnIndex += 1) {
-      if (this.options.columns[columnIndex].id === columnId) {
-        return columnIndex;
-      }
-    }
-
-    return -1;
   }
 
   private findHeaderCellAtPoint(clientX: number, clientY: number): HTMLDivElement | null {
@@ -4252,49 +4143,24 @@ export class DomRenderer {
       return null;
     }
 
-    const columnIndex = this.getVisibleColumnIndexById(columnId);
+    const columnIndex = getVisibleColumnIndexById(this.options.columns, columnId);
     if (columnIndex === -1) {
       return null;
     }
 
     const cellRect = headerCell.getBoundingClientRect();
-    const dropAfter = clientX > cellRect.left + cellRect.width * 0.5;
-    return {
-      dropIndex: columnIndex + (dropAfter ? 1 : 0),
-      targetColumnId: columnId,
-      indicatorClientX: dropAfter ? cellRect.right : cellRect.left
-    };
+    return createHeaderDropTarget(columnId, columnIndex, clientX, cellRect);
   }
 
   private showHeaderDropIndicator(indicatorClientX: number): void {
     const headerRect = this.headerElement.getBoundingClientRect();
-    const clampedLeft = Math.max(0, Math.min(headerRect.width, indicatorClientX - headerRect.left));
+    const clampedLeft = clampHeaderDropIndicatorOffset(headerRect, indicatorClientX);
     this.headerDropIndicatorElement.style.display = 'block';
     this.headerDropIndicatorElement.style.transform = `translateX(${clampedLeft}px)`;
   }
 
   private hideHeaderDropIndicator(): void {
     this.headerDropIndicatorElement.style.display = 'none';
-  }
-
-  private normalizeDropIndexForSource(dropIndex: number, sourceIndex: number): number {
-    if (dropIndex > sourceIndex) {
-      return dropIndex - 1;
-    }
-
-    return dropIndex;
-  }
-
-  private buildReorderedColumnOrder(sourceIndex: number, targetIndex: number): string[] {
-    const nextOrder = this.options.columns.map((column) => column.id);
-    if (sourceIndex < 0 || sourceIndex >= nextOrder.length) {
-      return nextOrder;
-    }
-
-    const [movedColumnId] = nextOrder.splice(sourceIndex, 1);
-    const boundedTargetIndex = Math.max(0, Math.min(nextOrder.length, targetIndex));
-    nextOrder.splice(boundedTargetIndex, 0, movedColumnId);
-    return nextOrder;
   }
 
   private startColumnReorderSession(
@@ -4308,7 +4174,7 @@ export class DomRenderer {
       return;
     }
 
-    const sourceIndex = this.getVisibleColumnIndexById(sourceColumnId);
+    const sourceIndex = getVisibleColumnIndexById(this.options.columns, sourceColumnId);
     if (sourceIndex === -1) {
       return;
     }
@@ -4317,16 +4183,8 @@ export class DomRenderer {
     this.teardownPointerSelectionSession();
     this.setHeaderResizeHoverCell(null);
 
-    this.columnReorderSession = {
-      pointerId,
-      sourceColumnId,
-      sourceIndex,
-      pendingClientX: clientX,
-      pendingClientY: clientY,
-      pendingTarget: sourceHeaderCell,
-      currentDropIndex: sourceIndex + 1,
-      currentTargetColumnId: sourceColumnId
-    };
+    this.columnReorderSession = createColumnReorderSession(pointerId, clientX, clientY, sourceColumnId, sourceIndex);
+    this.columnReorderSession.pendingTarget = sourceHeaderCell;
 
     this.headerReorderDraggingCell = sourceHeaderCell;
     this.headerReorderDraggingCell.classList.add('hgrid__header-cell--dragging');
@@ -4429,12 +4287,16 @@ export class DomRenderer {
       return;
     }
 
-    const normalizedTargetIndex = this.normalizeDropIndexForSource(session.currentDropIndex, session.sourceIndex);
+    const normalizedTargetIndex = normalizeDropIndexForSource(session.currentDropIndex, session.sourceIndex);
     if (normalizedTargetIndex === session.sourceIndex) {
       return;
     }
 
-    const nextOrder = this.buildReorderedColumnOrder(session.sourceIndex, normalizedTargetIndex);
+    const nextOrder = buildReorderedColumnOrder(
+      this.options.columns.map((column) => column.id),
+      session.sourceIndex,
+      normalizedTargetIndex
+    );
     this.eventBus.emit('columnReorder', {
       sourceColumnId: session.sourceColumnId,
       targetColumnId: session.currentTargetColumnId,
@@ -4449,24 +4311,13 @@ export class DomRenderer {
     this.teardownColumnReorderSession();
     this.teardownPointerSelectionSession();
 
-    const { minWidth, maxWidth } = this.resolveColumnWidthBounds(resizeHit.column);
-    const startWidth = this.clampColumnWidth(resizeHit.column.width, minWidth, maxWidth);
-    this.columnResizeSession = {
-      pointerId,
-      columnId: resizeHit.columnId,
-      startClientX: clientX,
-      startWidth,
-      minWidth,
-      maxWidth,
-      pendingClientX: clientX,
-      lastEmittedWidth: startWidth
-    };
+    this.columnResizeSession = createColumnResizeSession(pointerId, clientX, resizeHit);
 
     this.rootElement.classList.add('hgrid--column-resizing');
     this.setHeaderResizeHoverCell(null);
     this.eventBus.emit('columnResize', {
       columnId: resizeHit.columnId,
-      width: startWidth,
+      width: this.columnResizeSession.startWidth,
       phase: 'start'
     });
 
@@ -4537,8 +4388,7 @@ export class DomRenderer {
       return;
     }
 
-    const deltaX = session.pendingClientX - session.startClientX;
-    const nextWidth = this.clampColumnWidth(session.startWidth + deltaX, session.minWidth, session.maxWidth);
+    const nextWidth = resolveNextColumnResizeWidth(session);
     if (phase === 'move' && nextWidth === session.lastEmittedWidth) {
       return;
     }
@@ -5641,62 +5491,6 @@ export class DomRenderer {
     };
   }
 
-  private resolveScrollbarSourceExtent(
-    visibility: ScrollbarVisibility,
-    hasOverflow: boolean,
-    measuredSize: number
-  ): number {
-    if (visibility === 'hidden') {
-      return 0;
-    }
-
-    if (visibility === 'always' || hasOverflow) {
-      if (measuredSize > 0) {
-        return measuredSize;
-      }
-      return INVISIBLE_SCROLLBAR_FALLBACK_SIZE;
-    }
-
-    return 0;
-  }
-
-  private resolveReservedScrollbarExtent(
-    visibility: ScrollbarVisibility,
-    hasOverflow: boolean,
-    measuredSize: number,
-    sourceSize: number
-  ): number {
-    if (sourceSize === 0 || visibility === 'hidden') {
-      return 0;
-    }
-
-    if (measuredSize > 0) {
-      return sourceSize;
-    }
-
-    if (visibility === 'always') {
-      return sourceSize;
-    }
-
-    if (hasOverflow && visibility === 'auto') {
-      return 0;
-    }
-
-    return 0;
-  }
-
-  private toCssOverflowValue(visibility: ScrollbarVisibility): 'auto' | 'scroll' | 'hidden' {
-    if (visibility === 'hidden') {
-      return 'hidden';
-    }
-
-    if (visibility === 'always') {
-      return 'scroll';
-    }
-
-    return 'auto';
-  }
-
   private measureScrollbarSize(): ScrollbarSize {
     if (!document.body) {
       return {
@@ -5752,14 +5546,19 @@ export class DomRenderer {
 
   private getMaxHorizontalScrollLeft(): number {
     const maxHorizontal = this.horizontalScrollElement.scrollWidth - this.horizontalScrollElement.clientWidth;
-    const leftWidth = this.getColumnsWidth(this.columnsByZone.left);
+    const leftWidth = sumColumnWidths(this.columnsByZone.left);
     const centerWidth = this.centerColumnsWidth;
-    const rightWidth = this.getColumnsWidth(this.columnsByZone.right);
+    const rightWidth = sumColumnWidths(this.columnsByZone.right);
     const reservedVerticalWidth = Number.parseFloat(this.rootElement.style.getPropertyValue('--hgrid-v-scrollbar-width')) || 0;
     const rootWidth = this.rootElement.clientWidth || this.container.clientWidth || leftWidth + centerWidth + rightWidth;
-    const centerVisibleWidth = Math.max(1, rootWidth - leftWidth - rightWidth - reservedVerticalWidth);
-    const modelMax = centerWidth - centerVisibleWidth;
-    return Math.max(0, maxHorizontal, modelMax);
+    return calculateMaxHorizontalScrollLeft({
+      maxHorizontalScrollLeft: maxHorizontal,
+      leftWidth,
+      centerWidth,
+      rightWidth,
+      reservedVerticalWidth,
+      rootWidth
+    });
   }
 
   private setVerticalScrollTop(scrollTop: number, virtualScrollTopOverride?: number): void {

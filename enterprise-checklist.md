@@ -60,14 +60,15 @@
 > 상용 제품으로 커지기 전에 핵심 클래스 구조를 분해한다.
 
 ## E0.1 Grid 오케스트레이터 분해
-- [ ] `Grid`의 책임을 service 단위로 분리
-  - [ ] state service
-  - [ ] data pipeline service
-  - [ ] command/event service
-  - [ ] export service
-  - [ ] remote query service
-- [ ] `Grid`는 orchestration facade 역할만 수행하도록 정리
-- [ ] 내부 서비스 경계 문서화
+- [x] `Grid`의 책임을 service 단위로 분리
+  - [x] state service
+  - [x] data pipeline service
+  - [x] command/event service
+  - [x] export service
+  - [x] remote query service
+  - [x] provider lifecycle service
+- [x] `Grid`는 orchestration facade 역할만 수행하도록 정리
+- [x] 내부 서비스 경계 문서화
 
 ## E0.2 DomRenderer 분해
 - [ ] `DomRenderer`를 책임별 모듈로 분리
@@ -89,14 +90,14 @@
   - [ ] virtualization invariants
 
 ### 변경 대상
-- [ ] `packages/grid-core/src/core/grid.ts`
+- [x] `packages/grid-core/src/core/grid.ts`
 - [ ] `packages/grid-core/src/render/dom-renderer.ts`
-- [ ] `packages/grid-core/src/core/*`
+- [x] `packages/grid-core/src/core/*`
 - [ ] `packages/grid-core/src/render/*`
 
 ### 수용 기준
 - [ ] `grid.ts`, `dom-renderer.ts` 단일 파일 비대화가 해소된다.
-- [ ] 신규 기능 추가 시 영향 범위를 service/module 단위로 제한할 수 있다.
+- [x] 신규 기능 추가 시 영향 범위를 service/module 단위로 제한할 수 있다.
 
 ---
 

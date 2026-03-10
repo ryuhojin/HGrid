@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 42 - Orchestrator Split Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 1160px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 42 - Orchestrator Split Smoke</h1>
+    <p>
+      `Grid` 내부 오케스트레이터 분해 이후에도 공개 API 흐름이 그대로 유지되는지 확인하는 smoke example입니다.
+      local provider 교체, remote query sync, client grouping, state save/restore, visible export를 한 화면에서 확인할 수 있습니다.
+    </p>
+    <div class="toolbar">
+      <button id="use-local-alpha" type="button">use local alpha</button>
+      <button id="use-local-beta" type="button">use local beta</button>
+      <button id="use-remote" type="button">use remote</button>
+      <button id="mutate-local-row" type="button">mutate local row 1</button>
+      <button id="select-score" type="button">select score cell</button>
+    </div>
+    <div class="toolbar">
+      <button id="group-region" type="button">group region</button>
+      <button id="sort-score-desc" type="button">sort score desc</button>
+      <button id="filter-active" type="button">filter active</button>
+      <button id="clear-view" type="button">clear view</button>
+      <button id="save-state" type="button">save state</button>
+      <button id="restore-state" type="button">restore state</button>
+      <button id="jump-row-300" type="button">jump row 300</button>
+    </div>
+    <div class="toolbar">
+      <button id="export-visible" type="button">export visible CSV</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <div class="panels">
+      <section class="panel">
+        <h2>Summary</h2>
+        <pre id="summary">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Export Preview</h2>
+        <pre id="preview">No export result yet.</pre>
+      </section>
+      <section class="panel">
+        <h2>Action Log</h2>
+        <pre id="log">Ready</pre>
+      </section>
+    </div>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const BASE_TIME = Date.UTC(2026, 2, 10, 9, 0, 0);
+      const regions = ['KR', 'US', 'JP', 'DE'];
+      const statuses = ['active', 'idle'];
+      const REMOTE_TOTAL_ROWS = 50000;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function createLocalRows(prefix, rowCount, offset) {
+        return Array.from({ length: rowCount }, (_, index) => ({
+          id: offset + index + 1,
+          name: prefix + '-Customer-' + String(index + 1).padStart(4, '0'),
+          region: regions[index % regions.length],
+          status: statuses[index % statuses.length],
+          score: (index * 17 + offset) % 1000,
+          updatedAt: new Date(BASE_TIME - index * 60000).toISOString()
+        }));
+      }
+
+      function resolveSortDirection(sortModel) {
+        if (!Array.isArray(sortModel) || sortModel.length === 0) {
+          return 'asc';
+        }
+
+        return sortModel[0].direction === 'desc' ? 'desc' : 'asc';
+      }
+
+      function resolveStatusFilterMode(filterModel) {
+        if (!filterModel || typeof filterModel !== 'object') {
+          return 'all';
+        }
+
+        const statusFilter = filterModel.status;
+        if (!statusFilter || typeof statusFilter !== 'object') {
+          return 'all';
+        }
+
+        if (statusFilter.type !== 'set' || !Array.isArray(statusFilter.values)) {
+          return 'all';
+        }
+
+        if (statusFilter.values.length === 1 && statusFilter.values[0] === 'active') {
+          return 'active';
+        }
+
+        return 'all';
+      }
+
+      function getRemoteFilteredRowCount(filterMode) {
+        if (filterMode === 'active') {
+          return Math.ceil(REMOTE_TOTAL_ROWS / 2);
+        }
+
+        return REMOTE_TOTAL_ROWS;
+      }
+
+      function mapRemoteLogicalIndex(logicalIndex, filterMode, sortDirection) {
+        const filteredRowCount = getRemoteFilteredRowCount(filterMode);
+        const orderedIndex = sortDirection === 'desc' ? filteredRowCount - 1 - logicalIndex : logicalIndex;
+        if (filterMode === 'active') {
+          return orderedIndex * 2;
+        }
+
+        return orderedIndex;
+      }
+
+      function buildRemoteRow(sourceIndex) {
+        const id = 200000 + sourceIndex + 1;
+        return {
+          id,
+          name: 'Remote-Customer-' + String(id).padStart(8, '0'),
+          region: regions[sourceIndex % regions.length],
+          status: sourceIndex % 2 === 0 ? 'active' : 'idle',
+          score: (sourceIndex * 29) % 2000,
+          updatedAt: new Date(BASE_TIME - sourceIndex * 45000).toISOString()
+        };
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 110, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 240, type: 'text', editable: true },
+        { id: 'region', header: 'Region', width: 120, type: 'text' },
+        { id: 'status', header: 'Status', width: 120, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number', editable: true },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const localAlphaProvider = new HGrid.LocalDataProvider(createLocalRows('Alpha', 1800, 0));
+      const localBetaProvider = new HGrid.LocalDataProvider(createLocalRows('Beta', 900, 50000));
+
+      let remoteRequestCount = 0;
+
+      const remoteProvider = new HGrid.RemoteDataProvider({
+        dataSource: {
+          fetchBlock(request) {
+            remoteRequestCount += 1;
+
+            const sortDirection = resolveSortDirection(request.queryModel.sortModel);
+            const filterMode = resolveStatusFilterMode(request.queryModel.filterModel);
+            const totalRowCount = getRemoteFilteredRowCount(filterMode);
+            const startIndex = Math.max(0, Math.min(totalRowCount, request.startIndex));
+            const endIndex = Math.max(startIndex, Math.min(totalRowCount, request.endIndex));
+            const rows = [];
+
+            for (let logicalIndex = startIndex; logicalIndex < endIndex; logicalIndex += 1) {
+              const sourceIndex = mapRemoteLogicalIndex(logicalIndex, filterMode, sortDirection);
+              rows.push(buildRemoteRow(sourceIndex));
+            }
+
+            return new Promise((resolve) => {
+              setTimeout(() => {
+                resolve({
+                  rows,
+                  totalRowCount
+                });
+              }, 18);
+            });
+          }
+        },
+        rowCount: REMOTE_TOTAL_ROWS,
+        cache: {
+          blockSize: 200,
+          maxBlocks: 8,
+          prefetchBlocks: 1
+        },
+        loadingRowPolicy: 'skeleton'
+      });
+
+      const summaryElement = document.getElementById('summary');
+      const previewElement = document.getElementById('preview');
+      const logElement = document.getElementById('log');
+
+      const actionLog = [];
+      const eventLog = [];
+      let savedState = null;
+      let activeProviderKey = 'local-alpha';
+      let mutationCount = 0;
+      let lastExportMeta = null;
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: localAlphaProvider,
+        grouping: {
+          mode: 'client',
+          groupModel: [],
+          aggregations: [
+            { columnId: 'id', type: 'count' },
+            { columnId: 'score', type: 'avg' }
+          ],
+          defaultExpanded: true
+        },
+        height: 440,
+        rowHeight: 30,
+        overscan: 8,
+        overscanCols: 2,
+        validateEdit: (context) => {
+          if (context.column.id === 'score') {
+            return typeof context.value === 'number' && Number.isFinite(context.value) ? null : 'Score must be numeric';
+          }
+
+          return null;
+        }
+      });
+
+      function getCurrentProvider() {
+        if (activeProviderKey === 'local-alpha') {
+          return localAlphaProvider;
+        }
+
+        if (activeProviderKey === 'local-beta') {
+          return localBetaProvider;
+        }
+
+        return remoteProvider;
+      }
+
+      function isRemoteProviderActive() {
+        return activeProviderKey === 'remote';
+      }
+
+      function isLocalProvider(provider) {
+        return provider === localAlphaProvider || provider === localBetaProvider;
+      }
+
+      function pushAction(label, extra) {
+        actionLog.unshift({
+          time: new Date().toISOString(),
+          label,
+          extra: extra || null
+        });
+        if (actionLog.length > 10) {
+          actionLog.length = 10;
+        }
+      }
+
+      function pushEvent(label, extra) {
+        eventLog.unshift({
+          time: new Date().toISOString(),
+          label,
+          extra: extra || null
+        });
+        if (eventLog.length > 8) {
+          eventLog.length = 8;
+        }
+      }
+
+      function getFirstVisibleCellText(columnId) {
+        const cell = document.querySelector('.hgrid__row--center .hgrid__cell[data-column-id="' + columnId + '"]');
+        return cell && typeof cell.textContent === 'string' ? cell.textContent.trim() : '';
+      }
+
+      function summarizeState(state) {
+        if (!state) {
+          return null;
+        }
+
+        return {
+          scrollTop: Math.round(state.scrollTop),
+          groupModel: Array.isArray(state.groupModel) ? state.groupModel.slice() : [],
+          hiddenColumnIds: Array.isArray(state.hiddenColumnIds) ? state.hiddenColumnIds.slice() : [],
+          columnOrder: Array.isArray(state.columnOrder) ? state.columnOrder.slice() : null
+        };
+      }
+
+      function getSnapshot() {
+        const currentProvider = getCurrentProvider();
+        const groupedRows = grid.getGroupedRowsSnapshot();
+        const groupRowCount = groupedRows.filter((row) => row.kind === 'group').length;
+
+        return {
+          provider: activeProviderKey,
+          providerRowCount: currentProvider.getRowCount(),
+          sortModel: grid.getSortModel(),
+          filterModel: grid.getFilterModel(),
+          groupModel: grid.getGroupModel(),
+          groupingMode: grid.getGroupingMode(),
+          selection: grid.getSelection(),
+          groupedRowCount: groupRowCount,
+          savedState: summarizeState(savedState),
+          remoteRequests: remoteRequestCount,
+          remoteQueryModel: isRemoteProviderActive() ? remoteProvider.getQueryModel() : null,
+          remoteDebugState: isRemoteProviderActive() ? remoteProvider.getDebugState() : null,
+          lastExportMeta,
+          firstVisible: {
+            id: getFirstVisibleCellText('id'),
+            name: getFirstVisibleCellText('name'),
+            status: getFirstVisibleCellText('status')
+          },
+          actions: actionLog.slice(0, 4),
+          events: eventLog.slice(0, 4)
+        };
+      }
+
+      function renderSummary() {
+        summaryElement.textContent = JSON.stringify(getSnapshot(), null, 2);
+        logElement.textContent = JSON.stringify(
+          {
+            actions: actionLog,
+            events: eventLog
+          },
+          null,
+          2
+        );
+      }
+
+      function renderPreview(content) {
+        previewElement.textContent = content.split('\n').slice(0, 10).join('\n');
+      }
+
+      async function syncView(label, extra) {
+        await waitFrame();
+        pushAction(label, extra);
+        renderSummary();
+      }
+
+      async function useProvider(key) {
+        activeProviderKey = key;
+        grid.setOptions({
+          dataProvider:
+            key === 'local-alpha'
+              ? localAlphaProvider
+              : key === 'local-beta'
+                ? localBetaProvider
+                : remoteProvider
+        });
+        if (key === 'remote' && grid.getGroupModel().length > 0) {
+          await grid.clearGroupModel();
+        }
+        await syncView('setOptions(dataProvider)', { provider: key });
+      }
+
+      async function mutateCurrentLocalRow() {
+        const provider = getCurrentProvider();
+        if (!isLocalProvider(provider)) {
+          await syncView('mutate local row skipped', { reason: 'remote provider active' });
+          return;
+        }
+
+        mutationCount += 1;
+        provider.setValue(0, 'name', 'Mutated-' + activeProviderKey + '-' + mutationCount);
+        provider.setValue(0, 'status', mutationCount % 2 === 0 ? 'idle' : 'active');
+        await syncView('provider.setValue(row=0)', { provider: activeProviderKey, mutationCount });
+      }
+
+      async function selectScoreCell() {
+        grid.setSelection({
+          activeCell: { rowIndex: 12, colIndex: 4 },
+          cellRanges: [{ r1: 12, c1: 4, r2: 12, c2: 4 }],
+          rowRanges: []
+        });
+        await syncView('setSelection(score cell)', null);
+      }
+
+      async function groupRegion() {
+        if (isRemoteProviderActive()) {
+          await syncView('setGroupModel skipped', { reason: 'remote provider active' });
+          return;
+        }
+
+        await grid.setGroupingMode('client');
+        await grid.setGroupModel([{ columnId: 'region' }]);
+        await syncView('setGroupModel(region)', null);
+      }
+
+      async function sortScoreDesc() {
+        await grid.setSortModel([{ columnId: 'score', direction: 'desc' }]);
+        await syncView('setSortModel(score desc)', null);
+      }
+
+      async function filterActive() {
+        await grid.setFilterModel({
+          status: {
+            type: 'set',
+            values: ['active']
+          }
+        });
+        await syncView('setFilterModel(status=active)', null);
+      }
+
+      async function clearView() {
+        await grid.clearGroupModel();
+        await grid.clearFilterModel();
+        await grid.clearSortModel();
+        await syncView('clear group/filter/sort', null);
+      }
+
+      async function saveState() {
+        savedState = grid.getState();
+        await syncView('getState()', summarizeState(savedState));
+      }
+
+      async function restoreState() {
+        if (!savedState) {
+          await syncView('setState skipped', { reason: 'no saved state' });
+          return;
+        }
+
+        grid.setState(savedState);
+        await syncView('setState(savedState)', summarizeState(savedState));
+      }
+
+      async function jumpRow300() {
+        grid.setState({
+          scrollTop: 300 * 30
+        });
+        await syncView('setState(scrollTop=row300)', { scrollTop: 300 * 30 });
+      }
+
+      async function exportVisibleCsv() {
+        const result = await grid.exportCsv({ scope: 'visible' });
+        lastExportMeta = {
+          format: result.format,
+          scope: result.scope,
+          rowCount: result.rowCount,
+          canceled: result.canceled
+        };
+        renderPreview(result.content);
+        await syncView('exportCsv(visible)', lastExportMeta);
+      }
+
+      document.getElementById('use-local-alpha').addEventListener('click', () => {
+        void useProvider('local-alpha');
+      });
+
+      document.getElementById('use-local-beta').addEventListener('click', () => {
+        void useProvider('local-beta');
+      });
+
+      document.getElementById('use-remote').addEventListener('click', () => {
+        void useProvider('remote');
+      });
+
+      document.getElementById('mutate-local-row').addEventListener('click', () => {
+        void mutateCurrentLocalRow();
+      });
+
+      document.getElementById('select-score').addEventListener('click', () => {
+        void selectScoreCell();
+      });
+
+      document.getElementById('group-region').addEventListener('click', () => {
+        void groupRegion();
+      });
+
+      document.getElementById('sort-score-desc').addEventListener('click', () => {
+        void sortScoreDesc();
+      });
+
+      document.getElementById('filter-active').addEventListener('click', () => {
+        void filterActive();
+      });
+
+      document.getElementById('clear-view').addEventListener('click', () => {
+        void clearView();
+      });
+
+      document.getElementById('save-state').addEventListener('click', () => {
+        void saveState();
+      });
+
+      document.getElementById('restore-state').addEventListener('click', () => {
+        void restoreState();
+      });
+
+      document.getElementById('jump-row-300').addEventListener('click', () => {
+        void jumpRow300();
+      });
+
+      document.getElementById('export-visible').addEventListener('click', () => {
+        void exportVisibleCsv();
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderSummary();
+      });
+
+      grid.on('cellClick', (event) => {
+        pushEvent('cellClick', {
+          rowIndex: event.rowIndex,
+          columnId: event.columnId,
+          value: event.value
+        });
+        renderSummary();
+      });
+
+      grid.on('selectionChange', (event) => {
+        pushEvent('selectionChange', {
+          activeCell: event.activeCell,
+          cellRangeCount: event.cellRanges.length,
+          source: event.source
+        });
+        renderSummary();
+      });
+
+      grid.on('editCommit', (event) => {
+        pushEvent('editCommit', {
+          rowIndex: event.rowIndex,
+          columnId: event.columnId,
+          value: event.value
+        });
+        renderSummary();
+      });
+
+      window.__example42 = {
+        getSnapshot() {
+          return getSnapshot();
+        },
+        async useRemote() {
+          await useProvider('remote');
+          return getSnapshot();
+        },
+        async useLocalAlpha() {
+          await useProvider('local-alpha');
+          return getSnapshot();
+        },
+        async groupRegion() {
+          await groupRegion();
+          return getSnapshot();
+        },
+        async exportVisible() {
+          await exportVisibleCsv();
+          return getSnapshot();
+        }
+      };
+
+      renderSummary();
+    </script>
+  </body>
+</html>

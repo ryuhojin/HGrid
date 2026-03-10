@@ -1,5 +1,5 @@
 import { EventBus } from './event-bus';
-import type { ColumnReorderEvent, ColumnResizeEvent, GridEventMap, GridEventName } from './event-bus';
+import type { GridEventMap, GridEventName } from './event-bus';
 import type {
   ColumnDef,
   ColumnGroupDef,
@@ -40,6 +40,38 @@ import { GroupedDataProvider } from '../data/grouped-data-provider';
 import { CooperativeTreeExecutor, toTreeNodeKeyToken, type TreeExecutionResult, type TreeExecutor } from '../data/tree-executor';
 import { TreeDataProvider } from '../data/tree-data-provider';
 import type { EditCommitAuditLogger } from './edit-events';
+import { GridCommandEventService } from './grid-command-event-service';
+import {
+  GridDataPipelineService,
+  type GridDataPipelineApplyResult,
+  type GridDataPipelineState
+} from './grid-data-pipeline-service';
+import {
+  GridExportService,
+  type GridExportFormat,
+  type GridExportOptions,
+  type GridExportResult,
+  type GridVisibleRowRange
+} from './grid-export-service';
+import {
+  cloneGroupAggregations,
+  cloneGroupExpansionState,
+  cloneGroupModel,
+  clonePivotModel,
+  clonePivotValues
+} from './grid-model-utils';
+import { GridProviderLifecycleService } from './grid-provider-lifecycle-service';
+import { GridRemoteQueryService } from './grid-remote-query-service';
+import { GridStateService } from './grid-state-service';
+export type {
+  GridExportFormat,
+  GridExportOptions,
+  GridExportProgressEvent,
+  GridExportResult,
+  GridExportScope,
+  GridExportStatus,
+  GridVisibleRowRange
+} from './grid-export-service';
 
 const DEFAULT_SCROLLBAR_POLICY = {
   vertical: 'auto',
@@ -56,8 +88,6 @@ const DEFAULT_INDICATOR_STATUS_WIDTH = 96;
 const MIN_INDICATOR_WIDTH = 44;
 const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 108;
-const DEFAULT_EXPORT_CHUNK_SIZE = 2000;
-const DEFAULT_EXPORT_LINE_BREAK = '\n';
 const DEFAULT_LOCALE = 'en-US';
 
 function isSystemUtilityColumn(columnId: string): boolean {
@@ -172,74 +202,6 @@ function cloneAuditLogHook(onAuditLog?: EditCommitAuditLogger): EditCommitAuditL
   return typeof onAuditLog === 'function' ? onAuditLog : undefined;
 }
 
-function cloneGroupModel(groupModel?: GroupModelItem[]): GroupModelItem[] {
-  if (!Array.isArray(groupModel) || groupModel.length === 0) {
-    return [];
-  }
-
-  const cloned: GroupModelItem[] = [];
-  for (let index = 0; index < groupModel.length; index += 1) {
-    const item = groupModel[index];
-    if (!item || typeof item.columnId !== 'string') {
-      continue;
-    }
-
-    const columnId = item.columnId.trim();
-    if (columnId.length === 0) {
-      continue;
-    }
-
-    cloned.push({ columnId });
-  }
-
-  return cloned;
-}
-
-function cloneGroupAggregations(aggregations?: GroupAggregationDef[]): GroupAggregationDef[] {
-  if (!Array.isArray(aggregations) || aggregations.length === 0) {
-    return [];
-  }
-
-  const cloned: GroupAggregationDef[] = [];
-  for (let index = 0; index < aggregations.length; index += 1) {
-    const item = aggregations[index];
-    if (!item || typeof item.columnId !== 'string') {
-      continue;
-    }
-
-    const columnId = item.columnId.trim();
-    if (columnId.length === 0) {
-      continue;
-    }
-
-    cloned.push({
-      columnId,
-      type: item.type,
-      reducer: typeof item.reducer === 'function' ? item.reducer : undefined
-    });
-  }
-
-  return cloned;
-}
-
-function cloneGroupExpansionState(groupExpansionState?: Record<string, boolean>): Record<string, boolean> {
-  if (!groupExpansionState || typeof groupExpansionState !== 'object') {
-    return {};
-  }
-
-  const cloned: Record<string, boolean> = {};
-  const keys = Object.keys(groupExpansionState);
-  for (let index = 0; index < keys.length; index += 1) {
-    const key = keys[index];
-    const value = groupExpansionState[key];
-    if (value === true || value === false) {
-      cloned[key] = value;
-    }
-  }
-
-  return cloned;
-}
-
 function cloneGroupingOptions(grouping?: GridOptions['grouping']): GridOptions['grouping'] {
   if (!grouping) {
     return undefined;
@@ -285,56 +247,6 @@ function mergeGroupingOptions(
   }
 
   return base;
-}
-
-function clonePivotModel(pivotModel?: PivotModelItem[]): PivotModelItem[] {
-  if (!Array.isArray(pivotModel) || pivotModel.length === 0) {
-    return [];
-  }
-
-  const cloned: PivotModelItem[] = [];
-  for (let index = 0; index < pivotModel.length; index += 1) {
-    const item = pivotModel[index];
-    if (!item || typeof item.columnId !== 'string') {
-      continue;
-    }
-
-    const columnId = item.columnId.trim();
-    if (columnId.length === 0) {
-      continue;
-    }
-
-    cloned.push({ columnId });
-  }
-
-  return cloned;
-}
-
-function clonePivotValues(values?: PivotValueDef[]): PivotValueDef[] {
-  if (!Array.isArray(values) || values.length === 0) {
-    return [];
-  }
-
-  const cloned: PivotValueDef[] = [];
-  for (let index = 0; index < values.length; index += 1) {
-    const item = values[index];
-    if (!item || typeof item.columnId !== 'string') {
-      continue;
-    }
-
-    const columnId = item.columnId.trim();
-    if (columnId.length === 0) {
-      continue;
-    }
-
-    cloned.push({
-      columnId,
-      type: item.type,
-      reducer: typeof item.reducer === 'function' ? item.reducer : undefined
-    });
-  }
-
-  return cloned;
 }
 
 function clonePivotingOptions(pivoting?: PivotingOptions): PivotingOptions | undefined {
@@ -624,52 +536,6 @@ function createIdentityMapping(rowCount: number): Int32Array {
   return mapping;
 }
 
-function isRemoteDataProvider(dataProvider: GridOptions['dataProvider']): dataProvider is RemoteDataProviderContract {
-  return typeof (dataProvider as RemoteDataProviderContract).setQueryModel === 'function';
-}
-
-export type GridExportScope = 'visible' | 'selection' | 'all';
-export type GridExportFormat = 'csv' | 'tsv';
-export type GridExportStatus = 'running' | 'completed' | 'canceled';
-
-export interface GridExportOptions {
-  scope?: GridExportScope;
-  includeHeaders?: boolean;
-  includeSystemColumns?: boolean;
-  chunkSize?: number;
-  signal?: AbortSignal;
-  onProgress?: (event: GridExportProgressEvent) => void;
-}
-
-export interface GridExportProgressEvent {
-  operationId: string;
-  format: GridExportFormat;
-  scope: GridExportScope;
-  status: GridExportStatus;
-  processedRows: number;
-  totalRows: number;
-  progress: number;
-}
-
-export interface GridExportResult {
-  operationId: string;
-  format: GridExportFormat;
-  scope: GridExportScope;
-  content: string;
-  rowCount: number;
-  canceled: boolean;
-}
-
-export interface GridVisibleRowRange {
-  startRow: number;
-  endRow: number;
-}
-
-interface ExportRowSegment {
-  startRow: number;
-  endRow: number;
-}
-
 export class Grid {
   private options: GridOptions;
   private sourceDataProvider: GridOptions['dataProvider'];
@@ -685,6 +551,12 @@ export class Grid {
   private readonly groupExecutor: GroupExecutor;
   private readonly pivotExecutor: PivotExecutor;
   private readonly treeExecutor: TreeExecutor;
+  private readonly commandEventService = new GridCommandEventService();
+  private readonly dataPipelineService = new GridDataPipelineService();
+  private readonly exportService = new GridExportService();
+  private readonly providerLifecycleService = new GridProviderLifecycleService();
+  private readonly stateService = new GridStateService();
+  private readonly remoteQueryService = new GridRemoteQueryService();
   private sortModel: SortModelItem[] = [];
   private filterModel: GridFilterModel = {};
   private groupModel: GroupModelItem[] = [];
@@ -708,7 +580,6 @@ export class Grid {
   private treeLazyChildrenByParent = new Map<string, { parentNodeKey: RowKey; rows: GridRowData[] }>();
   private treeLoadingParents = new Set<string>();
   private treeLoadOperationToken = 0;
-  private exportOperationToken = 0;
   private sortOperationToken = 0;
   private filterOperationToken = 0;
   private groupOperationToken = 0;
@@ -717,6 +588,7 @@ export class Grid {
   private sortMapping: Int32Array | null = null;
   private filterMapping: Int32Array | null = null;
   private dataProviderUnsubscribe: (() => void) | null = null;
+  private commandEventUnsubscribe: (() => void) | null = null;
   private columnValueFormatContext: ColumnValueFormatContext | null = null;
 
   public constructor(container: HTMLElement, config?: GridConfig) {
@@ -730,12 +602,28 @@ export class Grid {
     };
     this.rebuildColumnValueFormatContext();
     this.eventBus = new EventBus();
-    this.eventBus.on('columnResize', this.handleColumnResize);
-    this.eventBus.on('columnReorder', this.handleColumnReorder);
-    this.eventBus.on('cellClick', this.handleCellClickForTree);
-    this.eventBus.on('cellClick', this.handleCellClickForGrouping);
-    this.eventBus.on('editCommit', this.handleEditCommitForGrouping);
-    this.eventBus.on('editCommit', this.handleEditCommitAuditLog);
+    this.commandEventUnsubscribe = this.commandEventService.register({
+      eventBus: this.eventBus,
+      hasColumn: (columnId) => this.columnModel.getColumns().some((column) => column.id === columnId),
+      setColumnWidth: (columnId, width) => {
+        this.columnModel.setColumnWidth(columnId, width);
+      },
+      setColumnOrder: (columnOrder) => {
+        this.columnModel.setColumnOrder(columnOrder);
+      },
+      syncColumnsToRenderer: () => {
+        this.syncColumnsToRenderer();
+      },
+      isTreeDataActive: () => this.hasActiveTreeData(),
+      isClientGroupingActive: () => this.hasActiveClientGrouping(),
+      getDataProvider: () => this.options.dataProvider,
+      getTreeColumnId: () => this.treeDataOptions.treeColumnId ?? '',
+      toggleGroupExpanded: (groupKey) => this.toggleGroupExpanded(groupKey),
+      toggleTreeExpanded: (nodeKey) => this.toggleTreeExpanded(nodeKey),
+      applyGroupingView: () => this.applyGroupingViewInternal(),
+      applyTreeView: () => this.applyTreeViewInternal(),
+      getAuditLogHook: () => this.options.onAuditLog
+    });
     this.sortExecutor = new CooperativeSortExecutor();
     this.filterExecutor = new CooperativeFilterExecutor();
     this.groupExecutor = new CooperativeGroupExecutor();
@@ -751,7 +639,11 @@ export class Grid {
     this.treeDataOptions = this.normalizeTreeDataOptions(mergeTreeDataOptions(undefined, this.options.treeData));
     this.treeMode = this.treeDataOptions.mode === 'server' ? 'server' : 'client';
     this.renderer = new DomRenderer(container, this.getRendererOptions(), this.eventBus);
-    this.bindDataProvider(this.sourceDataProvider);
+    this.dataProviderUnsubscribe = this.providerLifecycleService.rebindRowsChangedListener({
+      dataProvider: this.sourceDataProvider,
+      currentUnsubscribe: this.dataProviderUnsubscribe,
+      onRowsChanged: this.handleDataProviderRowsChanged
+    });
     void this.rebuildDerivedView();
   }
 
@@ -825,34 +717,46 @@ export class Grid {
     }
 
     const hasProviderOption = Boolean(options.dataProvider || options.rowData);
-    const previousSourceDataProvider = this.sourceDataProvider;
     const nextDataProvider = hasProviderOption
       ? options.dataProvider ?? new LocalDataProvider(options.rowData ?? [])
       : this.sourceDataProvider;
 
     if (hasProviderOption) {
-      this.sortOperationToken += 1;
-      this.filterOperationToken += 1;
-      this.groupOperationToken += 1;
-      this.pivotOperationToken += 1;
-      this.treeOperationToken += 1;
-      this.sortMapping = null;
-      this.filterMapping = null;
-      this.groupRows = [];
-      this.groupKeys = [];
-      this.groupedDataProvider = null;
-      this.pivotDataProvider = null;
-      this.pivotColumns = [];
-      this.groupExpansionState = {};
-      this.treeRows = [];
-      this.treeNodeKeys = [];
-      this.treeNodeKeyTokens = [];
-      this.treeDataProvider = null;
-      this.treeExpansionState = {};
-      this.treeLazyChildrenByParent.clear();
-      this.treeLoadingParents.clear();
-      this.sourceDataProvider = nextDataProvider;
-      this.rowModel.setRowCount(this.sourceDataProvider.getRowCount());
+      const providerReplacement = this.providerLifecycleService.replaceDataProvider(
+        this.sourceDataProvider,
+        nextDataProvider
+      );
+      if (providerReplacement.shouldResetOperationTokens) {
+        this.sortOperationToken += 1;
+        this.filterOperationToken += 1;
+        this.groupOperationToken += 1;
+        this.pivotOperationToken += 1;
+        this.treeOperationToken += 1;
+      }
+      if (providerReplacement.shouldResetMappings) {
+        this.sortMapping = null;
+        this.filterMapping = null;
+      }
+      if (providerReplacement.shouldResetDerivedArtifacts) {
+        this.clearDerivedViewArtifacts();
+      }
+      if (providerReplacement.shouldResetExpansionState) {
+        this.groupExpansionState = {};
+        this.treeExpansionState = {};
+      }
+      if (providerReplacement.shouldResetTreeCaches) {
+        this.treeLazyChildrenByParent.clear();
+        this.treeLoadingParents.clear();
+      }
+      this.sourceDataProvider = providerReplacement.dataProvider;
+      this.rowModel.setRowCount(providerReplacement.rowCount);
+      if (providerReplacement.shouldRebind) {
+        this.dataProviderUnsubscribe = this.providerLifecycleService.rebindRowsChangedListener({
+          dataProvider: this.sourceDataProvider,
+          currentUnsubscribe: this.dataProviderUnsubscribe,
+          onRowsChanged: this.handleDataProviderRowsChanged
+        });
+      }
     }
 
     if (options.rowModelOptions) {
@@ -904,10 +808,6 @@ export class Grid {
     };
     this.rebuildColumnValueFormatContext();
 
-    if (previousSourceDataProvider !== this.sourceDataProvider) {
-      this.bindDataProvider(this.sourceDataProvider);
-    }
-
     void this.rebuildDerivedView();
   }
 
@@ -954,40 +854,15 @@ export class Grid {
   public async setSortModel(sortModel: SortModelItem[]): Promise<void> {
     const normalizedSortModel = this.normalizeSortModel(sortModel);
     this.sortModel = normalizedSortModel;
-    if (isRemoteDataProvider(this.sourceDataProvider)) {
+    if (this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)) {
       this.sortOperationToken += 1;
       this.filterOperationToken += 1;
       this.groupOperationToken += 1;
       this.pivotOperationToken += 1;
       this.sortMapping = null;
       this.filterMapping = null;
-      this.sourceDataProvider.setQueryModel({
-        sortModel: normalizedSortModel,
-        filterModel: this.filterModel,
-        groupModel: this.shouldUseServerGrouping() ? this.groupModel : undefined,
-        pivotModel: this.shouldUseServerPivot() ? this.pivotModel : undefined,
-        pivotValues: this.shouldUseServerPivot() ? this.pivotValues : undefined
-      });
-      const rowCount = this.sourceDataProvider.getRowCount();
-      if (this.rowModel.getState().rowCount !== rowCount) {
-        this.rowModel.setRowCount(rowCount);
-      } else {
-        this.rowModel.setBaseIdentityMapping();
-        this.rowModel.setFilterViewToData(null);
-      }
-      this.options = {
-        ...this.options,
-        dataProvider: this.sourceDataProvider
-      };
-      this.groupRows = [];
-      this.groupKeys = [];
-      this.groupedDataProvider = null;
-      this.pivotDataProvider = null;
-      this.pivotColumns = [];
-      this.treeRows = [];
-      this.treeNodeKeys = [];
-      this.treeNodeKeyTokens = [];
-      this.treeDataProvider = null;
+      this.syncRemoteProviderQueryState();
+      this.clearDerivedViewArtifacts();
       this.renderer.setOptions(this.getRendererOptions());
       return;
     }
@@ -1054,40 +929,15 @@ export class Grid {
 
   public async setFilterModel(filterModel: GridFilterModel): Promise<void> {
     this.filterModel = this.normalizeFilterModel(filterModel);
-    if (isRemoteDataProvider(this.sourceDataProvider)) {
+    if (this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)) {
       this.sortMapping = null;
       this.filterMapping = null;
       this.sortOperationToken += 1;
       this.filterOperationToken += 1;
       this.groupOperationToken += 1;
       this.pivotOperationToken += 1;
-      this.sourceDataProvider.setQueryModel({
-        sortModel: this.sortModel,
-        filterModel: this.filterModel,
-        groupModel: this.shouldUseServerGrouping() ? this.groupModel : undefined,
-        pivotModel: this.shouldUseServerPivot() ? this.pivotModel : undefined,
-        pivotValues: this.shouldUseServerPivot() ? this.pivotValues : undefined
-      });
-      const rowCount = this.sourceDataProvider.getRowCount();
-      if (this.rowModel.getState().rowCount !== rowCount) {
-        this.rowModel.setRowCount(rowCount);
-      } else {
-        this.rowModel.setBaseIdentityMapping();
-        this.rowModel.setFilterViewToData(null);
-      }
-      this.options = {
-        ...this.options,
-        dataProvider: this.sourceDataProvider
-      };
-      this.groupRows = [];
-      this.groupKeys = [];
-      this.groupedDataProvider = null;
-      this.pivotDataProvider = null;
-      this.pivotColumns = [];
-      this.treeRows = [];
-      this.treeNodeKeys = [];
-      this.treeNodeKeyTokens = [];
-      this.treeDataProvider = null;
+      this.syncRemoteProviderQueryState();
+      this.clearDerivedViewArtifacts();
       this.renderer.setOptions(this.getRendererOptions());
       return;
     }
@@ -1399,117 +1249,47 @@ export class Grid {
   }
 
   public getState(): GridState {
-    const columns = this.getSchemaColumnsForModelNormalization();
-    const hiddenColumnIds: string[] = [];
-    const pinnedColumns: Record<string, ColumnPinPosition> = {};
-    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-      const column = columns[columnIndex];
-      if (column.visible === false) {
-        hiddenColumnIds.push(column.id);
-      }
-      if (column.pinned) {
-        pinnedColumns[column.id] = column.pinned;
-      }
-    }
-
     const rendererState = this.renderer.getState();
-    return {
-      ...rendererState,
+    return this.stateService.createState({
+      columns: this.getSchemaColumnsForModelNormalization(),
       columnOrder: this.getColumnOrder(),
-      hiddenColumnIds,
-      pinnedColumns,
-      groupModel: cloneGroupModel(this.groupModel),
-      pivotModel: clonePivotModel(this.pivotModel),
-      groupExpansionState: cloneGroupExpansionState(this.groupExpansionState),
-      treeExpansionState: cloneGroupExpansionState(this.treeExpansionState)
-    };
+      scrollTop: rendererState.scrollTop,
+      groupModel: this.groupModel,
+      pivotModel: this.pivotModel,
+      groupExpansionState: this.groupExpansionState,
+      treeExpansionState: this.treeExpansionState
+    });
   }
 
   public setState(state: GridState): void {
-    let shouldSyncColumns = false;
-    let shouldRefreshGrouping = false;
-
-    if (Array.isArray(state.columnOrder) && state.columnOrder.length > 0) {
-      this.columnModel.setColumnOrder(state.columnOrder);
-      shouldSyncColumns = true;
-    }
-
-    if (Array.isArray(state.hiddenColumnIds)) {
-      const hiddenColumnIdSet = new Set<string>(state.hiddenColumnIds);
-      const columns = this.columnModel.getColumns();
-      for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-        const column = columns[columnIndex];
-        this.columnModel.setColumnVisibility(column.id, !hiddenColumnIdSet.has(column.id));
-      }
-      shouldSyncColumns = true;
-    }
-
-    if (state.pinnedColumns && typeof state.pinnedColumns === 'object') {
-      const columns = this.columnModel.getColumns();
-      for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-        const column = columns[columnIndex];
-        const pinned = state.pinnedColumns[column.id];
-        this.columnModel.setColumnPin(column.id, pinned === 'left' || pinned === 'right' ? pinned : undefined);
-      }
-      shouldSyncColumns = true;
-    }
-
-    if (shouldSyncColumns) {
-      this.syncColumnsToRenderer();
-    }
-
-    if (Array.isArray(state.groupModel)) {
-      const nextGroupModel = this.normalizeGroupModel(state.groupModel);
-      const isSameGroupModel = JSON.stringify(nextGroupModel) === JSON.stringify(this.groupModel);
-      if (!isSameGroupModel) {
-        this.groupModel = nextGroupModel;
-        this.options = {
-          ...this.options,
-          grouping: {
-            ...(this.options.grouping ?? {}),
-            mode: this.groupingMode,
-            groupModel: cloneGroupModel(this.groupModel),
-            aggregations: cloneGroupAggregations(this.groupAggregations),
-            defaultExpanded: this.groupDefaultExpanded
-          }
-        };
-        shouldRefreshGrouping = true;
-      }
-    }
-
-    if (Array.isArray(state.pivotModel)) {
-      const nextPivotModel = this.normalizePivotModel(state.pivotModel);
-      const isSamePivotModel = JSON.stringify(nextPivotModel) === JSON.stringify(this.pivotModel);
-      if (!isSamePivotModel) {
-        this.pivotModel = nextPivotModel;
-        this.options = {
-          ...this.options,
-          pivoting: {
-            ...(this.options.pivoting ?? {}),
-            mode: this.pivotingMode,
-            pivotModel: clonePivotModel(this.pivotModel),
-            values: clonePivotValues(this.pivotValues)
-          }
-        };
-        shouldRefreshGrouping = true;
-      }
-    }
-
-    if (state.groupExpansionState && typeof state.groupExpansionState === 'object') {
-      this.groupExpansionState = cloneGroupExpansionState(state.groupExpansionState);
-      shouldRefreshGrouping = true;
-    }
-
-    if (state.treeExpansionState && typeof state.treeExpansionState === 'object') {
-      this.treeExpansionState = cloneGroupExpansionState(state.treeExpansionState);
-      shouldRefreshGrouping = true;
-    }
-
-    this.renderer.setState({
-      scrollTop: state.scrollTop
+    const appliedState = this.stateService.applyState({
+      state,
+      columnModel: this.columnModel,
+      syncColumnsToRenderer: () => this.syncColumnsToRenderer(),
+      normalizeGroupModel: (groupModel) => this.normalizeGroupModel(groupModel),
+      normalizePivotModel: (pivotModel) => this.normalizePivotModel(pivotModel),
+      groupModel: this.groupModel,
+      pivotModel: this.pivotModel,
+      groupAggregations: this.groupAggregations,
+      pivotValues: this.pivotValues,
+      groupExpansionState: this.groupExpansionState,
+      treeExpansionState: this.treeExpansionState,
+      options: this.options,
+      groupingMode: this.groupingMode,
+      pivotingMode: this.pivotingMode,
+      groupDefaultExpanded: this.groupDefaultExpanded
     });
 
-    if (shouldRefreshGrouping) {
+    this.groupModel = appliedState.nextGroupModel;
+    this.pivotModel = appliedState.nextPivotModel;
+    this.groupExpansionState = appliedState.nextGroupExpansionState;
+    this.treeExpansionState = appliedState.nextTreeExpansionState;
+    this.options = appliedState.nextOptions;
+    this.renderer.setState({
+      scrollTop: appliedState.scrollTop
+    });
+
+    if (appliedState.shouldRefreshDerivedView) {
       if (this.hasActiveTreeData()) {
         void this.applyTreeViewInternal();
       } else {
@@ -1579,32 +1359,74 @@ export class Grid {
   }
 
   public destroy(): void {
-    this.unbindDataProvider();
-    this.eventBus.off('columnResize', this.handleColumnResize);
-    this.eventBus.off('columnReorder', this.handleColumnReorder);
-    this.eventBus.off('cellClick', this.handleCellClickForTree);
-    this.eventBus.off('cellClick', this.handleCellClickForGrouping);
-    this.eventBus.off('editCommit', this.handleEditCommitForGrouping);
-    this.eventBus.off('editCommit', this.handleEditCommitAuditLog);
+    this.dataProviderUnsubscribe = this.providerLifecycleService.disconnectRowsChangedListener(this.dataProviderUnsubscribe);
+    this.commandEventUnsubscribe?.();
+    this.commandEventUnsubscribe = null;
     this.renderer.destroy();
   }
 
-  private bindDataProvider(dataProvider: GridOptions['dataProvider']): void {
-    this.unbindDataProvider();
-    if (typeof dataProvider.onRowsChanged !== 'function') {
-      return;
+  private requireRemoteDataProvider(): RemoteDataProviderContract {
+    if (!this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)) {
+      throw new Error('Remote data provider is required for this operation');
     }
 
-    this.dataProviderUnsubscribe = dataProvider.onRowsChanged(this.handleDataProviderRowsChanged);
+    return this.sourceDataProvider;
   }
 
-  private unbindDataProvider(): void {
-    if (!this.dataProviderUnsubscribe) {
-      return;
-    }
+  private clearDerivedViewArtifacts(): void {
+    this.applyDataPipelineState(this.dataPipelineService.clearState());
+    this.pivotColumns = [];
+  }
 
-    this.dataProviderUnsubscribe();
-    this.dataProviderUnsubscribe = null;
+  private syncRemoteProviderQueryState(): void {
+    const remoteDataProvider = this.requireRemoteDataProvider();
+    this.remoteQueryService.syncProviderState({
+      dataProvider: remoteDataProvider,
+      rowModel: this.rowModel,
+      sortModel: this.sortModel,
+      filterModel: this.filterModel,
+      groupModel: this.groupModel,
+      pivotModel: this.pivotModel,
+      pivotValues: this.pivotValues,
+      useServerGrouping: this.shouldUseServerGrouping(),
+      useServerPivot: this.shouldUseServerPivot()
+    });
+    this.options = {
+      ...this.options,
+      dataProvider: remoteDataProvider
+    };
+  }
+
+  private getDataPipelineState(): GridDataPipelineState {
+    return {
+      groupRows: this.groupRows,
+      groupKeys: this.groupKeys,
+      groupedDataProvider: this.groupedDataProvider,
+      pivotDataProvider: this.pivotDataProvider,
+      treeRows: this.treeRows,
+      treeNodeKeys: this.treeNodeKeys,
+      treeNodeKeyTokens: this.treeNodeKeyTokens,
+      treeDataProvider: this.treeDataProvider
+    };
+  }
+
+  private applyDataPipelineState(nextState: GridDataPipelineState): void {
+    this.groupRows = nextState.groupRows;
+    this.groupKeys = nextState.groupKeys;
+    this.groupedDataProvider = nextState.groupedDataProvider;
+    this.pivotDataProvider = nextState.pivotDataProvider;
+    this.treeRows = nextState.treeRows;
+    this.treeNodeKeys = nextState.treeNodeKeys;
+    this.treeNodeKeyTokens = nextState.treeNodeKeyTokens;
+    this.treeDataProvider = nextState.treeDataProvider;
+  }
+
+  private commitDataPipelineResult(result: GridDataPipelineApplyResult): void {
+    this.applyDataPipelineState(result.nextState);
+    this.options = {
+      ...this.options,
+      dataProvider: result.dataProvider
+    };
   }
 
   private syncColumnsToRenderer(): void {
@@ -1620,121 +1442,19 @@ export class Grid {
     delimiter: ',' | '\t',
     options: GridExportOptions
   ): Promise<GridExportResult> {
-    const scope: GridExportScope = options.scope === 'visible' || options.scope === 'selection' ? options.scope : 'all';
-    const includeHeaders = options.includeHeaders !== false;
-    const includeSystemColumns = options.includeSystemColumns === true;
-    const rawChunkSize = Number(options.chunkSize);
-    const chunkSize = Number.isFinite(rawChunkSize) ? Math.max(1, Math.floor(rawChunkSize)) : DEFAULT_EXPORT_CHUNK_SIZE;
-    const operationId = `export-${++this.exportOperationToken}`;
-
-    const columns = this.resolveExportColumns(scope, includeSystemColumns);
-    const rowSegments = this.resolveExportRowSegments(scope);
-    const totalRows = this.countExportRows(rowSegments);
-
-    if (columns.length === 0) {
-      this.emitExportProgress(options.onProgress, {
-        operationId,
-        format,
-        scope,
-        status: 'completed',
-        processedRows: 0,
-        totalRows,
-        progress: 1
-      });
-      return {
-        operationId,
-        format,
-        scope,
-        content: '',
-        rowCount: 0,
-        canceled: false
-      };
-    }
-
-    const lines: string[] = [];
-    if (includeHeaders) {
-      lines.push(this.serializeExportHeader(columns, delimiter));
-    }
-
-    let processedRows = 0;
-    let canceled = options.signal?.aborted === true;
-    if (!canceled && totalRows > 0) {
-      this.emitExportProgress(options.onProgress, {
-        operationId,
-        format,
-        scope,
-        status: 'running',
-        processedRows: 0,
-        totalRows,
-        progress: 0
-      });
-    }
-
-    outer: for (let segmentIndex = 0; segmentIndex < rowSegments.length; segmentIndex += 1) {
-      const segment = rowSegments[segmentIndex];
-      for (let rowIndex = segment.startRow; rowIndex <= segment.endRow; rowIndex += 1) {
-        if (options.signal?.aborted) {
-          canceled = true;
-          break outer;
-        }
-
-        lines.push(this.serializeExportRow(rowIndex, columns, delimiter));
-        processedRows += 1;
-
-        if (processedRows % chunkSize === 0) {
-          this.emitExportProgress(options.onProgress, {
-            operationId,
-            format,
-            scope,
-            status: 'running',
-            processedRows,
-            totalRows,
-            progress: totalRows > 0 ? Math.min(1, processedRows / totalRows) : 1
-          });
-          await this.yieldExportFrame();
-          if (options.signal?.aborted) {
-            canceled = true;
-            break outer;
-          }
-        }
-      }
-    }
-
-    const completedStatus: GridExportStatus = canceled ? 'canceled' : 'completed';
-    this.emitExportProgress(options.onProgress, {
-      operationId,
+    return this.exportService.exportDelimited({
       format,
-      scope,
-      status: completedStatus,
-      processedRows,
-      totalRows,
-      progress: totalRows > 0 ? Math.min(1, processedRows / totalRows) : 1
-    });
-
-    return {
-      operationId,
-      format,
-      scope,
-      content: lines.join(DEFAULT_EXPORT_LINE_BREAK),
-      rowCount: processedRows,
-      canceled
-    };
-  }
-
-  private emitExportProgress(
-    onProgress: GridExportOptions['onProgress'],
-    event: GridExportProgressEvent
-  ): void {
-    if (typeof onProgress !== 'function') {
-      return;
-    }
-
-    onProgress(event);
-  }
-
-  private async yieldExportFrame(): Promise<void> {
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => resolve());
+      delimiter,
+      options,
+      rendererOrderedColumns: this.getVisibleColumnsInRendererOrder(),
+      selection: this.renderer.getSelection(),
+      visibleRowRange: this.renderer.getVisibleRowRange(),
+      viewRowCount: this.rowModel.getViewRowCount(),
+      getDataIndex: (rowIndex) => this.rowModel.getDataIndex(rowIndex),
+      getRow: (dataIndex) => this.options.dataProvider.getRow?.(dataIndex),
+      getValue: (dataIndex, columnId) => this.options.dataProvider.getValue(dataIndex, columnId),
+      formatCell: (column, row) => formatColumnValue(column, row, this.columnValueFormatContext ?? undefined),
+      isSystemColumn: isSystemUtilityColumn
     });
   }
 
@@ -1756,222 +1476,6 @@ export class Grid {
     }
 
     return [...leftColumns, ...centerColumns, ...rightColumns];
-  }
-
-  private resolveSelectionColumnIndexes(totalColumnCount: number): number[] | null {
-    if (totalColumnCount <= 0) {
-      return null;
-    }
-
-    const selection = this.renderer.getSelection();
-    const primaryRange = selection.cellRanges[0];
-    if (primaryRange) {
-      const startCol = Math.max(0, Math.min(totalColumnCount - 1, Math.min(primaryRange.c1, primaryRange.c2)));
-      const endCol = Math.max(0, Math.min(totalColumnCount - 1, Math.max(primaryRange.c1, primaryRange.c2)));
-      const indexes: number[] = [];
-      for (let colIndex = startCol; colIndex <= endCol; colIndex += 1) {
-        indexes.push(colIndex);
-      }
-      return indexes;
-    }
-
-    if (selection.activeCell) {
-      const clampedCol = Math.max(0, Math.min(totalColumnCount - 1, selection.activeCell.colIndex));
-      return [clampedCol];
-    }
-
-    return null;
-  }
-
-  private resolveExportColumns(scope: GridExportScope, includeSystemColumns: boolean): ColumnDef[] {
-    const rendererOrderedColumns = this.getVisibleColumnsInRendererOrder();
-    const baseColumns = includeSystemColumns
-      ? rendererOrderedColumns
-      : rendererOrderedColumns.filter((column) => !isSystemUtilityColumn(column.id));
-
-    if (scope !== 'selection') {
-      return baseColumns;
-    }
-
-    const selectedColumnIndexes = this.resolveSelectionColumnIndexes(rendererOrderedColumns.length);
-    if (!selectedColumnIndexes || selectedColumnIndexes.length === 0) {
-      return baseColumns;
-    }
-
-    const selectedColumns: ColumnDef[] = [];
-    for (let index = 0; index < selectedColumnIndexes.length; index += 1) {
-      const selectedColumnIndex = selectedColumnIndexes[index];
-      const column = rendererOrderedColumns[selectedColumnIndex];
-      if (!column) {
-        continue;
-      }
-
-      if (!includeSystemColumns && isSystemUtilityColumn(column.id)) {
-        continue;
-      }
-
-      selectedColumns.push(column);
-    }
-
-    return selectedColumns.length > 0 ? selectedColumns : baseColumns;
-  }
-
-  private resolveExportRowSegments(scope: GridExportScope): ExportRowSegment[] {
-    const rowCount = this.rowModel.getViewRowCount();
-    if (rowCount <= 0) {
-      return [];
-    }
-
-    if (scope === 'all') {
-      return [{ startRow: 0, endRow: rowCount - 1 }];
-    }
-
-    if (scope === 'visible') {
-      const visibleRange = this.renderer.getVisibleRowRange();
-      if (!visibleRange) {
-        return [];
-      }
-
-      return this.mergeExportRowSegments(
-        [
-          {
-            startRow: visibleRange.startRow,
-            endRow: visibleRange.endRow
-          }
-        ],
-        rowCount
-      );
-    }
-
-    const selection = this.renderer.getSelection();
-    const segments: ExportRowSegment[] = [];
-    const primaryRange = selection.cellRanges[0];
-
-    if (primaryRange) {
-      segments.push({
-        startRow: Math.min(primaryRange.r1, primaryRange.r2),
-        endRow: Math.max(primaryRange.r1, primaryRange.r2)
-      });
-    } else if (selection.rowRanges.length > 0) {
-      for (let rangeIndex = 0; rangeIndex < selection.rowRanges.length; rangeIndex += 1) {
-        const range = selection.rowRanges[rangeIndex];
-        segments.push({
-          startRow: Math.min(range.r1, range.r2),
-          endRow: Math.max(range.r1, range.r2)
-        });
-      }
-    } else if (selection.activeCell) {
-      segments.push({
-        startRow: selection.activeCell.rowIndex,
-        endRow: selection.activeCell.rowIndex
-      });
-    }
-
-    return this.mergeExportRowSegments(segments, rowCount);
-  }
-
-  private mergeExportRowSegments(segments: ExportRowSegment[], rowCount: number): ExportRowSegment[] {
-    if (segments.length === 0 || rowCount <= 0) {
-      return [];
-    }
-
-    const normalized: ExportRowSegment[] = [];
-    for (let index = 0; index < segments.length; index += 1) {
-      const segment = segments[index];
-      if (!segment) {
-        continue;
-      }
-
-      const startRow = Math.max(0, Math.min(rowCount - 1, Math.min(segment.startRow, segment.endRow)));
-      const endRow = Math.max(0, Math.min(rowCount - 1, Math.max(segment.startRow, segment.endRow)));
-      if (endRow < startRow) {
-        continue;
-      }
-
-      normalized.push({
-        startRow,
-        endRow
-      });
-    }
-
-    normalized.sort((left, right) => left.startRow - right.startRow || left.endRow - right.endRow);
-
-    const merged: ExportRowSegment[] = [];
-    for (let index = 0; index < normalized.length; index += 1) {
-      const current = normalized[index];
-      const previous = merged[merged.length - 1];
-      if (!previous || current.startRow > previous.endRow + 1) {
-        merged.push({ ...current });
-        continue;
-      }
-
-      previous.endRow = Math.max(previous.endRow, current.endRow);
-    }
-
-    return merged;
-  }
-
-  private countExportRows(segments: ExportRowSegment[]): number {
-    let rowCount = 0;
-    for (let index = 0; index < segments.length; index += 1) {
-      const segment = segments[index];
-      rowCount += Math.max(0, segment.endRow - segment.startRow + 1);
-    }
-    return rowCount;
-  }
-
-  private serializeExportHeader(columns: ColumnDef[], delimiter: ',' | '\t'): string {
-    const cells = new Array<string>(columns.length);
-    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-      cells[columnIndex] = this.escapeDelimitedValue(columns[columnIndex].header, delimiter);
-    }
-
-    return cells.join(delimiter);
-  }
-
-  private serializeExportRow(rowIndex: number, columns: ColumnDef[], delimiter: ',' | '\t'): string {
-    const dataIndex = this.rowModel.getDataIndex(rowIndex);
-    const row = this.buildExportRowData(dataIndex, columns);
-    const cells = new Array<string>(columns.length);
-    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-      const text = formatColumnValue(columns[columnIndex], row, this.columnValueFormatContext ?? undefined);
-      cells[columnIndex] = this.escapeDelimitedValue(text, delimiter);
-    }
-
-    return cells.join(delimiter);
-  }
-
-  private buildExportRowData(dataIndex: number, columns: ColumnDef[]): GridRowData {
-    if (dataIndex < 0) {
-      return {};
-    }
-
-    const providerRow = this.options.dataProvider.getRow?.(dataIndex);
-    if (providerRow) {
-      return providerRow;
-    }
-
-    const fallbackRow: GridRowData = {};
-    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-      const columnId = columns[columnIndex].id;
-      fallbackRow[columnId] = this.options.dataProvider.getValue(dataIndex, columnId);
-    }
-
-    return fallbackRow;
-  }
-
-  private escapeDelimitedValue(value: string, delimiter: ',' | '\t'): string {
-    if (value.length === 0) {
-      return '';
-    }
-
-    const shouldQuote =
-      value.includes(delimiter) || value.includes('"') || value.includes('\n') || value.includes('\r');
-    if (!shouldQuote) {
-      return value;
-    }
-
-    return `"${value.replace(/"/g, '""')}"`;
   }
 
   private captureBaseColumnsForClientPivot(): void {
@@ -2025,145 +1529,46 @@ export class Grid {
   }
 
   private handleDataProviderRowsChanged = (): void => {
-    const rowCount = this.sourceDataProvider.getRowCount();
-    if (this.rowModel.getState().rowCount !== rowCount) {
-      this.rowModel.setRowCount(rowCount);
-      if (isRemoteDataProvider(this.sourceDataProvider)) {
-        this.sortMapping = null;
-        this.filterMapping = null;
-      }
+    const rowsChangedResolution = this.providerLifecycleService.resolveRowsChanged({
+      dataProvider: this.sourceDataProvider,
+      currentRowCount: this.rowModel.getState().rowCount,
+      hasActiveDerivedView:
+        this.sortModel.length > 0 ||
+        this.hasActiveFilterModel() ||
+        this.hasActiveClientGrouping() ||
+        this.hasActiveTreeData() ||
+        this.hasActivePivotModel(),
+      isRemoteDataProvider: this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider),
+      shouldSyncRemoteQueryState:
+        (this.shouldUseServerGrouping() || this.shouldUseServerPivot()) &&
+        this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)
+    });
+
+    if (rowsChangedResolution.shouldSetRowCount) {
+      this.rowModel.setRowCount(rowsChangedResolution.nextRowCount);
     }
 
-    if (
-      this.sortModel.length > 0 ||
-      this.hasActiveFilterModel() ||
-      this.hasActiveClientGrouping() ||
-      this.hasActiveTreeData() ||
-      this.hasActivePivotModel()
-    ) {
+    if (rowsChangedResolution.shouldResetRemoteMappings) {
+      this.sortMapping = null;
+      this.filterMapping = null;
+    }
+
+    if (rowsChangedResolution.shouldRebuildDerivedView) {
       void this.rebuildDerivedView();
       return;
     }
 
-    if ((this.shouldUseServerGrouping() || this.shouldUseServerPivot()) && isRemoteDataProvider(this.sourceDataProvider)) {
-      this.sourceDataProvider.setQueryModel({
-        sortModel: this.sortModel,
-        filterModel: this.filterModel,
-        groupModel: this.shouldUseServerGrouping() ? this.groupModel : undefined,
-        pivotModel: this.shouldUseServerPivot() ? this.pivotModel : undefined,
-        pivotValues: this.shouldUseServerPivot() ? this.pivotValues : undefined
-      });
+    if (rowsChangedResolution.shouldSyncRemoteQueryState) {
+      this.syncRemoteProviderQueryState();
     }
 
-    this.options = {
-      ...this.options,
-      dataProvider: this.sourceDataProvider
-    };
-    this.renderer.setOptions(this.getRendererOptions());
-  };
-
-  private handleColumnResize = (event: ColumnResizeEvent): void => {
-    if (event.phase === 'start') {
-      return;
+    if (rowsChangedResolution.shouldRefreshRenderer) {
+      this.options = {
+        ...this.options,
+        dataProvider: this.sourceDataProvider
+      };
+      this.renderer.setOptions(this.getRendererOptions());
     }
-
-    const hasColumn = this.columnModel.getColumns().some((column) => column.id === event.columnId);
-    if (!hasColumn) {
-      return;
-    }
-
-    this.columnModel.setColumnWidth(event.columnId, event.width);
-    this.syncColumnsToRenderer();
-  };
-
-  private handleColumnReorder = (event: ColumnReorderEvent): void => {
-    if (!Array.isArray(event.columnOrder) || event.columnOrder.length === 0) {
-      return;
-    }
-
-    this.columnModel.setColumnOrder(event.columnOrder);
-    this.syncColumnsToRenderer();
-  };
-
-  private handleCellClickForGrouping = (event: GridEventMap['cellClick']): void => {
-    if (this.hasActiveTreeData()) {
-      return;
-    }
-
-    if (!this.hasActiveClientGrouping()) {
-      return;
-    }
-
-    if (!(this.options.dataProvider instanceof GroupedDataProvider)) {
-      return;
-    }
-
-    const groupRow = this.options.dataProvider.getGroupRow(event.dataIndex);
-    if (!groupRow) {
-      return;
-    }
-
-    if (event.columnId !== groupRow.columnId) {
-      return;
-    }
-
-    void this.toggleGroupExpanded(groupRow.groupKey);
-  };
-
-  private handleCellClickForTree = (event: GridEventMap['cellClick']): void => {
-    if (!this.hasActiveTreeData()) {
-      return;
-    }
-
-    if (!(this.options.dataProvider instanceof TreeDataProvider)) {
-      return;
-    }
-
-    const treeRow = this.options.dataProvider.getTreeRow(event.dataIndex);
-    if (!treeRow || !treeRow.hasChildren) {
-      return;
-    }
-
-    const treeColumnId = this.treeDataOptions.treeColumnId ?? '';
-    if (treeColumnId.length > 0 && event.columnId !== treeColumnId) {
-      return;
-    }
-
-    void this.toggleTreeExpanded(treeRow.nodeKey);
-  };
-
-  private handleEditCommitForGrouping = (): void => {
-    if (this.hasActiveTreeData()) {
-      void this.applyTreeViewInternal();
-      return;
-    }
-
-    if (!this.hasActiveClientGrouping()) {
-      return;
-    }
-
-    void this.applyGroupingViewInternal();
-  };
-
-  private handleEditCommitAuditLog = (event: GridEventMap['editCommit']): void => {
-    const onAuditLog = this.options.onAuditLog;
-    if (!onAuditLog) {
-      return;
-    }
-
-    onAuditLog({
-      eventName: 'editCommit',
-      rowIndex: event.rowIndex,
-      dataIndex: event.dataIndex,
-      rowKey: event.rowKey,
-      columnId: event.columnId,
-      previousValue: event.previousValue,
-      value: event.value,
-      source: event.source,
-      commitId: event.commitId,
-      timestampMs: event.timestampMs,
-      timestamp: event.timestamp
-    });
   };
 
   private getColumnOrder(): string[] {
@@ -2209,28 +1614,32 @@ export class Grid {
   }
 
   private hasActiveClientPivot(): boolean {
-    return this.hasActivePivotModel() && !isRemoteDataProvider(this.sourceDataProvider) && !this.hasActiveTreeData();
+    return this.hasActivePivotModel() && !this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider) && !this.hasActiveTreeData();
   }
 
   private hasActiveTreeData(): boolean {
-    return this.treeDataOptions.enabled === true && !isRemoteDataProvider(this.sourceDataProvider);
+    return this.treeDataOptions.enabled === true && !this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider);
   }
 
   private hasActiveClientGrouping(): boolean {
     return (
       this.hasActiveGroupModel() &&
-      !isRemoteDataProvider(this.sourceDataProvider) &&
+      !this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider) &&
       !this.hasActiveTreeData() &&
       !this.hasActivePivotModel()
     );
   }
 
   private shouldUseServerGrouping(): boolean {
-    return this.groupingMode === 'server' && isRemoteDataProvider(this.sourceDataProvider);
+    return this.groupingMode === 'server' && this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider);
   }
 
   private shouldUseServerPivot(): boolean {
-    return this.pivotingMode === 'server' && this.hasActivePivotModel() && isRemoteDataProvider(this.sourceDataProvider);
+    return (
+      this.pivotingMode === 'server' &&
+      this.hasActivePivotModel() &&
+      this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)
+    );
   }
 
   private shouldUseServerTreeMode(): boolean {
@@ -2504,7 +1913,7 @@ export class Grid {
   }
 
   private async rebuildDerivedView(): Promise<void> {
-    if (isRemoteDataProvider(this.sourceDataProvider)) {
+    if (this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)) {
       this.sortOperationToken += 1;
       this.filterOperationToken += 1;
       this.groupOperationToken += 1;
@@ -2512,32 +1921,9 @@ export class Grid {
       this.treeOperationToken += 1;
       this.sortMapping = null;
       this.filterMapping = null;
-      this.groupRows = [];
-      this.groupKeys = [];
-      this.groupedDataProvider = null;
-      this.pivotDataProvider = null;
-      this.pivotColumns = [];
-      this.treeRows = [];
-      this.treeNodeKeys = [];
-      this.treeNodeKeyTokens = [];
-      this.treeDataProvider = null;
+      this.clearDerivedViewArtifacts();
       this.restoreColumnsAfterClientPivot();
-      this.sourceDataProvider.setQueryModel({
-        sortModel: this.sortModel,
-        filterModel: this.filterModel,
-        groupModel: this.shouldUseServerGrouping() ? this.groupModel : undefined,
-        pivotModel: this.shouldUseServerPivot() ? this.pivotModel : undefined,
-        pivotValues: this.shouldUseServerPivot() ? this.pivotValues : undefined
-      });
-
-      const sourceRowCount = this.sourceDataProvider.getRowCount();
-      this.rowModel.setRowCount(sourceRowCount);
-      this.rowModel.setBaseIdentityMapping();
-      this.rowModel.setFilterViewToData(null);
-      this.options = {
-        ...this.options,
-        dataProvider: this.sourceDataProvider
-      };
+      this.syncRemoteProviderQueryState();
       this.renderer.setOptions(this.getRendererOptions());
       return;
     }
@@ -2630,32 +2016,15 @@ export class Grid {
     }
 
     this.restoreColumnsAfterClientPivot();
-    const sourceRowCount = this.sourceDataProvider.getRowCount();
-    this.treeRows = [];
-    this.treeNodeKeys = [];
-    this.treeNodeKeyTokens = [];
-    this.treeDataProvider = null;
-    this.groupRows = [];
-    this.groupKeys = [];
-    this.groupedDataProvider = null;
-    this.pivotDataProvider = null;
     this.pivotColumns = [];
-    this.options = {
-      ...this.options,
-      dataProvider: this.sourceDataProvider
-    };
-
-    if (this.rowModel.getState().rowCount !== sourceRowCount) {
-      this.rowModel.setRowCount(sourceRowCount);
-    }
-
-    if (this.sortMapping) {
-      this.rowModel.setBaseViewToData(this.sortMapping);
-    } else {
-      this.rowModel.setBaseIdentityMapping();
-    }
-
-    this.rowModel.setFilterViewToData(this.filterMapping);
+    this.commitDataPipelineResult(
+      this.dataPipelineService.applyFlatView({
+        sourceDataProvider: this.sourceDataProvider,
+        rowModel: this.rowModel,
+        sortMapping: this.sortMapping,
+        filterMapping: this.filterMapping
+      })
+    );
     this.renderer.setOptions(this.getRendererOptions());
   }
 
@@ -2701,23 +2070,13 @@ export class Grid {
   }
 
   private applyPivotResult(result: PivotExecutionResult): void {
-    this.groupRows = [];
-    this.groupKeys = [];
-    this.groupedDataProvider = null;
-    this.treeRows = [];
-    this.treeNodeKeys = [];
-    this.treeNodeKeyTokens = [];
-    this.treeDataProvider = null;
-
     this.applyClientPivotColumns(result.columns);
-    this.pivotDataProvider = new LocalDataProvider(result.rows, { keyField: '__pivot_row_key' });
-    this.options = {
-      ...this.options,
-      dataProvider: this.pivotDataProvider
-    };
-    this.rowModel.setRowCount(this.pivotDataProvider.getRowCount());
-    this.rowModel.setBaseIdentityMapping();
-    this.rowModel.setFilterViewToData(null);
+    this.commitDataPipelineResult(
+      this.dataPipelineService.applyPivotResult({
+        rowModel: this.rowModel,
+        result
+      })
+    );
   }
 
   private async applyGroupingViewInternal(): Promise<void> {
@@ -2763,34 +2122,15 @@ export class Grid {
   }
 
   private applyGroupingResult(result: GroupExecutionResult): void {
-    this.treeRows = [];
-    this.treeNodeKeys = [];
-    this.treeNodeKeyTokens = [];
-    this.treeDataProvider = null;
-    this.pivotDataProvider = null;
     this.pivotColumns = [];
-
-    this.groupRows = result.rows;
-    this.groupKeys = result.groupKeys.slice();
-
-    if (!this.groupedDataProvider) {
-      this.groupedDataProvider = new GroupedDataProvider(this.sourceDataProvider);
-    } else {
-      this.groupedDataProvider.setSourceDataProvider(this.sourceDataProvider);
-    }
-
-    this.groupedDataProvider.applySnapshot({
-      rows: result.rows,
-      groupKeys: result.groupKeys
-    });
-
-    this.options = {
-      ...this.options,
-      dataProvider: this.groupedDataProvider
-    };
-    this.rowModel.setRowCount(this.groupedDataProvider.getRowCount());
-    this.rowModel.setBaseIdentityMapping();
-    this.rowModel.setFilterViewToData(null);
+    this.commitDataPipelineResult(
+      this.dataPipelineService.applyGroupingResult({
+        state: this.getDataPipelineState(),
+        sourceDataProvider: this.sourceDataProvider,
+        rowModel: this.rowModel,
+        result
+      })
+    );
   }
 
   private async applyTreeViewInternal(expandNodeKey?: RowKey, nextExpanded?: boolean): Promise<void> {
@@ -2838,36 +2178,16 @@ export class Grid {
   }
 
   private applyTreeResult(result: TreeExecutionResult): void {
-    this.groupRows = [];
-    this.groupKeys = [];
-    this.groupedDataProvider = null;
-    this.pivotDataProvider = null;
     this.pivotColumns = [];
-
-    this.treeRows = result.rows;
-    this.treeNodeKeys = result.nodeKeys.slice();
-    this.treeNodeKeyTokens = result.nodeKeyTokens.slice();
-
-    if (!this.treeDataProvider) {
-      this.treeDataProvider = new TreeDataProvider(this.sourceDataProvider);
-    } else {
-      this.treeDataProvider.setSourceDataProvider(this.sourceDataProvider);
-    }
-
-    this.treeDataProvider.setTreeColumnId(this.treeDataOptions.treeColumnId ?? '');
-    this.treeDataProvider.applySnapshot({
-      rows: result.rows,
-      nodeKeys: result.nodeKeys,
-      nodeKeyTokens: result.nodeKeyTokens
-    });
-
-    this.options = {
-      ...this.options,
-      dataProvider: this.treeDataProvider
-    };
-    this.rowModel.setRowCount(this.treeDataProvider.getRowCount());
-    this.rowModel.setBaseIdentityMapping();
-    this.rowModel.setFilterViewToData(null);
+    this.commitDataPipelineResult(
+      this.dataPipelineService.applyTreeResult({
+        state: this.getDataPipelineState(),
+        sourceDataProvider: this.sourceDataProvider,
+        rowModel: this.rowModel,
+        result,
+        treeColumnId: this.treeDataOptions.treeColumnId ?? ''
+      })
+    );
   }
 
   private async ensureTreeLazyChildrenLoaded(nodeKey: RowKey): Promise<void> {

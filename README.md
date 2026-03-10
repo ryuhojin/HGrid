@@ -3,13 +3,13 @@
 HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 데이터 그리드**입니다.
 `Canvas/WebGL/OffscreenCanvas` 없이 대용량(10M~100M) 스크롤, pinned 컬럼, 수직/수평 가상화, 풀링 렌더를 제공합니다.
 
-## 프로젝트 상태 (2026-03-09)
+## 프로젝트 상태 (2026-03-10)
 
-- 완료: `Phase 0`, `Phase 1`, `Phase 2`, `Phase 3.1~3.5`, `Phase 4.1~4.4`, `Phase 5.1~5.2`, `Phase 6.1~6.4`, `Phase 7.1~7.7`, `Phase 8.1~8.2`, `Phase 9.1~9.3`, `Phase 10.1~10.4`, `Phase 11.1~11.3`, `Phase 12.1~12.4`, `Phase 13.1~13.3`, `Phase 14.1~14.3(자동 게이트)`
-- 다음 범위: `Phase 14.2 OS 기록 보강 + Phase 15` (release readiness)
-- 상세 기준: `checklist.md`
+- 코어 베이스라인: `Phase 0` ~ `Phase 14.3` 범위의 핵심 엔진/테스트/벤치 파이프라인은 구현됨
+- 남은 핵심 범위: actual Worker runtime, mature server-side row model, enterprise product surface, framework/package productization, `Phase 15` (commercial readiness)
+- 정확한 현재 평가는 `checklist.md`, `docs/enterprise-feature-matrix.md`, `docs/enterprise-known-limitations.md` 기준으로 확인
 
-구현 완료 핵심:
+현재 구현된 핵심 기반:
 
 - 분리 스크롤 셸 (x/y native scroll source 분리 + sync lock)
 - Vertical/Horizontal virtualization + binary search window
@@ -22,26 +22,34 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Selection model ranges + keyboard navigation
 - Single overlay editor + sync/async validation
 - Worker protocol 계약 + transferable 유틸
-- Worker-first sorting/filtering executor + Grid API 연동
+- Cooperative sorting/filtering executor + Grid API 연동
 - Column feature pack (resize/reorder/pin/hide) + selection indicator columns
 - Multi-level column group header
-- Grouping pipeline (group model + key 기반 expand/collapse + sum/avg/min/max/count/custom aggregation)
-- Tree data pipeline (parentId model + key expansion state + lazy children load)
-- Pivot pipeline (로컬 pivot matrix + 동적 컬럼 생성 + 서버 pivot query model)
+- Grouping pipeline (client grouping + key 기반 expand/collapse + sum/avg/min/max/count/custom aggregation)
+- Tree data pipeline (client tree model + key expansion state + lazy children load)
+- Pivot pipeline (client pivot matrix + 동적 컬럼 생성 + server query model)
 - Clipboard pipeline (selection copy TSV + plain text paste + HTML paste 방어)
 - CSV/TSV export pipeline (visible/selection/all + progress + cancel)
 - Excel(xlsx) plugin pipeline (plugin 분리, export/import, header mapping, validation)
 - CSS Variables theme token pipeline (`.h-theme-light` / `.h-theme-dark` + `setTheme()` runtime override)
 - SI Design Guide pipeline (토큰 매핑표 + 커스터마이징 레시피 + 고객사 테마 샘플)
-- RemoteDataProvider block cache/LRU/prefetch + server-side query model(sort/filter/group/pivot)
+- RemoteDataProvider block cache/LRU/prefetch + server query model(sort/filter/group/pivot)
 - 성능 스모크(e2e heartbeat max gap)로 그룹/트리/피벗 UI freeze 회귀 점검
 - ARIA Grid semantics pipeline (`aria-rowcount/colcount/rowindex/colindex` + `aria-activedescendant` focus strategy)
 - Keyboard-only pipeline (navigation/selection/editing, `Ctrl/Cmd+A`, `F2`, editor `Tab/Shift+Tab`)
 - i18n pipeline (`localeText` externalization, Intl number/date formatting, RTL direction option)
-- Security/CSP hardening (`unsafeHtml` opt-in + sanitize hook, `editCommit` audit payload 표준화, CSP/정적 보안 스캔)
+- Security/CSP baseline (`unsafeHtml` opt-in + sanitize hook, `editCommit` audit payload 표준화, CSP/정적 보안 스캔)
 - Performance baseline policy (`Phase 14.1` 참조 환경 문서화 + 벤치 데이터 생성 스크립트)
 - Performance scenarios (`Phase 14.2` initial render/FPS/100M mapping/sort/filter/create-destroy/scroll regression)
 - Performance gates (`Phase 14.3` long-task rate/p95/dom-pool 고정 기준 강제)
+
+아직 엔터프라이즈 상용 제품으로 완료되지 않은 범위:
+
+- actual Worker runtime (`worker-protocol`은 있으나 `.worker.ts` 런타임은 아직 없음)
+- mature server-side row model (`RemoteDataProvider`는 block cache/query model 중심)
+- enterprise UI surface (column menu, filter UI, side bar/tool panel, status bar 등)
+- React/Vue product package 및 plugin SDK
+- release/commercial readiness (`Phase 15`)
 
 ## 핵심 원칙
 

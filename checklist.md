@@ -7,6 +7,10 @@
 > - [ ] 테스트(최소 1개: unit 또는 e2e)
 > - [ ] 문서(최소 registry + 짧은 md)
 > - [ ] 성능 영향 분석(핫패스 변경 시)
+>
+> 주의:
+> - 이 문서에서 phase가 체크되어 있어도 그것이 곧바로 enterprise product parity 또는 commercial readiness를 의미하지는 않는다.
+> - 현재 제품 관점 평가는 `docs/enterprise-feature-matrix.md`와 `docs/enterprise-known-limitations.md`를 기준으로 본다.
 
 ---
 

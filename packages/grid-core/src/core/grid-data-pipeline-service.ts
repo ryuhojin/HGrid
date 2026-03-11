@@ -3,9 +3,10 @@ import type { GroupExecutionResult, GroupViewRow } from '../data/group-executor'
 import { GroupedDataProvider } from '../data/grouped-data-provider';
 import { LocalDataProvider } from '../data/local-data-provider';
 import type { PivotExecutionResult } from '../data/pivot-executor';
-import type { RowModel, ViewToDataMapping } from '../data/row-model';
+import type { ViewToDataMapping } from '../data/row-model';
 import { TreeDataProvider } from '../data/tree-data-provider';
 import type { TreeExecutionResult } from '../data/tree-executor';
+import type { GridDerivedViewRowModelPort } from './grid-internal-contracts';
 
 export interface GridDataPipelineState {
   groupRows: GroupViewRow[];
@@ -25,27 +26,27 @@ export interface GridDataPipelineApplyResult {
 
 export interface GridDataPipelineFlatViewParams {
   sourceDataProvider: DataProvider;
-  rowModel: RowModel;
+  rowModel: GridDerivedViewRowModelPort;
   sortMapping: ViewToDataMapping | null;
   filterMapping: ViewToDataMapping | null;
 }
 
 export interface GridDataPipelinePivotParams {
-  rowModel: RowModel;
+  rowModel: GridDerivedViewRowModelPort;
   result: PivotExecutionResult;
 }
 
 export interface GridDataPipelineGroupingParams {
   state: GridDataPipelineState;
   sourceDataProvider: DataProvider;
-  rowModel: RowModel;
+  rowModel: GridDerivedViewRowModelPort;
   result: GroupExecutionResult;
 }
 
 export interface GridDataPipelineTreeParams {
   state: GridDataPipelineState;
   sourceDataProvider: DataProvider;
-  rowModel: RowModel;
+  rowModel: GridDerivedViewRowModelPort;
   result: TreeExecutionResult;
   treeColumnId: string;
 }

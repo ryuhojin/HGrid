@@ -82,12 +82,12 @@
 - [x] 대형 파일 분해 후 회귀 테스트 유지
 
 ## E0.3 내부 계약 정리
-- [ ] renderer <-> grid <-> data pipeline 내부 인터페이스 정의
-- [ ] private 필드 의존을 줄이는 internal contract 작성
-- [ ] ADR 문서 추가:
-  - [ ] DOM-only 유지
-  - [ ] pooling invariants
-  - [ ] virtualization invariants
+- [x] renderer <-> grid <-> data pipeline 내부 인터페이스 정의
+- [x] private 필드 의존을 줄이는 internal contract 작성
+- [x] ADR 문서 추가:
+  - [x] DOM-only 유지
+  - [x] pooling invariants
+  - [x] virtualization invariants
 
 ### 변경 대상
 - [x] `packages/grid-core/src/core/grid.ts`

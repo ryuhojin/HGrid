@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 43 - Renderer Hardening Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 1180px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 43 - Renderer Hardening Smoke</h1>
+    <p>
+      E0 아키텍처 하드닝 이후 renderer 분해 결과를 한 화면에서 확인하는 smoke example입니다.
+      row pool, horizontal virtualization, aria-activedescendant, selection/state restore, selection export를 함께 점검할 수 있습니다.
+      `Name` 또는 `Score` 셀을 더블클릭하면 editor overlay까지 수동으로 확인할 수 있습니다.
+    </p>
+
+    <div class="toolbar">
+      <button id="jump-row" type="button">jump row 12000</button>
+      <button id="jump-top" type="button">jump top</button>
+      <button id="scroll-wide" type="button">scroll wide</button>
+      <button id="reset-wide" type="button">reset wide</button>
+      <button id="select-range" type="button">select range</button>
+      <button id="clear-selection" type="button">clear selection</button>
+    </div>
+    <div class="toolbar">
+      <button id="save-state" type="button">save state</button>
+      <button id="restore-state" type="button">restore state</button>
+      <button id="export-selection" type="button">export selection TSV</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>Summary</h2>
+        <pre id="summary">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Renderer DOM</h2>
+        <pre id="dom-metrics">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Export Preview</h2>
+        <pre id="preview">No export result yet.</pre>
+      </section>
+      <section class="panel">
+        <h2>Action Log</h2>
+        <pre id="log">Ready</pre>
+      </section>
+    </div>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const GRID_ROW_HEIGHT = 28;
+      const JUMP_ROW_INDEX = 12000;
+      const NAME_COL_INDEX = 2;
+      const REGION_COL_INDEX = 3;
+      const STATUS_COL_INDEX = 4;
+      const NOTE_COL_INDEX = 6;
+      const BASE_TIME = Date.UTC(2026, 2, 11, 9, 0, 0);
+      const regions = ['KR', 'US', 'JP', 'DE', 'SG'];
+      const statuses = ['active', 'idle', 'hold'];
+      let savedState = null;
+      let savedSelection = null;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function createRows(rowCount) {
+        return Array.from({ length: rowCount }, (_, index) => ({
+          id: 100000 + index + 1,
+          name: 'Renderer-' + String(index + 1).padStart(5, '0'),
+          region: regions[index % regions.length],
+          status: statuses[index % statuses.length],
+          updatedAt: new Date(BASE_TIME - index * 45000).toISOString(),
+          note:
+            'This row verifies DOM pool reuse, horizontal virtualization, aria sync, and selection state. ' +
+            'Segment #' +
+            ((index % 7) + 1),
+          score: (index * 17) % 1000
+        }));
+      }
+
+      const columns = [
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: 'id', header: 'ID', width: 110, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'region', header: 'Region', width: 120, type: 'text' },
+        { id: 'status', header: 'Status', width: 120, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' },
+        { id: 'note', header: 'Note', width: 520, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number', editable: true, pinned: 'right' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: createRows(15000),
+        height: 420,
+        rowHeight: GRID_ROW_HEIGHT,
+        overscan: 6,
+        overscanCols: 2
+      });
+
+      const summaryElement = document.getElementById('summary');
+      const domMetricsElement = document.getElementById('dom-metrics');
+      const previewElement = document.getElementById('preview');
+      const logElement = document.getElementById('log');
+
+      function pushLog(message) {
+        const lines = logElement.textContent ? logElement.textContent.split('\n') : [];
+        lines.unshift(new Date().toLocaleTimeString('ko-KR') + ' - ' + message);
+        logElement.textContent = lines.slice(0, 14).join('\n');
+      }
+
+      function countVisible(elements) {
+        return Array.from(elements).filter((element) => element.style.display !== 'none').length;
+      }
+
+      function countVisibleCells(rowElements) {
+        let total = 0;
+        rowElements.forEach((rowElement) => {
+          total += Array.from(rowElement.querySelectorAll('.hgrid__cell')).filter((cell) => cell.style.display !== 'none').length;
+        });
+        return total;
+      }
+
+      function inspectExample() {
+        const root = document.querySelector('.hgrid');
+        const centerRows = Array.from(document.querySelectorAll('.hgrid__row--center'));
+        const leftRows = Array.from(document.querySelectorAll('.hgrid__row--left'));
+        const rightRows = Array.from(document.querySelectorAll('.hgrid__row--right'));
+        const selection = grid.getSelection();
+        const visibleRange = grid.getVisibleRowRange();
+        const state = grid.getState();
+        const horizontalScroller = document.querySelector('.hgrid__h-scroll');
+        const viewportCenter = document.querySelector('.hgrid__rows-center-viewport') || document.querySelector('.hgrid__rows-viewport-center');
+
+        return {
+          scrollTop: state.scrollTop,
+          visibleRange,
+          selection,
+          activeDescendant: root ? root.getAttribute('aria-activedescendant') : null,
+          rowPool: {
+            left: leftRows.length,
+            center: centerRows.length,
+            right: rightRows.length
+          },
+          visibleRows: {
+            left: countVisible(leftRows),
+            center: countVisible(centerRows),
+            right: countVisible(rightRows)
+          },
+          visibleCenterCells: countVisibleCells(centerRows),
+          horizontalScrollLeft: horizontalScroller ? horizontalScroller.scrollLeft : 0,
+          transforms: {
+            headerCenter: document.querySelector('.hgrid__header-viewport')?.style.transform || '',
+            centerViewport: viewportCenter ? viewportCenter.style.transform : '',
+            leftViewport: document.querySelector('.hgrid__rows-left-viewport, .hgrid__rows-viewport-left')?.style.transform || ''
+          }
+        };
+      }
+
+      function renderPanels() {
+        const info = inspectExample();
+        summaryElement.textContent = JSON.stringify(
+          {
+            scrollTop: info.scrollTop,
+            visibleRange: info.visibleRange,
+            activeCell: info.selection.activeCell,
+            cellRangeCount: info.selection.cellRanges.length,
+            activeDescendant: info.activeDescendant
+          },
+          null,
+          2
+        );
+        domMetricsElement.textContent = JSON.stringify(
+          {
+            rowPool: info.rowPool,
+            visibleRows: info.visibleRows,
+            visibleCenterCells: info.visibleCenterCells,
+            horizontalScrollLeft: info.horizontalScrollLeft,
+            transforms: info.transforms
+          },
+          null,
+          2
+        );
+      }
+
+      async function jumpToRow(rowIndex) {
+        grid.setState({
+          ...grid.getState(),
+          scrollTop: rowIndex * GRID_ROW_HEIGHT
+        });
+        await waitFrame();
+        renderPanels();
+      }
+
+      async function setHorizontalScroll(scrollLeft) {
+        const horizontalScroller = document.querySelector('.hgrid__h-scroll');
+        if (!horizontalScroller) {
+          return;
+        }
+
+        horizontalScroller.scrollLeft = scrollLeft;
+        horizontalScroller.dispatchEvent(new Event('scroll'));
+        await waitFrame();
+        renderPanels();
+      }
+
+      async function selectSmokeRange() {
+        await jumpToRow(JUMP_ROW_INDEX);
+        grid.setSelection({
+          activeCell: { rowIndex: JUMP_ROW_INDEX, colIndex: NAME_COL_INDEX },
+          cellRanges: [
+            {
+              r1: JUMP_ROW_INDEX,
+              c1: NAME_COL_INDEX,
+              r2: JUMP_ROW_INDEX + 2,
+              c2: STATUS_COL_INDEX
+            }
+          ],
+          rowRanges: []
+        });
+        await waitFrame();
+        renderPanels();
+      }
+
+      document.getElementById('jump-row').addEventListener('click', async () => {
+        await jumpToRow(JUMP_ROW_INDEX);
+        pushLog('jumped to row ' + JUMP_ROW_INDEX);
+      });
+
+      document.getElementById('jump-top').addEventListener('click', async () => {
+        await jumpToRow(0);
+        pushLog('jumped to top');
+      });
+
+      document.getElementById('scroll-wide').addEventListener('click', async () => {
+        await setHorizontalScroll(860);
+        pushLog('horizontal scroll moved to 860');
+      });
+
+      document.getElementById('reset-wide').addEventListener('click', async () => {
+        await setHorizontalScroll(0);
+        pushLog('horizontal scroll reset');
+      });
+
+      document.getElementById('select-range').addEventListener('click', async () => {
+        await selectSmokeRange();
+        pushLog('selected 3x3 range at row ' + JUMP_ROW_INDEX);
+      });
+
+      document.getElementById('clear-selection').addEventListener('click', async () => {
+        grid.clearSelection();
+        await waitFrame();
+        renderPanels();
+        pushLog('selection cleared');
+      });
+
+      document.getElementById('save-state').addEventListener('click', () => {
+        savedState = grid.getState();
+        savedSelection = grid.getSelection();
+        pushLog('saved current state and selection');
+      });
+
+      document.getElementById('restore-state').addEventListener('click', async () => {
+        if (!savedState || !savedSelection) {
+          pushLog('no saved state');
+          return;
+        }
+
+        grid.setState(savedState);
+        grid.setSelection(savedSelection);
+        await waitFrame();
+        renderPanels();
+        pushLog('restored saved state and selection');
+      });
+
+      document.getElementById('export-selection').addEventListener('click', async () => {
+        const result = await grid.exportTsv({
+          scope: 'selection',
+          includeHeaders: true
+        });
+        previewElement.textContent = result.content.split('\n').slice(0, 12).join('\n');
+        pushLog('exported selection as TSV (' + result.rowCount + ' rows)');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderPanels();
+        pushLog('panel refresh');
+      });
+
+      grid.on('selectionChange', (event) => {
+        pushLog(
+          'selectionChange active=' +
+            (event.activeCell ? event.activeCell.rowIndex + ':' + event.activeCell.colIndex : 'none') +
+            ' ranges=' +
+            event.cellRanges.length
+        );
+        renderPanels();
+      });
+
+      grid.on('editStart', (event) => {
+        pushLog('editStart ' + event.rowIndex + ':' + event.columnId);
+      });
+
+      grid.on('editCommit', (event) => {
+        pushLog('editCommit ' + event.rowIndex + ':' + event.columnId + '=' + String(event.value));
+        renderPanels();
+      });
+
+      window.__example43 = {
+        grid,
+        inspect: inspectExample,
+        jumpToRow,
+        selectSmokeRange,
+        renderPanels,
+        columns,
+        constants: {
+          JUMP_ROW_INDEX,
+          NAME_COL_INDEX,
+          REGION_COL_INDEX,
+          STATUS_COL_INDEX,
+          NOTE_COL_INDEX
+        }
+      };
+
+      renderPanels();
+    </script>
+  </body>
+</html>

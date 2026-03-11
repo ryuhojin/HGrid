@@ -511,6 +511,22 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 43,
+      "file": "example43.html",
+      "title": "Example 43 - Renderer Hardening Smoke",
+      "tags": [
+        "enterprise",
+        "architecture-hardening",
+        "renderer-split",
+        "pooling",
+        "a11y",
+        "selection",
+        "clipboard",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

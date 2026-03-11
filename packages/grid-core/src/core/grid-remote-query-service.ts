@@ -1,8 +1,8 @@
 import type { DataProvider } from '../data/data-provider';
 import type { GridFilterModel } from '../data/filter-executor';
 import type { RemoteDataProvider as RemoteDataProviderContract, RemoteQueryModel, SortModelItem } from '../data/remote-data-provider';
-import type { RowModel } from '../data/row-model';
 import type { GroupModelItem, PivotModelItem, PivotValueDef } from './grid-options';
+import type { GridDerivedViewRowModelPort } from './grid-internal-contracts';
 import { cloneGroupModel, clonePivotModel, clonePivotValues } from './grid-model-utils';
 
 function cloneSortModel(sortModel: SortModelItem[]): SortModelItem[] {
@@ -52,7 +52,7 @@ export interface CreateRemoteQueryModelParams {
 
 export interface SyncRemoteProviderStateParams extends CreateRemoteQueryModelParams {
   dataProvider: RemoteDataProviderContract;
-  rowModel: RowModel;
+  rowModel: GridDerivedViewRowModelPort;
 }
 
 export class GridRemoteQueryService {
@@ -75,7 +75,7 @@ export class GridRemoteQueryService {
     this.syncRowModel(params.rowModel, params.dataProvider);
   }
 
-  public syncRowModel(rowModel: RowModel, dataProvider: RemoteDataProviderContract): void {
+  public syncRowModel(rowModel: GridDerivedViewRowModelPort, dataProvider: RemoteDataProviderContract): void {
     const rowCount = dataProvider.getRowCount();
     if (rowModel.getState().rowCount !== rowCount) {
       rowModel.setRowCount(rowCount);

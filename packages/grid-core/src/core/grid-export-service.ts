@@ -1,6 +1,8 @@
 import type { ColumnDef } from './grid-options';
+import type { GridExportDataPort, GridVisibleRowRange } from './grid-internal-contracts';
 import type { GridRowData } from '../data/data-provider';
 import type { GridSelection } from '../interaction/selection-model';
+export type { GridVisibleRowRange } from './grid-internal-contracts';
 
 const DEFAULT_EXPORT_CHUNK_SIZE = 2000;
 const DEFAULT_EXPORT_LINE_BREAK = '\n';
@@ -37,30 +39,15 @@ export interface GridExportResult {
   canceled: boolean;
 }
 
-export interface GridVisibleRowRange {
-  startRow: number;
-  endRow: number;
-}
-
 interface ExportRowSegment {
   startRow: number;
   endRow: number;
 }
 
-export interface GridExportDelimitedParams {
+export interface GridExportDelimitedParams extends GridExportDataPort {
   format: GridExportFormat;
   delimiter: ',' | '\t';
   options: GridExportOptions;
-  rendererOrderedColumns: ColumnDef[];
-  selection: GridSelection;
-  visibleRowRange: GridVisibleRowRange | null;
-  viewRowCount: number;
-  getDataIndex: (rowIndex: number) => number;
-  getRow: (dataIndex: number) => GridRowData | undefined;
-  getValue: (dataIndex: number, columnId: string) => unknown;
-  formatCell: (column: ColumnDef, row: GridRowData) => string;
-  isSystemColumn: (columnId: string) => boolean;
-  yieldControl?: () => Promise<void>;
 }
 
 export class GridExportService {

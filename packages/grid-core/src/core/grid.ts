@@ -40,6 +40,7 @@ import { GroupedDataProvider } from '../data/grouped-data-provider';
 import { CooperativeTreeExecutor, toTreeNodeKeyToken, type TreeExecutionResult, type TreeExecutor } from '../data/tree-executor';
 import { TreeDataProvider } from '../data/tree-data-provider';
 import type { EditCommitAuditLogger } from './edit-events';
+import type { GridRendererPort } from './grid-internal-contracts';
 import { GridCommandEventService } from './grid-command-event-service';
 import {
   GridDataPipelineService,
@@ -545,7 +546,7 @@ export class Grid {
   private readonly columnModel: ColumnModel;
   private readonly rowModel: RowModel;
   private readonly eventBus: EventBus;
-  private readonly renderer: DomRenderer;
+  private readonly renderer: GridRendererPort;
   private readonly sortExecutor: SortExecutor;
   private readonly filterExecutor: FilterExecutor;
   private readonly groupExecutor: GroupExecutor;

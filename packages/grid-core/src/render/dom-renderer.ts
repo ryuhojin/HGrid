@@ -1,4 +1,5 @@
 import { EventBus } from '../core/event-bus';
+import type { GridRendererPort } from '../core/grid-internal-contracts';
 import type {
   ColumnGroupDef,
   ColumnDef,
@@ -228,7 +229,7 @@ const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
 };
 let NEXT_ARIA_GRID_INSTANCE_ID = 1;
 
-export class DomRenderer {
+export class DomRenderer implements GridRendererPort {
   private readonly container: HTMLElement;
   private readonly eventBus: EventBus;
 

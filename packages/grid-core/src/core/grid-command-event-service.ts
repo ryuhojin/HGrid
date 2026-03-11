@@ -1,24 +1,14 @@
-import type { DataProvider, RowKey } from '../data/data-provider';
 import { GroupedDataProvider } from '../data/grouped-data-provider';
 import { TreeDataProvider } from '../data/tree-data-provider';
-import type { EditCommitAuditLogger } from './edit-events';
 import type { ColumnReorderEvent, ColumnResizeEvent, EventBus, GridEventMap } from './event-bus';
+import type {
+  GridAuditLogPort,
+  GridColumnMutationPort,
+  GridDerivedViewControllerPort
+} from './grid-internal-contracts';
 
-export interface GridCommandEventServiceParams {
+export interface GridCommandEventServiceParams extends GridColumnMutationPort, GridDerivedViewControllerPort, GridAuditLogPort {
   eventBus: EventBus;
-  hasColumn: (columnId: string) => boolean;
-  setColumnWidth: (columnId: string, width: number) => void;
-  setColumnOrder: (columnOrder: string[]) => void;
-  syncColumnsToRenderer: () => void;
-  isTreeDataActive: () => boolean;
-  isClientGroupingActive: () => boolean;
-  getDataProvider: () => DataProvider;
-  getTreeColumnId: () => string;
-  toggleGroupExpanded: (groupKey: string) => Promise<void> | void;
-  toggleTreeExpanded: (nodeKey: RowKey) => Promise<void> | void;
-  applyGroupingView: () => Promise<void> | void;
-  applyTreeView: () => Promise<void> | void;
-  getAuditLogHook: () => EditCommitAuditLogger | undefined;
 }
 
 export class GridCommandEventService {

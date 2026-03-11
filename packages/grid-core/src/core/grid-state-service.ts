@@ -17,13 +17,7 @@ import {
   clonePivotModel,
   clonePivotValues
 } from './grid-model-utils';
-
-interface GridStateColumnModel {
-  setColumnOrder(columnIds: string[]): void;
-  getColumns(): ColumnDef[];
-  setColumnVisibility(columnId: string, isVisible: boolean): void;
-  setColumnPin(columnId: string, pinned?: ColumnPinPosition): void;
-}
+import type { GridColumnStatePort } from './grid-internal-contracts';
 
 export interface GridStateSnapshotParams {
   columns: ColumnDef[];
@@ -37,7 +31,7 @@ export interface GridStateSnapshotParams {
 
 export interface GridStateApplyParams {
   state: GridState;
-  columnModel: GridStateColumnModel;
+  columnModel: GridColumnStatePort;
   syncColumnsToRenderer: () => void;
   normalizeGroupModel: (groupModel: GroupModelItem[]) => GroupModelItem[];
   normalizePivotModel: (pivotModel: PivotModelItem[]) => PivotModelItem[];

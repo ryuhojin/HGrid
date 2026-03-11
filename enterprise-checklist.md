@@ -71,15 +71,15 @@
 - [x] 내부 서비스 경계 문서화
 
 ## E0.2 DomRenderer 분해
-- [ ] `DomRenderer`를 책임별 모듈로 분리
+- [x] `DomRenderer`를 책임별 모듈로 분리
   - [x] layout/metrics
-  - [ ] row/cell pooling
+  - [x] row/cell pooling
   - [x] header interactions
-  - [ ] editor overlay
-  - [ ] a11y sync
-  - [ ] clipboard/selection render
-- [ ] scroll path hot function 분리 및 주석/테스트 보강
-- [ ] 대형 파일 분해 후 회귀 테스트 유지
+  - [x] editor overlay
+  - [x] a11y sync
+  - [x] clipboard/selection render
+- [x] scroll path hot function 분리 및 주석/테스트 보강
+- [x] 대형 파일 분해 후 회귀 테스트 유지
 
 ## E0.3 내부 계약 정리
 - [ ] renderer <-> grid <-> data pipeline 내부 인터페이스 정의

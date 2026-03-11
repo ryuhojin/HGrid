@@ -100,22 +100,79 @@
   - reorder drop target / indicator offset 계산
   - reorder session / next column order 계산
 
+#### 3) Editor Overlay Module
+- 파일: `packages/grid-core/src/render/dom-renderer-editor-overlay.ts`
+- 역할:
+  - edit session metadata 생성
+  - column type별 editor input normalize
+  - overlay visual state transition(open / active / pending / invalid / closed)
+  - overlay rect 계산과 validation 실패 후 refocus 정책 분리
+
+#### 4) Selection / Clipboard Module
+- 파일: `packages/grid-core/src/render/dom-renderer-selection-clipboard.ts`
+- 역할:
+  - selection bounds 기반 active cell clamp / fallback 계산
+  - primary selection rectangle 해석
+  - clipboard TSV sanitize / parse / serialize
+  - single-cell fill paste와 matrix paste 대상 범위 계산
+
+#### 5) A11y Sync Module
+- 파일: `packages/grid-core/src/render/dom-renderer-a11y-sync.ts`
+- 역할:
+  - grid aria id / row index / cell id 계산
+  - aria rowcount / colcount 계산
+  - active descendant 상태 전이 계산
+
+#### 6) Row / Cell Pool Module
+- 파일: `packages/grid-core/src/render/dom-renderer-row-pool.ts`
+- 역할:
+  - zone row skeleton 생성
+  - pinned/center row pool rebuild
+  - row-level DOM state apply(translate, height, selected/group/tree, aria-rowindex)
+  - pooled row hide/reset
+
+#### 7) Scroll Path Module
+- 파일: `packages/grid-core/src/render/dom-renderer-scroll-path.ts`
+- 역할:
+  - center horizontal window binary search
+  - overscan/capacity 기반 rendered column window 계산
+  - viewport transform 계산(scrollTop / virtualTop / rendered row window 기준)
+
+#### 8) Cell Binding Module
+- 파일: `packages/grid-core/src/render/dom-renderer-cell-binding.ts`
+- 역할:
+  - cell DOM diff apply(text/html/class/title/aria)
+  - prefixed cell content 조립(group/tree glyph 등)
+
 현재 `DomRenderer`는 계산 결과를 DOM에 반영하는 쪽에 집중하고, 레이아웃 숫자 계산은 별도 모듈이 담당한다.
 header pointer event wiring은 `DomRenderer`에 남겨두되, resize/reorder 계산과 session 생성은 별도 모듈이 담당한다.
+editor overlay DOM event wiring과 provider commit path는 `DomRenderer`에 남겨두되, overlay 상태와 값 normalize 규칙은 별도 모듈이 담당한다.
+selectionModel 변경, row/cell DOM class 반영, clipboard transaction 적용과 event emit은 `DomRenderer`에 남겨두되, selection rectangle과 clipboard matrix planning은 별도 모듈이 담당한다.
+a11y DOM attribute apply와 실제 focus 호출은 `DomRenderer`에 남겨두되, aria 좌표/식별자/active descendant 계산은 별도 모듈이 담당한다.
+row/cell pool DOM 생성과 row-level state apply는 별도 모듈이 담당하고, `DomRenderer`는 row content binding과 render orchestration에 집중한다.
+cell DOM diff와 prefix 조립은 별도 모듈이 담당하고, `DomRenderer`는 cell payload 결정과 zone별 render flow에 집중한다.
 
 ### 이번 단계에서 `DomRenderer`에 남겨둔 책임
-- row/cell pooling
 - header DOM event wiring
-- editor overlay
-- selection / clipboard rendering
-- scroll sync와 transform 적용
+- editor overlay DOM wiring / commit integration
+- selection / clipboard DOM application
+- a11y DOM attribute apply / focus orchestration
+- row/cell payload 결정
+- scroll sync DOM apply
+- renderRows orchestration
 
 ### 다음 분해 후보
-- editor overlay
-- clipboard / selection rendering
+- `E0.3` 내부 계약 정리
+- renderer/grid/data pipeline 내부 인터페이스 정리
 
 ### 검증
 - 기존 `packages/grid-core/test/grid.spec.ts` 회귀
 - 신규 unit:
+  - `packages/grid-core/test/dom-renderer-a11y-sync.spec.ts`
+  - `packages/grid-core/test/dom-renderer-cell-binding.spec.ts`
+  - `packages/grid-core/test/dom-renderer-editor-overlay.spec.ts`
   - `packages/grid-core/test/dom-renderer-header-interactions.spec.ts`
   - `packages/grid-core/test/dom-renderer-layout-metrics.spec.ts`
+  - `packages/grid-core/test/dom-renderer-row-pool.spec.ts`
+  - `packages/grid-core/test/dom-renderer-scroll-path.spec.ts`
+  - `packages/grid-core/test/dom-renderer-selection-clipboard.spec.ts`

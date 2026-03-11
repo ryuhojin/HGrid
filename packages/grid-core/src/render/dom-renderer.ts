@@ -78,6 +78,58 @@ import {
   type HeaderDropTarget,
   type HeaderResizeHit
 } from './dom-renderer-header-interactions';
+import {
+  bindCell as bindGridCell,
+  prependCellContentPrefix,
+  type CellBindingState,
+  type CellContentResult
+} from './dom-renderer-cell-binding';
+import {
+  createAriaGridId,
+  getAccessibleHeaderRowCount,
+  getAriaCellId,
+  getAriaRowIndexForDataRow,
+  resolveAriaActiveDescendantUpdate,
+  resolveAriaGridMetrics
+} from './dom-renderer-a11y-sync';
+import {
+  createActiveEditorOverlayState,
+  createClosedEditorOverlayState,
+  createEditSession,
+  createInvalidEditorOverlayState,
+  createOpenEditorOverlayState,
+  createPendingEditorOverlayState,
+  normalizeEditorInputValue,
+  resolveEditorOverlayRect,
+  shouldRefocusEditorAfterValidationFailure,
+  type EditSession,
+  type EditorOverlayState
+} from './dom-renderer-editor-overlay';
+import {
+  buildSelectionTsv,
+  clampSelectionCellToBounds,
+  parseClipboardTsv,
+  resolveClipboardMatrixMetrics,
+  resolveClipboardSourceOffsets,
+  resolveInitialActiveCell,
+  resolvePrimarySelectionRectangle,
+  type SelectionRectangle
+} from './dom-renderer-selection-clipboard';
+import {
+  applyZoneRowBindingState,
+  createCellRenderState,
+  hideZoneRow,
+  rebuildRowPool,
+  type CellRenderState,
+  type IndicatorCellElements,
+  type RowPoolItem,
+  type ZoneRowItem
+} from './dom-renderer-row-pool';
+import {
+  resolveHorizontalWindow,
+  resolveViewportTransformMetrics,
+  type HorizontalWindow
+} from './dom-renderer-scroll-path';
 
 type ColumnZoneName = 'left' | 'center' | 'right';
 
@@ -85,62 +137,6 @@ interface ColumnsByZone {
   left: ColumnDef[];
   center: ColumnDef[];
   right: ColumnDef[];
-}
-
-interface CellRenderState {
-  isVisible: boolean;
-  columnId: string;
-  role: string;
-  contentMode: 'text' | 'html';
-  textContent: string;
-  htmlContent: string;
-  left: number;
-  width: number;
-  isSelected: boolean;
-  isActive: boolean;
-  extraClassName: string;
-  titleText: string;
-  ariaLabel: string;
-  ariaRowIndex: number;
-  ariaColIndex: number;
-  cellId: string;
-}
-
-interface IndicatorCellElements {
-  checkbox: HTMLInputElement;
-}
-
-interface ZoneRowRenderState {
-  isVisible: boolean;
-  rowIndex: number;
-  dataIndex: number;
-  translateY: number;
-  height: number;
-  isSelected: boolean;
-  isGroupRow: boolean;
-  groupLevel: number;
-  isTreeRow: boolean;
-  treeLevel: number;
-}
-
-interface ZoneRowItem {
-  element: HTMLDivElement;
-  cells: HTMLDivElement[];
-  indicatorCells: Array<IndicatorCellElements | null>;
-  visibleDisplay: '' | 'block';
-  rowState: ZoneRowRenderState;
-  cellStates: CellRenderState[];
-}
-
-interface RowPoolItem {
-  left: ZoneRowItem;
-  center: ZoneRowItem;
-  right: ZoneRowItem;
-}
-
-interface HorizontalWindow {
-  start: number;
-  end: number;
 }
 
 interface HeaderGroupCellLayout {
@@ -169,12 +165,6 @@ interface HeaderLeafSpanMetrics {
   hiddenLeafColumnIds: Set<string>;
 }
 
-interface CellContentResult {
-  textContent: string;
-  contentMode: 'text' | 'html';
-  htmlContent: string;
-}
-
 type StateColumnTone = RowStatusTone | 'dirty' | 'commit';
 
 interface NormalizedStateColumnResult {
@@ -196,21 +186,6 @@ interface PointerSelectionSession {
   pointerId: number;
   anchorCell: SelectionCellPosition;
   lastCell: SelectionCellPosition;
-}
-
-interface EditSession {
-  rowIndex: number;
-  dataIndex: number;
-  colIndex: number;
-  column: ColumnDef;
-  originalValue: unknown;
-}
-
-interface SelectionRectangle {
-  startRow: number;
-  endRow: number;
-  startCol: number;
-  endCol: number;
 }
 
 interface ClipboardCellUpdate {
@@ -252,15 +227,6 @@ const DEFAULT_SCROLLBAR_VISIBILITY: Required<ScrollbarPolicy> = {
   horizontal: 'auto'
 };
 let NEXT_ARIA_GRID_INSTANCE_ID = 1;
-
-function escapeHtmlText(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 export class DomRenderer {
   private readonly container: HTMLElement;
@@ -422,7 +388,7 @@ export class DomRenderer {
     this.scrollbarSize = this.measureScrollbarSize();
     this.rowHeightMap = new RowHeightMap(this.options.rowModel.getViewRowCount(), this.getBaseRowHeight());
     this.selectionModel = new SelectionModel();
-    this.ariaGridId = `hgrid-grid-${NEXT_ARIA_GRID_INSTANCE_ID++}`;
+    this.ariaGridId = createAriaGridId(NEXT_ARIA_GRID_INSTANCE_ID++);
     this.refreshI18nContext();
 
     this.initializeDom();
@@ -725,56 +691,50 @@ export class DomRenderer {
   }
 
   private getAriaCellId(rowIndex: number, colIndex: number): string {
-    return `${this.ariaGridId}-cell-r${this.getAriaRowIndexForDataRow(rowIndex)}-c${colIndex + 1}`;
+    return getAriaCellId(this.ariaGridId, this.headerGroupRowCount, rowIndex, colIndex);
   }
 
   private getAccessibleHeaderRowCount(): number {
-    return this.headerGroupRowCount + 1;
+    return getAccessibleHeaderRowCount(this.headerGroupRowCount);
   }
 
   private getAriaRowIndexForDataRow(rowIndex: number): number {
-    return this.getAccessibleHeaderRowCount() + rowIndex + 1;
+    return getAriaRowIndexForDataRow(this.headerGroupRowCount, rowIndex);
   }
 
   private syncAriaGridMetrics(): void {
-    const rowCount = this.options.rowModel.getViewRowCount() + this.getAccessibleHeaderRowCount();
-    const colCount = this.getVisibleColumnCount();
+    const metrics = resolveAriaGridMetrics(
+      this.options.rowModel.getViewRowCount(),
+      this.getVisibleColumnCount(),
+      this.headerGroupRowCount
+    );
 
-    if (this.ariaRowCount !== rowCount) {
-      this.rootElement.setAttribute('aria-rowcount', String(Math.max(0, rowCount)));
-      this.ariaRowCount = rowCount;
+    if (this.ariaRowCount !== metrics.rowCount) {
+      this.rootElement.setAttribute('aria-rowcount', String(metrics.rowCount));
+      this.ariaRowCount = metrics.rowCount;
     }
 
-    if (this.ariaColCount !== colCount) {
-      this.rootElement.setAttribute('aria-colcount', String(Math.max(0, colCount)));
-      this.ariaColCount = colCount;
+    if (this.ariaColCount !== metrics.colCount) {
+      this.rootElement.setAttribute('aria-colcount', String(metrics.colCount));
+      this.ariaColCount = metrics.colCount;
     }
   }
 
   private syncAriaActiveDescendant(): void {
     const selection = this.selectionModel.getSelection();
     const activeCell = selection.activeCell;
-    if (!activeCell) {
-      if (this.activeDescendantCellId.length > 0) {
-        this.rootElement.removeAttribute('aria-activedescendant');
-        this.activeDescendantCellId = '';
-      }
+    const cellEntry = activeCell ? this.resolveCellElementBySelectionPosition(activeCell.rowIndex, activeCell.colIndex) : null;
+    const update = resolveAriaActiveDescendantUpdate(this.activeDescendantCellId, activeCell, cellEntry?.cell.id ?? null);
+    if (!update.shouldMutate) {
       return;
     }
 
-    const cellEntry = this.resolveCellElementBySelectionPosition(activeCell.rowIndex, activeCell.colIndex);
-    if (!cellEntry || !cellEntry.cell.id) {
-      if (this.activeDescendantCellId.length > 0) {
-        this.rootElement.removeAttribute('aria-activedescendant');
-        this.activeDescendantCellId = '';
-      }
-      return;
+    if (update.nextAttributeValue === null) {
+      this.rootElement.removeAttribute('aria-activedescendant');
+    } else {
+      this.rootElement.setAttribute('aria-activedescendant', update.nextAttributeValue);
     }
-
-    if (this.activeDescendantCellId !== cellEntry.cell.id) {
-      this.rootElement.setAttribute('aria-activedescendant', cellEntry.cell.id);
-      this.activeDescendantCellId = cellEntry.cell.id;
-    }
+    this.activeDescendantCellId = update.nextActiveDescendantCellId;
   }
 
   private getResolvedRowIndicatorOptions(): Required<
@@ -1709,24 +1669,10 @@ export class DomRenderer {
       headerCellElement.setAttribute('role', 'columnheader');
       rowElement.append(headerCellElement);
       this.centerHeaderCellPool.push(headerCellElement);
-      this.centerHeaderCellStates.push({
-        isVisible: false,
-        columnId: '',
-        role: 'columnheader',
-        contentMode: 'text',
-        textContent: '',
-        htmlContent: '',
-        left: 0,
-        width: 0,
-        isSelected: false,
-        isActive: false,
-        extraClassName: '',
-        titleText: '',
-        ariaLabel: '',
-        ariaRowIndex: -1,
-        ariaColIndex: -1,
-        cellId: ''
-      });
+      const cellState = createCellRenderState(false, '', 0);
+      cellState.role = 'columnheader';
+      cellState.left = 0;
+      this.centerHeaderCellStates.push(cellState);
     }
   }
 
@@ -1735,111 +1681,22 @@ export class DomRenderer {
     const leftWidth = sumColumnWidths(this.columnsByZone.left);
     const centerWidth = this.centerColumnsWidth;
     const rightWidth = sumColumnWidths(this.columnsByZone.right);
-
-    this.rowsLayerLeftElement.replaceChildren();
-    this.rowsLayerCenterElement.replaceChildren();
-    this.rowsLayerRightElement.replaceChildren();
-    this.rowPool = [];
-
-    for (let poolIndex = 0; poolIndex < desiredPoolSize; poolIndex += 1) {
-      const leftRow = this.createZoneRow('left', this.columnsByZone.left, leftWidth);
-      const centerRow = this.createZoneRow('center', this.columnsByZone.center, centerWidth, this.centerCellCapacity);
-      const rightRow = this.createZoneRow('right', this.columnsByZone.right, rightWidth);
-
-      this.rowsLayerLeftElement.append(leftRow.element);
-      this.rowsLayerCenterElement.append(centerRow.element);
-      this.rowsLayerRightElement.append(rightRow.element);
-
-      this.rowPool.push({
-        left: leftRow,
-        center: centerRow,
-        right: rightRow
-      });
-    }
-  }
-
-  private createZoneRow(
-    zoneName: ColumnZoneName,
-    columns: ColumnDef[],
-    width: number,
-    cellCapacity?: number
-  ): ZoneRowItem {
-    const visibleDisplay = zoneName === 'center' ? 'block' : '';
-    const rowElement = document.createElement('div');
-    rowElement.className = `hgrid__row hgrid__row--${zoneName}`;
-    rowElement.setAttribute('role', zoneName === 'center' ? 'row' : 'presentation');
-    rowElement.style.height = `${this.getBaseRowHeight()}px`;
-    rowElement.style.width = `${width}px`;
-
-    if (zoneName === 'center') {
-      rowElement.style.display = visibleDisplay;
-      rowElement.style.position = 'absolute';
-    }
-
-    const cells: HTMLDivElement[] = [];
-    const indicatorCells: Array<IndicatorCellElements | null> = [];
-    const cellStates: CellRenderState[] = [];
-    const loopCount = zoneName === 'center' ? Math.max(0, cellCapacity ?? 0) : columns.length;
-    for (let colIndex = 0; colIndex < loopCount; colIndex += 1) {
-      const column = columns[colIndex];
-      const cellElement = document.createElement('div');
-      let indicatorCell: IndicatorCellElements | null = null;
-      cellElement.className = zoneName === 'center' ? 'hgrid__cell hgrid__cell--center' : 'hgrid__cell';
-      cellElement.setAttribute('role', 'gridcell');
-      if (zoneName === 'center') {
-        cellElement.style.position = 'absolute';
-        cellElement.style.left = '0px';
-        cellElement.style.display = 'none';
-      } else {
-        cellElement.style.width = `${column.width}px`;
-        cellElement.dataset.columnId = column.id;
-        if (this.isIndicatorCheckboxColumnId(column.id)) {
-          cellElement.classList.add('hgrid__cell--indicator', 'hgrid__cell--indicator-checkbox');
-          indicatorCell = this.createIndicatorCellElements(cellElement);
-        }
-      }
-      rowElement.append(cellElement);
-      cells.push(cellElement);
-      indicatorCells.push(indicatorCell);
-      cellStates.push({
-        isVisible: zoneName !== 'center',
-        columnId: zoneName === 'center' ? '' : column.id,
-        role: 'gridcell',
-        contentMode: 'text',
-        textContent: '',
-        htmlContent: '',
-        left: Number.NaN,
-        width: zoneName === 'center' ? Number.NaN : column.width,
-        isSelected: false,
-        isActive: false,
-        extraClassName: '',
-        titleText: '',
-        ariaLabel: '',
-        ariaRowIndex: -1,
-        ariaColIndex: -1,
-        cellId: ''
-      });
-    }
-
-    return {
-      element: rowElement,
-      cells,
-      indicatorCells,
-      visibleDisplay,
-      rowState: {
-        isVisible: true,
-        rowIndex: -1,
-        dataIndex: -1,
-        translateY: Number.NaN,
-        height: Number.NaN,
-        isSelected: false,
-        isGroupRow: false,
-        groupLevel: 0,
-        isTreeRow: false,
-        treeLevel: 0
-      },
-      cellStates
-    };
+    this.rowPool = rebuildRowPool({
+      desiredPoolSize,
+      rowsLayerLeftElement: this.rowsLayerLeftElement,
+      rowsLayerCenterElement: this.rowsLayerCenterElement,
+      rowsLayerRightElement: this.rowsLayerRightElement,
+      leftColumns: this.columnsByZone.left,
+      centerColumns: this.columnsByZone.center,
+      rightColumns: this.columnsByZone.right,
+      leftWidth,
+      centerWidth,
+      rightWidth,
+      centerCellCapacity: this.centerCellCapacity,
+      baseRowHeight: this.getBaseRowHeight(),
+      isIndicatorCheckboxColumnId: (columnId) => this.isIndicatorCheckboxColumnId(columnId),
+      createIndicatorCellElements: (cellElement) => this.createIndicatorCellElements(cellElement)
+    });
   }
 
   private createIndicatorCellElements(cellElement: HTMLDivElement): IndicatorCellElements {
@@ -2103,23 +1960,7 @@ export class DomRenderer {
   }
 
   private prependCellPrefix(content: CellContentResult, prefix: string): CellContentResult {
-    if (prefix.length === 0) {
-      return content;
-    }
-
-    if (content.contentMode === 'html') {
-      return {
-        textContent: `${prefix} ${content.textContent}`,
-        contentMode: 'html',
-        htmlContent: `${escapeHtmlText(prefix)} ${content.htmlContent}`
-      };
-    }
-
-    return {
-      textContent: `${prefix} ${content.textContent}`,
-      contentMode: 'text',
-      htmlContent: ''
-    };
+    return prependCellContentPrefix(content, prefix);
   }
 
   private createEditCommitEventPayload(
@@ -2411,29 +2252,7 @@ export class DomRenderer {
   }
 
   private hidePoolRow(zoneRow: ZoneRowItem): void {
-    if (!zoneRow.rowState.isVisible) {
-      return;
-    }
-
-    zoneRow.element.style.display = 'none';
-    if (zoneRow.rowState.isSelected) {
-      zoneRow.element.classList.remove('hgrid__row--selected');
-      zoneRow.rowState.isSelected = false;
-    }
-    if (zoneRow.rowState.isGroupRow) {
-      zoneRow.element.classList.remove('hgrid__row--group');
-      zoneRow.rowState.isGroupRow = false;
-      zoneRow.rowState.groupLevel = 0;
-    }
-    if (zoneRow.rowState.isTreeRow) {
-      zoneRow.element.classList.remove('hgrid__row--tree');
-      zoneRow.rowState.isTreeRow = false;
-      zoneRow.rowState.treeLevel = 0;
-    }
-    zoneRow.rowState.isVisible = false;
-    zoneRow.rowState.rowIndex = -1;
-    zoneRow.rowState.dataIndex = -1;
-    zoneRow.element.removeAttribute('aria-rowindex');
+    hideZoneRow(zoneRow);
   }
 
   private bindRowPosition(
@@ -2447,242 +2266,22 @@ export class DomRenderer {
     isTreeRow: boolean,
     treeLevel: number
   ): void {
-    const rowState = zoneRow.rowState;
-
-    if (!rowState.isVisible) {
-      zoneRow.element.style.display = zoneRow.visibleDisplay;
-      rowState.isVisible = true;
-    }
-
-    if (rowState.translateY !== rowTranslateY) {
-      zoneRow.element.style.transform = `translate3d(0, ${rowTranslateY}px, 0)`;
-      rowState.translateY = rowTranslateY;
-    }
-
-    if (rowState.height !== rowHeight) {
-      zoneRow.element.style.height = `${rowHeight}px`;
-      rowState.height = rowHeight;
-    }
-
-    if (rowState.rowIndex !== rowIndex) {
-      zoneRow.element.dataset.rowIndex = String(rowIndex);
-      if (zoneRow.element.getAttribute('role') === 'row') {
-        zoneRow.element.setAttribute('aria-rowindex', String(this.getAriaRowIndexForDataRow(rowIndex)));
-      } else {
-        zoneRow.element.removeAttribute('aria-rowindex');
-      }
-      rowState.rowIndex = rowIndex;
-    }
-
-    if (rowState.dataIndex !== dataIndex) {
-      zoneRow.element.dataset.dataIndex = String(dataIndex);
-      rowState.dataIndex = dataIndex;
-    }
-
-    const isSelected = this.selectionModel.isRowSelected(rowIndex);
-    if (rowState.isSelected !== isSelected) {
-      zoneRow.element.classList.toggle('hgrid__row--selected', isSelected);
-      rowState.isSelected = isSelected;
-    }
-
-    if (rowState.isGroupRow !== isGroupRow) {
-      zoneRow.element.classList.toggle('hgrid__row--group', isGroupRow);
-      rowState.isGroupRow = isGroupRow;
-    }
-
-    if (rowState.groupLevel !== groupLevel) {
-      if (isGroupRow) {
-        zoneRow.element.dataset.groupLevel = String(groupLevel);
-      } else {
-        delete zoneRow.element.dataset.groupLevel;
-      }
-      rowState.groupLevel = groupLevel;
-    }
-
-    if (rowState.isTreeRow !== isTreeRow) {
-      zoneRow.element.classList.toggle('hgrid__row--tree', isTreeRow);
-      rowState.isTreeRow = isTreeRow;
-    }
-
-    if (rowState.treeLevel !== treeLevel) {
-      if (isTreeRow) {
-        zoneRow.element.dataset.treeLevel = String(treeLevel);
-      } else {
-        delete zoneRow.element.dataset.treeLevel;
-      }
-      rowState.treeLevel = treeLevel;
-    }
+    applyZoneRowBindingState(zoneRow, {
+      rowIndex,
+      dataIndex,
+      translateY: rowTranslateY,
+      height: rowHeight,
+      isSelected: this.selectionModel.isRowSelected(rowIndex),
+      isGroupRow,
+      groupLevel,
+      isTreeRow,
+      treeLevel,
+      ariaRowIndex: zoneRow.element.getAttribute('role') === 'row' ? this.getAriaRowIndexForDataRow(rowIndex) : null
+    });
   }
 
-  private bindCell(
-    cell: HTMLDivElement,
-    cellState: CellRenderState,
-    nextState: {
-      isVisible: boolean;
-      columnId: string;
-      textContent: string;
-      contentMode?: 'text' | 'html';
-      htmlContent?: string;
-      role?: string;
-      left?: number;
-      width?: number;
-      isSelected?: boolean;
-      isActive?: boolean;
-      extraClassName?: string;
-      titleText?: string;
-      ariaLabel?: string;
-      ariaRowIndex?: number;
-      ariaColIndex?: number;
-      cellId?: string;
-    }
-  ): void {
-    const role = nextState.role ?? cellState.role;
-    const isSelected = nextState.isSelected ?? false;
-    const isActive = nextState.isActive ?? false;
-    const extraClassName = nextState.extraClassName ?? '';
-    const titleText = nextState.titleText ?? '';
-    const ariaLabel = nextState.ariaLabel ?? '';
-    const ariaRowIndex = nextState.ariaRowIndex ?? -1;
-    const ariaColIndex = nextState.ariaColIndex ?? -1;
-    const cellId = nextState.cellId ?? '';
-    const contentMode = nextState.contentMode ?? 'text';
-    const htmlContent = nextState.htmlContent ?? '';
-
-    if (cellState.isVisible !== nextState.isVisible) {
-      cell.style.display = nextState.isVisible ? '' : 'none';
-      cellState.isVisible = nextState.isVisible;
-    }
-
-    if (nextState.left !== undefined && cellState.left !== nextState.left) {
-      cell.style.left = `${nextState.left}px`;
-      cellState.left = nextState.left;
-    }
-
-    if (nextState.width !== undefined && cellState.width !== nextState.width) {
-      cell.style.width = `${nextState.width}px`;
-      cellState.width = nextState.width;
-    }
-
-    if (cellState.columnId !== nextState.columnId) {
-      cell.dataset.columnId = nextState.columnId;
-      cellState.columnId = nextState.columnId;
-    }
-
-    if (cellState.role !== role) {
-      if (role.length > 0) {
-        cell.setAttribute('role', role);
-      } else {
-        cell.removeAttribute('role');
-      }
-      cellState.role = role;
-    }
-
-    if (cellState.contentMode !== contentMode) {
-      if (contentMode === 'html') {
-        cell.innerHTML = htmlContent;
-        cellState.htmlContent = htmlContent;
-      } else {
-        cell.textContent = nextState.textContent;
-        cellState.htmlContent = '';
-      }
-      cellState.textContent = nextState.textContent;
-      cellState.contentMode = contentMode;
-    } else if (contentMode === 'html') {
-      if (cellState.htmlContent !== htmlContent) {
-        cell.innerHTML = htmlContent;
-        cellState.htmlContent = htmlContent;
-      }
-      if (cellState.textContent !== nextState.textContent) {
-        cellState.textContent = nextState.textContent;
-      }
-    } else {
-      if (cellState.textContent !== nextState.textContent) {
-        cell.textContent = nextState.textContent;
-        cellState.textContent = nextState.textContent;
-      }
-      if (cellState.htmlContent.length > 0) {
-        cellState.htmlContent = '';
-      }
-    }
-
-    if (cellState.extraClassName !== extraClassName) {
-      if (cellState.extraClassName.length > 0) {
-        const previousClasses = cellState.extraClassName.split(' ');
-        for (let classIndex = 0; classIndex < previousClasses.length; classIndex += 1) {
-          const previousClassName = previousClasses[classIndex];
-          if (previousClassName) {
-            cell.classList.remove(previousClassName);
-          }
-        }
-      }
-
-      if (extraClassName.length > 0) {
-        const nextClasses = extraClassName.split(' ');
-        for (let classIndex = 0; classIndex < nextClasses.length; classIndex += 1) {
-          const nextClassName = nextClasses[classIndex];
-          if (nextClassName) {
-            cell.classList.add(nextClassName);
-          }
-        }
-      }
-
-      cellState.extraClassName = extraClassName;
-    }
-
-    if (cellState.titleText !== titleText) {
-      if (titleText.length > 0) {
-        cell.title = titleText;
-      } else {
-        cell.removeAttribute('title');
-      }
-      cellState.titleText = titleText;
-    }
-
-    if (cellState.ariaLabel !== ariaLabel) {
-      if (ariaLabel.length > 0) {
-        cell.setAttribute('aria-label', ariaLabel);
-      } else {
-        cell.removeAttribute('aria-label');
-      }
-      cellState.ariaLabel = ariaLabel;
-    }
-
-    if (cellState.ariaRowIndex !== ariaRowIndex) {
-      if (ariaRowIndex > 0) {
-        cell.setAttribute('aria-rowindex', String(ariaRowIndex));
-      } else {
-        cell.removeAttribute('aria-rowindex');
-      }
-      cellState.ariaRowIndex = ariaRowIndex;
-    }
-
-    if (cellState.ariaColIndex !== ariaColIndex) {
-      if (ariaColIndex > 0) {
-        cell.setAttribute('aria-colindex', String(ariaColIndex));
-      } else {
-        cell.removeAttribute('aria-colindex');
-      }
-      cellState.ariaColIndex = ariaColIndex;
-    }
-
-    if (cellState.cellId !== cellId) {
-      if (cellId.length > 0) {
-        cell.id = cellId;
-      } else {
-        cell.removeAttribute('id');
-      }
-      cellState.cellId = cellId;
-    }
-
-    if (cellState.isSelected !== isSelected) {
-      cell.classList.toggle('hgrid__cell--selected', isSelected);
-      cellState.isSelected = isSelected;
-    }
-
-    if (cellState.isActive !== isActive) {
-      cell.classList.toggle('hgrid__cell--active', isActive);
-      cellState.isActive = isActive;
-    }
+  private bindCell(cell: HTMLDivElement, cellState: CellRenderState, nextState: CellBindingState): void {
+    bindGridCell(cell, cellState, nextState);
   }
 
   private bindIndicatorCheckboxCell(
@@ -2964,83 +2563,12 @@ export class DomRenderer {
     };
   }
 
-  private normalizeEditorInputValue(column: ColumnDef, inputText: string): unknown {
-    const trimmedText = inputText.trim();
-    if (column.type === 'number') {
-      if (trimmedText.length === 0) {
-        return null;
-      }
-
-      const numericValue = Number(trimmedText);
-      return Number.isFinite(numericValue) ? numericValue : inputText;
-    }
-
-    if (column.type === 'boolean') {
-      const lowerCaseValue = trimmedText.toLowerCase();
-      if (lowerCaseValue === 'true' || lowerCaseValue === '1' || lowerCaseValue === 'yes' || lowerCaseValue === 'on') {
-        return true;
-      }
-
-      if (lowerCaseValue === 'false' || lowerCaseValue === '0' || lowerCaseValue === 'no' || lowerCaseValue === 'off') {
-        return false;
-      }
-    }
-
-    return inputText;
-  }
-
-  private sanitizeClipboardText(rawText: string): string {
-    return rawText.replace(/\u0000/g, '').replace(/\r\n?/g, '\n');
-  }
-
-  private parseClipboardTsv(rawText: string): string[][] {
-    const normalizedText = this.sanitizeClipboardText(rawText);
-    if (normalizedText.length === 0) {
-      return [];
-    }
-
-    const lines = normalizedText.split('\n');
-    while (lines.length > 0 && lines[lines.length - 1] === '') {
-      lines.pop();
-    }
-
-    const matrix: string[][] = [];
-    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-      matrix.push(lines[lineIndex].split('\t'));
-    }
-
-    return matrix;
-  }
-
   private resolvePrimarySelectionRectangle(): SelectionRectangle | null {
-    const bounds = this.getSelectionBounds();
-    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
-      return null;
-    }
-
-    const selection = this.selectionModel.getSelection();
-    const primaryRange = selection.cellRanges[0];
-    if (primaryRange) {
-      return {
-        startRow: Math.max(0, Math.min(primaryRange.r1, primaryRange.r2)),
-        endRow: Math.min(bounds.rowCount - 1, Math.max(primaryRange.r1, primaryRange.r2)),
-        startCol: Math.max(0, Math.min(primaryRange.c1, primaryRange.c2)),
-        endCol: Math.min(bounds.columnCount - 1, Math.max(primaryRange.c1, primaryRange.c2))
-      };
-    }
-
-    const activeCell = selection.activeCell ?? this.getInitialActiveCell();
-    if (!activeCell) {
-      return null;
-    }
-
-    const clampedCell = this.clampSelectionCell(activeCell);
-    return {
-      startRow: clampedCell.rowIndex,
-      endRow: clampedCell.rowIndex,
-      startCol: clampedCell.colIndex,
-      endCol: clampedCell.colIndex
-    };
+    return resolvePrimarySelectionRectangle(
+      this.getSelectionBounds(),
+      this.selectionModel.getSelection(),
+      this.getInitialActiveCell()
+    );
   }
 
   private readCellTextForClipboard(rowIndex: number, colIndex: number): string {
@@ -3072,16 +2600,7 @@ export class DomRenderer {
       return null;
     }
 
-    const lines: string[] = [];
-    for (let rowIndex = selectionRectangle.startRow; rowIndex <= selectionRectangle.endRow; rowIndex += 1) {
-      const cells: string[] = [];
-      for (let colIndex = selectionRectangle.startCol; colIndex <= selectionRectangle.endCol; colIndex += 1) {
-        cells.push(this.readCellTextForClipboard(rowIndex, colIndex));
-      }
-      lines.push(cells.join('\t'));
-    }
-
-    return lines.join('\n');
+    return buildSelectionTsv(selectionRectangle, (rowIndex, colIndex) => this.readCellTextForClipboard(rowIndex, colIndex));
   }
 
   private writeTextToClipboard(text: string): boolean {
@@ -3095,7 +2614,7 @@ export class DomRenderer {
   }
 
   private resolvePasteValue(column: ColumnDef, row: GridRowData, dataIndex: number, inputText: string): unknown {
-    const normalizedValue = this.normalizeEditorInputValue(column, inputText);
+    const normalizedValue = normalizeEditorInputValue(column, inputText);
     if (!column.valueSetter) {
       return normalizedValue;
     }
@@ -3111,25 +2630,17 @@ export class DomRenderer {
       return [];
     }
 
-    let sourceColumnCount = 0;
-    for (let rowIndex = 0; rowIndex < matrix.length; rowIndex += 1) {
-      sourceColumnCount = Math.max(sourceColumnCount, matrix[rowIndex].length);
-    }
-    if (sourceColumnCount <= 0) {
+    const matrixMetrics = resolveClipboardMatrixMetrics(matrix, selectionRectangle);
+    if (!matrixMetrics) {
       return [];
     }
 
-    const selectedRowCount = selectionRectangle.endRow - selectionRectangle.startRow + 1;
-    const selectedColCount = selectionRectangle.endCol - selectionRectangle.startCol + 1;
-    const shouldFillSelection = matrix.length === 1 && sourceColumnCount === 1 && (selectedRowCount > 1 || selectedColCount > 1);
-    const destinationRowCount = shouldFillSelection ? selectedRowCount : matrix.length;
-    const destinationColCount = shouldFillSelection ? selectedColCount : sourceColumnCount;
     const selectionBounds = this.getSelectionBounds();
 
     const transactions: DataTransaction[] = [];
     const updates: ClipboardCellUpdate[] = [];
 
-    for (let rowOffset = 0; rowOffset < destinationRowCount; rowOffset += 1) {
+    for (let rowOffset = 0; rowOffset < matrixMetrics.destinationRowCount; rowOffset += 1) {
       const rowIndex = selectionRectangle.startRow + rowOffset;
       if (rowIndex < 0 || rowIndex >= selectionBounds.rowCount) {
         break;
@@ -3145,7 +2656,7 @@ export class DomRenderer {
         continue;
       }
 
-      for (let colOffset = 0; colOffset < destinationColCount; colOffset += 1) {
+      for (let colOffset = 0; colOffset < matrixMetrics.destinationColCount; colOffset += 1) {
         const colIndex = selectionRectangle.startCol + colOffset;
         if (colIndex < 0 || colIndex >= selectionBounds.columnCount) {
           break;
@@ -3161,8 +2672,11 @@ export class DomRenderer {
           continue;
         }
 
-        const sourceRow = shouldFillSelection ? 0 : rowOffset;
-        const sourceCol = shouldFillSelection ? 0 : colOffset;
+        const { sourceRow, sourceCol } = resolveClipboardSourceOffsets(
+          rowOffset,
+          colOffset,
+          matrixMetrics.shouldFillSelection
+        );
         const inputText = matrix[sourceRow]?.[sourceCol];
         if (typeof inputText !== 'string') {
           continue;
@@ -3199,6 +2713,17 @@ export class DomRenderer {
     this.scheduleRender();
 
     return updates;
+  }
+
+  private applyEditorOverlayState(state: EditorOverlayState): void {
+    this.editorHostElement.classList.toggle('hgrid__editor-host--visible', state.isVisible);
+    this.editorHostElement.classList.toggle('hgrid__editor-host--invalid', state.isInvalid);
+    this.editorHostElement.classList.toggle('hgrid__editor-host--pending', state.isPending);
+    this.editorInputElement.disabled = state.isDisabled;
+    this.editorMessageElement.textContent = state.message;
+    if (state.nextInputValue !== null) {
+      this.editorInputElement.value = state.nextInputValue;
+    }
   }
 
   private startEditingAtCell(
@@ -3243,20 +2768,10 @@ export class DomRenderer {
     }
     const originalValue = getColumnValue(column, row);
 
-    this.editSession = {
-      rowIndex,
-      dataIndex,
-      colIndex,
-      column,
-      originalValue
-    };
+    this.editSession = createEditSession(rowIndex, dataIndex, colIndex, column, originalValue);
     this.editValidationTicket += 1;
     this.isEditValidationPending = false;
-    this.editorInputElement.disabled = false;
-    this.editorHostElement.classList.remove('hgrid__editor-host--invalid', 'hgrid__editor-host--pending');
-    this.editorMessageElement.textContent = '';
-    this.editorInputElement.value = originalValue === undefined || originalValue === null ? '' : String(originalValue);
-    this.editorHostElement.classList.add('hgrid__editor-host--visible');
+    this.applyEditorOverlayState(createOpenEditorOverlayState(originalValue));
     this.syncEditorOverlayPosition();
     this.editorInputElement.focus();
     this.editorInputElement.select();
@@ -3280,9 +2795,7 @@ export class DomRenderer {
     this.editValidationTicket += 1;
     this.isEditValidationPending = false;
     this.editSession = null;
-    this.editorInputElement.disabled = false;
-    this.editorHostElement.classList.remove('hgrid__editor-host--visible', 'hgrid__editor-host--invalid', 'hgrid__editor-host--pending');
-    this.editorMessageElement.textContent = '';
+    this.applyEditorOverlayState(createClosedEditorOverlayState());
 
     if (shouldEmitCancel) {
       this.eventBus.emit('editCancel', {
@@ -3301,7 +2814,7 @@ export class DomRenderer {
       return;
     }
 
-    const nextValue = this.normalizeEditorInputValue(currentSession.column, this.editorInputElement.value);
+    const nextValue = normalizeEditorInputValue(currentSession.column, this.editorInputElement.value);
     const row = this.resolveRow(currentSession.dataIndex);
     const validateEdit = this.options.validateEdit;
     const currentValidationTicket = ++this.editValidationTicket;
@@ -3318,8 +2831,7 @@ export class DomRenderer {
 
       if (validationResult && typeof (validationResult as Promise<unknown>).then === 'function') {
         this.isEditValidationPending = true;
-        this.editorHostElement.classList.add('hgrid__editor-host--pending');
-        this.editorInputElement.disabled = true;
+        this.applyEditorOverlayState(createPendingEditorOverlayState());
         let resolvedMessage: string | null | undefined = null;
         try {
           resolvedMessage = await validationResult;
@@ -3331,22 +2843,19 @@ export class DomRenderer {
         }
 
         this.isEditValidationPending = false;
-        this.editorHostElement.classList.remove('hgrid__editor-host--pending');
-        this.editorInputElement.disabled = false;
+        this.applyEditorOverlayState(createActiveEditorOverlayState());
 
         if (typeof resolvedMessage === 'string' && resolvedMessage.length > 0) {
-          this.editorHostElement.classList.add('hgrid__editor-host--invalid');
-          this.editorMessageElement.textContent = resolvedMessage;
-          if (trigger === 'blur') {
+          this.applyEditorOverlayState(createInvalidEditorOverlayState(resolvedMessage));
+          if (shouldRefocusEditorAfterValidationFailure(trigger)) {
             this.editorInputElement.focus();
             this.editorInputElement.select();
           }
           return;
         }
       } else if (typeof validationResult === 'string' && validationResult.length > 0) {
-        this.editorHostElement.classList.add('hgrid__editor-host--invalid');
-        this.editorMessageElement.textContent = validationResult;
-        if (trigger === 'blur') {
+        this.applyEditorOverlayState(createInvalidEditorOverlayState(validationResult));
+        if (shouldRefocusEditorAfterValidationFailure(trigger)) {
           this.editorInputElement.focus();
           this.editorInputElement.select();
         }
@@ -3354,8 +2863,7 @@ export class DomRenderer {
       }
     }
 
-    this.editorHostElement.classList.remove('hgrid__editor-host--invalid');
-    this.editorMessageElement.textContent = '';
+    this.applyEditorOverlayState(createActiveEditorOverlayState());
     let committedValue = nextValue;
     if (currentSession.column.valueSetter) {
       const rowForSetter = this.options.dataProvider.getRow
@@ -3397,10 +2905,11 @@ export class DomRenderer {
 
     const cellRect = cellEntry.cell.getBoundingClientRect();
     const rootRect = this.rootElement.getBoundingClientRect();
-    this.editorHostElement.style.left = `${Math.max(0, cellRect.left - rootRect.left)}px`;
-    this.editorHostElement.style.top = `${Math.max(0, cellRect.top - rootRect.top)}px`;
-    this.editorHostElement.style.width = `${Math.max(1, cellRect.width)}px`;
-    this.editorHostElement.style.height = `${Math.max(1, cellRect.height)}px`;
+    const overlayRect = resolveEditorOverlayRect(cellRect, rootRect);
+    this.editorHostElement.style.left = `${overlayRect.left}px`;
+    this.editorHostElement.style.top = `${overlayRect.top}px`;
+    this.editorHostElement.style.width = `${overlayRect.width}px`;
+    this.editorHostElement.style.height = `${overlayRect.height}px`;
     return true;
   }
 
@@ -3466,59 +2975,15 @@ export class DomRenderer {
   }
 
   private getHorizontalWindow(scrollLeft: number): HorizontalWindow {
-    const totalCenterColumns = this.columnsByZone.center.length;
-    if (totalCenterColumns === 0 || this.centerCellCapacity === 0) {
-      return { start: 0, end: 0 };
-    }
-
-    const overscanCols = this.getColumnOverscan();
-    const scrollRight = scrollLeft + Math.max(1, this.centerVisibleWidth);
-    const firstVisible = this.findFirstColumnEndingAfter(scrollLeft);
-    const endVisibleExclusive = this.findFirstColumnStartingAtOrAfter(scrollRight);
-    const start = Math.max(0, firstVisible - overscanCols);
-    const end = Math.min(totalCenterColumns, Math.max(start + 1, endVisibleExclusive + overscanCols));
-
-    if (end - start <= this.centerCellCapacity) {
-      return { start, end };
-    }
-
-    return {
-      start,
-      end: Math.min(totalCenterColumns, start + this.centerCellCapacity)
-    };
-  }
-
-  private findFirstColumnEndingAfter(offset: number): number {
-    let low = 0;
-    let high = this.centerColumnLeft.length;
-
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      const columnEnd = this.centerColumnLeft[mid] + this.centerColumnWidth[mid];
-      if (columnEnd <= offset) {
-        low = mid + 1;
-      } else {
-        high = mid;
-      }
-    }
-
-    return Math.min(low, this.centerColumnLeft.length);
-  }
-
-  private findFirstColumnStartingAtOrAfter(offset: number): number {
-    let low = 0;
-    let high = this.centerColumnLeft.length;
-
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      if (this.centerColumnLeft[mid] < offset) {
-        low = mid + 1;
-      } else {
-        high = mid;
-      }
-    }
-
-    return Math.min(low, this.centerColumnLeft.length);
+    return resolveHorizontalWindow({
+      columnLeft: this.centerColumnLeft,
+      columnWidth: this.centerColumnWidth,
+      totalCenterColumns: this.columnsByZone.center.length,
+      centerVisibleWidth: this.centerVisibleWidth,
+      centerCellCapacity: this.centerCellCapacity,
+      overscanCols: this.getColumnOverscan(),
+      scrollLeft
+    });
   }
 
   private findColumnIndexAtOffset(columnLeft: number[], columnWidth: number[], offset: number): number {
@@ -4790,15 +4255,7 @@ export class DomRenderer {
   }
 
   private getInitialActiveCell(): SelectionCellPosition | null {
-    const bounds = this.getSelectionBounds();
-    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
-      return null;
-    }
-
-    return {
-      rowIndex: Math.max(0, Math.min(bounds.rowCount - 1, this.renderedStartRow)),
-      colIndex: 0
-    };
+    return resolveInitialActiveCell(this.getSelectionBounds(), this.renderedStartRow);
   }
 
   private getPageStepRows(): number {
@@ -4806,18 +4263,7 @@ export class DomRenderer {
   }
 
   private clampSelectionCell(cell: SelectionCellPosition): SelectionCellPosition {
-    const bounds = this.getSelectionBounds();
-    if (bounds.rowCount <= 0 || bounds.columnCount <= 0) {
-      return {
-        rowIndex: 0,
-        colIndex: 0
-      };
-    }
-
-    return {
-      rowIndex: Math.max(0, Math.min(bounds.rowCount - 1, cell.rowIndex)),
-      colIndex: Math.max(0, Math.min(bounds.columnCount - 1, cell.colIndex))
-    };
+    return clampSelectionCellToBounds(this.getSelectionBounds(), cell);
   }
 
   private getEditableGlobalColumnIndexes(): number[] {
@@ -5324,7 +4770,7 @@ export class DomRenderer {
       return;
     }
 
-    const matrix = this.parseClipboardTsv(plainText);
+    const matrix = parseClipboardTsv(plainText);
     const updates = this.applyClipboardMatrix(matrix);
     if (updates.length === 0) {
       return;
@@ -5431,8 +4877,7 @@ export class DomRenderer {
       return;
     }
 
-    this.editorHostElement.classList.remove('hgrid__editor-host--invalid');
-    this.editorMessageElement.textContent = '';
+    this.applyEditorOverlayState(createActiveEditorOverlayState());
   };
 
   private resolveGroupRowColumnId(row: GridRowData): string | null {
@@ -5526,16 +4971,19 @@ export class DomRenderer {
   private syncViewportTransforms(scrollTop: number, scrollLeft: number, forceVerticalSync: boolean): void {
     this.syncHorizontalOffset(scrollLeft);
 
-    const virtualScrollTop = this.pendingVirtualScrollTop;
-    const canSyncVertical = forceVerticalSync || this.getStartRowForScrollTop(virtualScrollTop) === this.renderedStartRow;
-    const effectiveVirtualScrollTop = canSyncVertical ? virtualScrollTop : this.renderedScrollTop;
-    const centerVerticalOffset = this.renderedViewportOffsetY - effectiveVirtualScrollTop + scrollTop;
-    const pinnedVerticalOffset = this.renderedViewportOffsetY - effectiveVirtualScrollTop;
-    const centerVerticalTransform = `translate3d(${-scrollLeft}px, ${centerVerticalOffset}px, 0)`;
-    const pinnedVerticalTransform = `translate3d(0, ${pinnedVerticalOffset}px, 0)`;
-    this.rowsViewportCenterElement.style.transform = centerVerticalTransform;
-    this.rowsViewportLeftElement.style.transform = pinnedVerticalTransform;
-    this.rowsViewportRightElement.style.transform = pinnedVerticalTransform;
+    const metrics = resolveViewportTransformMetrics({
+      scrollTop,
+      scrollLeft,
+      pendingVirtualScrollTop: this.pendingVirtualScrollTop,
+      renderedStartRow: this.renderedStartRow,
+      renderedScrollTop: this.renderedScrollTop,
+      renderedViewportOffsetY: this.renderedViewportOffsetY,
+      forceVerticalSync,
+      getStartRowForScrollTop: (virtualScrollTop) => this.getStartRowForScrollTop(virtualScrollTop)
+    });
+    this.rowsViewportCenterElement.style.transform = metrics.centerVerticalTransform;
+    this.rowsViewportLeftElement.style.transform = metrics.pinnedVerticalTransform;
+    this.rowsViewportRightElement.style.transform = metrics.pinnedVerticalTransform;
   }
 
   private getMaxVerticalScrollTop(): number {

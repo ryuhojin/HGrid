@@ -691,6 +691,87 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 56,
+      "file": "example56.html",
+      "title": "Example 56 - Remote Group Pivot Tree Contract Smoke",
+      "tags": [
+        "enterprise",
+        "server-side-row-model",
+        "grouping",
+        "pivot",
+        "tree",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 57,
+      "file": "example57.html",
+      "title": "Example 57 - Remote Cache Diff And Refresh Smoke",
+      "tags": [
+        "enterprise",
+        "server-side-row-model",
+        "cache-invalidation",
+        "background-refresh",
+        "retry",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 58,
+      "file": "example58.html",
+      "title": "Example 58 - Remote Pending Changes",
+      "tags": [
+        "enterprise",
+        "server-side-row-model",
+        "editing",
+        "dirty-tracking",
+        "save-discard",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 59,
+      "file": "example59.html",
+      "title": "Example 59 - Server Grouping",
+      "tags": [
+        "enterprise",
+        "server-side-row-model",
+        "grouping",
+        "remote-grouping",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 60,
+      "file": "example60.html",
+      "title": "Example 60 - Server Pivot",
+      "tags": [
+        "enterprise",
+        "server-side-row-model",
+        "pivot",
+        "remote-pivot",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 61,
+      "file": "example61.html",
+      "title": "Example 61 - Server Tree",
+      "tags": [
+        "enterprise",
+        "server-side-row-model",
+        "tree",
+        "remote-tree",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

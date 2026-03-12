@@ -154,33 +154,42 @@
 - [x] server query schema versioning 정의
 
 ## E2.2 그룹/피벗/트리 원격 모델 완성
-- [ ] remote grouping row contract 정의
-- [ ] remote pivot result contract 정의
-- [ ] remote tree contract 정의
-- [ ] remote + tree 동시 지원
-- [ ] remote + grouping + pivot 조합별 정책 정의
+- [x] remote grouping row contract 정의
+- [x] remote pivot result contract 정의
+- [x] remote tree contract 정의
+- [x] remote + tree 동시 지원
+- [x] remote + grouping + pivot 조합별 정책 정의
 
 ## E2.3 캐시/동기화 고도화
-- [ ] block invalidation 범위 제어
-- [ ] query change diff 정책
-- [ ] optimistic refresh / background refresh 정책
-- [ ] remote loading / error / retry overlay 상태 체계화
+- [x] block invalidation 범위 제어
+- [x] query change diff 정책
+- [x] optimistic refresh / background refresh 정책
+- [x] remote loading / error / retry overlay 상태 체계화
 
-## E2.4 서버 연동 예제
-- [ ] fake server SSRM example 추가
-- [ ] server grouping example 추가
-- [ ] server pivot example 추가
-- [ ] server tree example 추가
+## E2.4 서버모드 편집 / 변경추적
+- [x] server-side edit policy 정의
+- [x] leaf row edit / group row non-edit policy 정의
+- [x] dirty row / dirty cell tracking
+- [x] pending changes API(`hasPendingChanges`, `getPendingChanges`, `getPendingChangeSummary`) 정의
+- [x] save / discard / revert API(`acceptPendingChanges`, `discardPendingChanges`, `revertPendingChange`) 정의
+- [x] remote cache eviction / refetch 이후 dirty state 유지
+- [x] save 실패 rollback / conflict 표시 정책 정의
+
+## E2.5 서버 연동 예제
+- [x] fake server SSRM example 추가
+- [x] server grouping example 추가
+- [x] server pivot example 추가
+- [x] server tree example 추가
 
 ### 변경 대상
-- [ ] `packages/grid-core/src/data/remote-data-provider.ts`
-- [ ] `packages/grid-core/src/core/grid.ts`
-- [ ] `docs/remote-data-provider-phase8.md`
-- [ ] 신규 SSRM 문서
+- [x] `packages/grid-core/src/data/remote-data-provider.ts`
+- [x] `packages/grid-core/src/core/grid.ts`
+- [x] `docs/remote-data-provider-phase8.md`
+- [x] 신규 SSRM 문서
 
 ### 수용 기준
-- [ ] remote provider가 단순 block fetch가 아니라 엔터프라이즈 row model 역할을 한다.
-- [ ] grouping / pivot / tree / sort / filter 조합이 서버 계약으로 설명 가능하다.
+- [x] remote provider가 단순 block fetch가 아니라 엔터프라이즈 row model 역할을 한다.
+- [x] grouping / pivot / tree / sort / filter 조합이 서버 계약으로 설명 가능하다.
 
 ---
 

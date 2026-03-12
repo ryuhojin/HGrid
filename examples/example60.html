@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 60 - Server Pivot</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --panel-border: #d7e0ea;
+        --panel-bg: #fbfdff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 260px),
+          linear-gradient(180deg, #f8fbff 0%, #f4f8fc 100%);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 21px;
+      }
+
+      p {
+        margin: 0 0 14px;
+        color: var(--muted);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .controls button {
+        border: 1px solid #c8d3de;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.94);
+        padding: 8px 13px;
+        cursor: pointer;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 420px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 1px solid var(--panel-border);
+        background: var(--panel-bg);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .panel + .panel {
+        margin-top: 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .status {
+        margin-bottom: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      @media (max-width: 1240px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 60 - Server Pivot</h1>
+    <p>
+      server pivot 전용 예제입니다. 서버가 `pivotResult.columns`를 내려주고, 그 컬럼이 그대로 렌더 컬럼으로 반영되는지,
+      그리고 pivot 결과 컬럼 기준 정렬/필터가 어떻게 query model과 함께 보이는지 확인합니다.
+    </p>
+
+    <div class="controls">
+      <button id="sort-feb" type="button">sort sales::Feb desc</button>
+      <button id="filter-apac" type="button">filter APAC</button>
+      <button id="toggle-quarter" type="button">toggle quarter view</button>
+      <button id="clear-query" type="button">clear query</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="status" id="status">mode: remote pivot</div>
+        <div id="grid"></div>
+      </div>
+      <div>
+        <section class="panel">
+          <h2>Pivot Contract</h2>
+          <pre id="contract-log">Initializing...</pre>
+        </section>
+        <section class="panel">
+          <h2>Visible Columns / Rows</h2>
+          <pre id="preview-log">Initializing...</pre>
+        </section>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const baseColumns = [
+        { id: 'region', header: 'Region', width: 180, type: 'text', pinned: 'left' },
+        { id: 'bucket', header: 'Bucket', width: 120, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 120, type: 'number' }
+      ];
+      const monthlyRows = [
+        { region: 'APAC', bucket: 'Jan', sales: 120 },
+        { region: 'APAC', bucket: 'Feb', sales: 180 },
+        { region: 'EMEA', bucket: 'Jan', sales: 90 },
+        { region: 'EMEA', bucket: 'Feb', sales: 150 }
+      ];
+      const quarterRows = [
+        { region: 'APAC', bucket: 'Q1', sales: 300 },
+        { region: 'APAC', bucket: 'Q2', sales: 140 },
+        { region: 'EMEA', bucket: 'Q1', sales: 240 },
+        { region: 'EMEA', bucket: 'Q2', sales: 130 }
+      ];
+
+      const statusNode = document.getElementById('status');
+      const contractLogNode = document.getElementById('contract-log');
+      const previewLogNode = document.getElementById('preview-log');
+
+      let quarterMode = false;
+      let lastRequest = null;
+      let lastResponse = null;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+
+      function deepClone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function getSourceRows() {
+        return quarterMode ? quarterRows : monthlyRows;
+      }
+
+      function buildPivotRows(request) {
+        const sourceRows = getSourceRows();
+        const regionFilter = request.queryModel.filterModel && request.queryModel.filterModel.region;
+        const regionValues =
+          regionFilter && typeof regionFilter === 'object' && regionFilter.kind === 'set' && Array.isArray(regionFilter.values)
+            ? regionFilter.values
+            : null;
+        const filteredRows = regionValues ? sourceRows.filter((row) => regionValues.indexOf(row.region) >= 0) : sourceRows.slice();
+        const bucketIds = quarterMode ? ['Q1', 'Q2'] : ['Jan', 'Feb'];
+        const grouped = new Map();
+
+        filteredRows.forEach((row) => {
+          if (!grouped.has(row.region)) {
+            grouped.set(row.region, { region: row.region });
+          }
+          const groupRow = grouped.get(row.region);
+          groupRow['sales::' + row.bucket] = row.sales;
+        });
+
+        const rows = Array.from(grouped.values());
+        const pivotColumns = [
+          { id: 'region', header: 'Region', width: 180, type: 'text', pinned: 'left' }
+        ].concat(
+          bucketIds.map((bucketId) => ({
+            id: 'sales::' + bucketId,
+            header: 'Sales ' + bucketId,
+            width: 140,
+            type: 'number'
+          }))
+        );
+
+        const sortItem = request.queryModel.sortModel[0];
+        if (sortItem && sortItem.columnId) {
+          const direction = sortItem.direction === 'desc' ? -1 : 1;
+          rows.sort((left, right) => {
+            const leftValue = left[sortItem.columnId] || 0;
+            const rightValue = right[sortItem.columnId] || 0;
+            if (leftValue === rightValue) {
+              return 0;
+            }
+            return leftValue > rightValue ? direction : -direction;
+          });
+        }
+
+        return {
+          rows,
+          pivotResult: {
+            columns: pivotColumns
+          },
+          totalRowCount: rows.length
+        };
+      }
+
+      const provider = new HGrid.RemoteDataProvider({
+        dataSource: {
+          fetchBlock(request) {
+            lastRequest = deepClone({
+              startIndex: request.startIndex,
+              endIndex: request.endIndex,
+              operationId: request.operationId,
+              queryModel: request.queryModel
+            });
+            const response = buildPivotRows(request);
+            lastResponse = deepClone({
+              totalRowCount: response.totalRowCount,
+              pivotResultColumnIds: response.pivotResult.columns.map((column) => column.id)
+            });
+            return new Promise((resolve) => {
+              setTimeout(() => resolve(response), 18);
+            });
+          }
+        },
+        rowCount: 2,
+        cache: {
+          blockSize: 20,
+          maxBlocks: 2,
+          prefetchBlocks: 0
+        },
+        queryModel: {
+          serverSide: {
+            schemaVersion: 'v2',
+            requestKind: 'pivot',
+            route: [],
+            rootStoreStrategy: 'partial',
+            childStoreStrategy: 'partial'
+          }
+        }
+      });
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: baseColumns,
+        dataProvider: provider,
+        pivoting: {
+          mode: 'server',
+          pivotModel: [{ columnId: 'bucket' }],
+          values: [{ columnId: 'sales', type: 'sum' }]
+        },
+        height: 360,
+        rowHeight: 30,
+        overscan: 3
+      });
+
+      function collectPreviewRows() {
+        const activeProvider = grid.getDataProvider();
+        const rows = [];
+        for (let index = 0; index < Math.min(4, activeProvider.getRowCount()); index += 1) {
+          rows.push({
+            index,
+            row: activeProvider.getRow ? activeProvider.getRow(index) : null
+          });
+        }
+        return rows;
+      }
+
+      function renderLogs() {
+        statusNode.textContent = 'mode: remote pivot / columns=' + provider.getPivotResultColumns().map((column) => column.id).join(', ');
+        contractLogNode.textContent = JSON.stringify(
+          {
+            queryModel: provider.getQueryModel(),
+            serverSideQueryModel: provider.getServerSideQueryModel(),
+            debugState: provider.getDebugState(),
+            lastRequest,
+            lastResponse
+          },
+          null,
+          2
+        );
+        previewLogNode.textContent = JSON.stringify(
+          {
+            visibleColumnIds: grid.getVisibleColumns().map((column) => column.id),
+            previewRows: collectPreviewRows()
+          },
+          null,
+          2
+        );
+      }
+
+      provider.onRowsChanged(renderLogs);
+
+      document.getElementById('sort-feb').addEventListener('click', async () => {
+        const targetColumnId = quarterMode ? 'sales::Q2' : 'sales::Feb';
+        await grid.setSortModel([{ columnId: targetColumnId, direction: 'desc' }]);
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('filter-apac').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          region: {
+            kind: 'set',
+            values: ['APAC']
+          }
+        });
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('toggle-quarter').addEventListener('click', async () => {
+        quarterMode = !quarterMode;
+        await grid.setFilterModel({});
+        await grid.clearSortModel();
+        provider.invalidateCache();
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('clear-query').addEventListener('click', async () => {
+        await grid.setFilterModel({});
+        await grid.clearSortModel();
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderLogs();
+      });
+
+      window.__example60 = {
+        provider,
+        grid,
+        inspect() {
+          renderLogs();
+        }
+      };
+
+      void waitFrame().then(renderLogs);
+    </script>
+  </body>
+</html>

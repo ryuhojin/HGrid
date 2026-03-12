@@ -1,5 +1,16 @@
 import { GroupedDataProvider } from '../data/grouped-data-provider';
+import {
+  GROUP_ROW_COLUMN_ID_FIELD,
+  GROUP_ROW_KEY_FIELD,
+  isGroupRowData
+} from '../data/grouped-data-provider';
 import { TreeDataProvider } from '../data/tree-data-provider';
+import {
+  TREE_ROW_HAS_CHILDREN_FIELD,
+  TREE_ROW_KIND_FIELD,
+  TREE_ROW_NODE_KEY_FIELD,
+  isTreeRowData
+} from '../data/tree-data-provider';
 import type { ColumnReorderEvent, ColumnResizeEvent, EventBus, GridEventMap } from './event-bus';
 import type {
   GridAuditLogPort,
@@ -69,13 +80,29 @@ export class GridCommandEventService {
   public handleCellClick(params: GridCommandEventServiceParams, event: GridEventMap['cellClick']): void {
     const dataProvider = params.getDataProvider();
 
-    if (params.isTreeDataActive()) {
-      if (!(dataProvider instanceof TreeDataProvider)) {
+    if (params.isTreeToggleActive()) {
+      if (dataProvider instanceof TreeDataProvider) {
+        const treeRow = dataProvider.getTreeRow(event.dataIndex);
+        if (!treeRow || !treeRow.hasChildren) {
+          return;
+        }
+
+        const treeColumnId = params.getTreeColumnId();
+        if (treeColumnId.length > 0 && event.columnId !== treeColumnId) {
+          return;
+        }
+
+        void params.toggleTreeExpanded(treeRow.nodeKey);
         return;
       }
 
-      const treeRow = dataProvider.getTreeRow(event.dataIndex);
-      if (!treeRow || !treeRow.hasChildren) {
+      const treeRow = dataProvider.getRow?.(event.dataIndex) ?? null;
+      if (!treeRow || !isTreeRowData(treeRow)) {
+        return;
+      }
+
+      const treeRowData = treeRow;
+      if (treeRowData[TREE_ROW_HAS_CHILDREN_FIELD] !== true) {
         return;
       }
 
@@ -84,28 +111,50 @@ export class GridCommandEventService {
         return;
       }
 
-      void params.toggleTreeExpanded(treeRow.nodeKey);
+      const nodeKey = treeRowData[TREE_ROW_NODE_KEY_FIELD];
+      if (typeof nodeKey !== 'string' && typeof nodeKey !== 'number') {
+        return;
+      }
+
+      void params.toggleTreeExpanded(nodeKey);
       return;
     }
 
-    if (!params.isClientGroupingActive()) {
+    if (!params.isGroupingToggleActive()) {
       return;
     }
 
-    if (!(dataProvider instanceof GroupedDataProvider)) {
+    if (dataProvider instanceof GroupedDataProvider) {
+      const groupRow = dataProvider.getGroupRow(event.dataIndex);
+      if (!groupRow) {
+        return;
+      }
+
+      if (event.columnId !== groupRow.columnId) {
+        return;
+      }
+
+      void params.toggleGroupExpanded(groupRow.groupKey);
       return;
     }
 
-    const groupRow = dataProvider.getGroupRow(event.dataIndex);
-    if (!groupRow) {
+    const groupRow = dataProvider.getRow?.(event.dataIndex) ?? null;
+    if (!groupRow || !isGroupRowData(groupRow)) {
       return;
     }
 
-    if (event.columnId !== groupRow.columnId) {
+    const groupRowData = groupRow;
+
+    if (event.columnId !== groupRowData[GROUP_ROW_COLUMN_ID_FIELD]) {
       return;
     }
 
-    void params.toggleGroupExpanded(groupRow.groupKey);
+    const groupKey = groupRowData[GROUP_ROW_KEY_FIELD];
+    if (typeof groupKey !== 'string' || groupKey.length === 0) {
+      return;
+    }
+
+    void params.toggleGroupExpanded(groupKey);
   }
 
   public handleEditCommit(params: GridCommandEventServiceParams, event: GridEventMap['editCommit']): void {

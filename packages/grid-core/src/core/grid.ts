@@ -747,6 +747,7 @@ export class Grid {
   private groupedDataProvider: GroupedDataProvider | null = null;
   private pivotDataProvider: LocalDataProvider | null = null;
   private treeDataProvider: TreeDataProvider | null = null;
+  private remoteServerSideDataProvider: GridDataPipelineState['remoteServerSideDataProvider'] = null;
   private readonly columnModel: ColumnModel;
   private readonly rowModel: RowModel;
   private readonly eventBus: EventBus;
@@ -823,6 +824,8 @@ export class Grid {
       },
       isTreeDataActive: () => this.hasActiveTreeData(),
       isClientGroupingActive: () => this.hasActiveClientGrouping(),
+      isTreeToggleActive: () => this.hasActiveTreeData() || this.shouldUseRemoteServerTreeView(),
+      isGroupingToggleActive: () => this.hasActiveClientGrouping() || this.shouldUseServerGrouping(),
       getDataProvider: () => this.options.dataProvider,
       getTreeColumnId: () => this.treeDataOptions.treeColumnId ?? '',
       toggleGroupExpanded: (groupKey) => this.toggleGroupExpanded(groupKey),
@@ -1151,7 +1154,7 @@ export class Grid {
       this.filterMapping = null;
       this.syncRemoteProviderQueryState();
       this.clearDerivedViewArtifacts();
-      this.renderer.setOptions(this.getRendererOptions());
+      this.applyRemoteServerSideView();
       return;
     }
 
@@ -1235,7 +1238,7 @@ export class Grid {
       this.pivotOperationToken += 1;
       this.syncRemoteProviderQueryState();
       this.clearDerivedViewArtifacts();
-      this.renderer.setOptions(this.getRendererOptions());
+      this.applyRemoteServerSideView();
       return;
     }
 
@@ -1305,6 +1308,10 @@ export class Grid {
     }
 
     this.groupExpansionState[groupKey] = nextExpanded;
+    if (this.shouldUseServerGrouping()) {
+      await this.rebuildDerivedView();
+      return;
+    }
     await this.applyGroupingViewInternal();
   }
 
@@ -1324,6 +1331,10 @@ export class Grid {
       nextState[this.groupKeys[index]] = true;
     }
     this.groupExpansionState = nextState;
+    if (this.shouldUseServerGrouping()) {
+      await this.rebuildDerivedView();
+      return;
+    }
     await this.applyGroupingViewInternal();
   }
 
@@ -1333,6 +1344,10 @@ export class Grid {
       nextState[this.groupKeys[index]] = false;
     }
     this.groupExpansionState = nextState;
+    if (this.shouldUseServerGrouping()) {
+      await this.rebuildDerivedView();
+      return;
+    }
     await this.applyGroupingViewInternal();
   }
 
@@ -1479,6 +1494,10 @@ export class Grid {
     }
 
     this.treeExpansionState[nodeToken] = nextExpanded;
+    if (this.shouldUseRemoteServerTreeView()) {
+      await this.rebuildDerivedView();
+      return;
+    }
     await this.applyTreeViewInternal(nodeKey, nextExpanded);
   }
 
@@ -1495,6 +1514,10 @@ export class Grid {
       nextState[this.treeNodeKeyTokens[index]] = true;
     }
     this.treeExpansionState = nextState;
+    if (this.shouldUseRemoteServerTreeView()) {
+      await this.rebuildDerivedView();
+      return;
+    }
     await this.applyTreeViewInternal();
   }
 
@@ -1504,6 +1527,10 @@ export class Grid {
       nextState[this.treeNodeKeyTokens[index]] = false;
     }
     this.treeExpansionState = nextState;
+    if (this.shouldUseRemoteServerTreeView()) {
+      await this.rebuildDerivedView();
+      return;
+    }
     await this.applyTreeViewInternal();
   }
 
@@ -1743,13 +1770,65 @@ export class Grid {
       groupModel: this.groupModel,
       pivotModel: this.pivotModel,
       pivotValues: this.pivotValues,
+      groupAggregations: this.groupAggregations,
+      groupExpansionState: this.groupExpansionState,
+      groupDefaultExpanded: this.groupDefaultExpanded,
+      treeDataOptions: this.treeDataOptions,
+      treeExpansionState: this.treeExpansionState,
       useServerGrouping: this.shouldUseServerGrouping(),
-      useServerPivot: this.shouldUseServerPivot()
+      useServerPivot: this.shouldUseServerPivot(),
+      useServerTree: this.shouldUseRemoteServerTreeView()
     });
     this.options = {
       ...this.options,
       dataProvider: remoteDataProvider
     };
+  }
+
+  private applyRemoteServerSideView(): void {
+    const remoteDataProvider = this.requireRemoteDataProvider();
+    if (this.shouldUseServerPivot()) {
+      const pivotResultColumns =
+        typeof remoteDataProvider.getPivotResultColumns === 'function' ? remoteDataProvider.getPivotResultColumns() : [];
+      if (pivotResultColumns.length > 0) {
+        this.applyClientPivotColumns(pivotResultColumns);
+      } else {
+        this.restoreColumnsAfterClientPivot();
+      }
+    } else {
+      this.restoreColumnsAfterClientPivot();
+      this.pivotColumns = [];
+    }
+
+    const remoteViewMode = this.shouldUseRemoteServerTreeView()
+      ? 'tree'
+      : this.shouldUseServerGrouping() && this.hasActiveGroupModel()
+        ? 'grouping'
+        : 'flat';
+
+    if (remoteViewMode === 'flat') {
+      this.commitDataPipelineResult(
+        this.dataPipelineService.applyFlatView({
+          sourceDataProvider: remoteDataProvider,
+          rowModel: this.rowModel,
+          sortMapping: null,
+          filterMapping: null
+        })
+      );
+      this.renderer.setOptions(this.getRendererOptions());
+      return;
+    }
+
+    this.commitDataPipelineResult(
+      this.dataPipelineService.applyRemoteServerSideView({
+        state: this.getDataPipelineState(),
+        sourceDataProvider: remoteDataProvider,
+        rowModel: this.rowModel,
+        viewMode: remoteViewMode,
+        treeColumnId: this.treeDataOptions.treeColumnId ?? ''
+      })
+    );
+    this.renderer.setOptions(this.getRendererOptions());
   }
 
   private getDataPipelineState(): GridDataPipelineState {
@@ -1761,7 +1840,8 @@ export class Grid {
       treeRows: this.treeRows,
       treeNodeKeys: this.treeNodeKeys,
       treeNodeKeyTokens: this.treeNodeKeyTokens,
-      treeDataProvider: this.treeDataProvider
+      treeDataProvider: this.treeDataProvider,
+      remoteServerSideDataProvider: this.remoteServerSideDataProvider
     };
   }
 
@@ -1774,6 +1854,7 @@ export class Grid {
     this.treeNodeKeys = nextState.treeNodeKeys;
     this.treeNodeKeyTokens = nextState.treeNodeKeyTokens;
     this.treeDataProvider = nextState.treeDataProvider;
+    this.remoteServerSideDataProvider = nextState.remoteServerSideDataProvider;
   }
 
   private commitDataPipelineResult(result: GridDataPipelineApplyResult): void {
@@ -1894,10 +1975,12 @@ export class Grid {
         this.hasActiveFilterModel() ||
         this.hasActiveClientGrouping() ||
         this.hasActiveTreeData() ||
-        this.hasActivePivotModel(),
+        this.hasActivePivotModel() ||
+        this.shouldUseServerGrouping() ||
+        this.shouldUseRemoteServerTreeView(),
       isRemoteDataProvider: this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider),
       shouldSyncRemoteQueryState:
-        (this.shouldUseServerGrouping() || this.shouldUseServerPivot()) &&
+        (this.shouldUseServerGrouping() || this.shouldUseServerPivot() || this.shouldUseRemoteServerTreeView()) &&
         this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)
     });
 
@@ -1978,6 +2061,14 @@ export class Grid {
     return this.treeDataOptions.enabled === true && !this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider);
   }
 
+  private shouldUseRemoteServerTreeView(): boolean {
+    return (
+      this.treeDataOptions.enabled === true &&
+      this.treeMode === 'server' &&
+      this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)
+    );
+  }
+
   private hasActiveClientGrouping(): boolean {
     return (
       this.hasActiveGroupModel() &&
@@ -1988,14 +2079,20 @@ export class Grid {
   }
 
   private shouldUseServerGrouping(): boolean {
-    return this.groupingMode === 'server' && this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider);
+    return (
+      this.groupingMode === 'server' &&
+      this.hasActiveGroupModel() &&
+      this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider) &&
+      !this.shouldUseRemoteServerTreeView()
+    );
   }
 
   private shouldUseServerPivot(): boolean {
     return (
       this.pivotingMode === 'server' &&
       this.hasActivePivotModel() &&
-      this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)
+      this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider) &&
+      !this.shouldUseRemoteServerTreeView()
     );
   }
 
@@ -2288,9 +2385,8 @@ export class Grid {
       this.sortMapping = null;
       this.filterMapping = null;
       this.clearDerivedViewArtifacts();
-      this.restoreColumnsAfterClientPivot();
       this.syncRemoteProviderQueryState();
-      this.renderer.setOptions(this.getRendererOptions());
+      this.applyRemoteServerSideView();
       return;
     }
 

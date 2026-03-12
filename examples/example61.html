@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 61 - Server Tree</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --panel-border: #d7e0ea;
+        --panel-bg: #fbfdff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(2, 132, 199, 0.08), transparent 260px),
+          linear-gradient(180deg, #f8fbff 0%, #f4f8fc 100%);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 21px;
+      }
+
+      p {
+        margin: 0 0 14px;
+        color: var(--muted);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .controls button {
+        border: 1px solid #c8d3de;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.94);
+        padding: 8px 13px;
+        cursor: pointer;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 420px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 1px solid var(--panel-border);
+        background: var(--panel-bg);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .panel + .panel {
+        margin-top: 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .status {
+        margin-bottom: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      @media (max-width: 1240px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 61 - Server Tree</h1>
+    <p>
+      server tree 전용 예제입니다. `serverSide.tree` query contract와 `rowMetadata.tree*` 필드가 실제 tree row DOM 계약으로 어떻게 연결되는지,
+      그리고 `expandedNodeKeys`가 어떻게 유지되는지 확인할 수 있습니다.
+    </p>
+
+    <div class="controls">
+      <button id="expand-root1" type="button">expand root-1</button>
+      <button id="expand-root2" type="button">expand root-2</button>
+      <button id="collapse-all" type="button">collapse all</button>
+      <button id="filter-node1" type="button">filter "1"</button>
+      <button id="clear-query" type="button">clear query</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="status" id="status">mode: remote tree</div>
+        <div id="grid"></div>
+      </div>
+      <div>
+        <section class="panel">
+          <h2>Tree Contract</h2>
+          <pre id="contract-log">Initializing...</pre>
+        </section>
+        <section class="panel">
+          <h2>Preview Rows</h2>
+          <pre id="preview-log">Initializing...</pre>
+        </section>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'name', header: 'Name', width: 260, type: 'text', pinned: 'left' },
+        { id: 'status', header: 'Status', width: 160, type: 'text' },
+        { id: 'owner', header: 'Owner', width: 160, type: 'text' }
+      ];
+      const treeRows = [
+        { id: 'root-1', parentId: null, hasChildren: true, name: 'Root 1', status: 'active', owner: 'Seoul' },
+        { id: 'root-2', parentId: null, hasChildren: true, name: 'Root 2', status: 'idle', owner: 'Berlin' },
+        { id: 'child-1', parentId: 'root-1', hasChildren: false, name: 'Child 1', status: 'active', owner: 'Busan' },
+        { id: 'child-2', parentId: 'root-1', hasChildren: false, name: 'Child 2', status: 'idle', owner: 'Tokyo' },
+        { id: 'child-3', parentId: 'root-2', hasChildren: false, name: 'Child 3', status: 'active', owner: 'Paris' }
+      ];
+
+      const statusNode = document.getElementById('status');
+      const contractLogNode = document.getElementById('contract-log');
+      const previewLogNode = document.getElementById('preview-log');
+
+      let lastRequest = null;
+      let lastResponse = null;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+
+      function deepClone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function getExpandedNodeKeys(request) {
+        return request.queryModel.serverSide && request.queryModel.serverSide.tree
+          ? request.queryModel.serverSide.tree.expandedNodeKeys || []
+          : [];
+      }
+
+      function getNameContains(filterModel) {
+        const nameFilter = filterModel && filterModel.name;
+        if (!nameFilter || typeof nameFilter !== 'object' || nameFilter.kind !== 'text' || typeof nameFilter.value !== 'string') {
+          return '';
+        }
+        return nameFilter.value.toLowerCase();
+      }
+
+      function createTreeResponse(request) {
+        const expandedNodeKeys = getExpandedNodeKeys(request);
+        const nameContains = getNameContains(request.queryModel.filterModel);
+        const rows = [];
+        const rowMetadata = [];
+
+        function pushRow(row, depth) {
+          if (nameContains && row.name.toLowerCase().indexOf(nameContains) < 0) {
+            return;
+          }
+
+          rows.push({
+            id: row.id,
+            parentId: row.parentId,
+            hasChildren: row.hasChildren,
+            name: row.name,
+            status: row.status,
+            owner: row.owner
+          });
+          rowMetadata.push({
+            kind: 'leaf',
+            treeNodeKey: row.id,
+            treeParentNodeKey: row.parentId,
+            treeDepth: depth,
+            treeHasChildren: row.hasChildren,
+            treeExpanded: expandedNodeKeys.indexOf(row.id) >= 0,
+            treeColumnId: 'name'
+          });
+        }
+
+        pushRow(treeRows[0], 0);
+        if (expandedNodeKeys.indexOf('root-1') >= 0) {
+          pushRow(treeRows[2], 1);
+          pushRow(treeRows[3], 1);
+        }
+
+        pushRow(treeRows[1], 0);
+        if (expandedNodeKeys.indexOf('root-2') >= 0) {
+          pushRow(treeRows[4], 1);
+        }
+
+        return {
+          rows,
+          rowMetadata,
+          totalRowCount: rows.length
+        };
+      }
+
+      const provider = new HGrid.RemoteDataProvider({
+        dataSource: {
+          fetchBlock(request) {
+            lastRequest = deepClone({
+              startIndex: request.startIndex,
+              endIndex: request.endIndex,
+              operationId: request.operationId,
+              queryModel: request.queryModel
+            });
+            const response = createTreeResponse(request);
+            lastResponse = deepClone({
+              totalRowCount: response.totalRowCount,
+              rowMetadata: response.rowMetadata
+            });
+            return new Promise((resolve) => {
+              setTimeout(() => resolve(response), 18);
+            });
+          }
+        },
+        rowCount: 2,
+        cache: {
+          blockSize: 20,
+          maxBlocks: 2,
+          prefetchBlocks: 0
+        },
+        queryModel: {
+          serverSide: {
+            schemaVersion: 'v2',
+            requestKind: 'tree',
+            route: [],
+            rootStoreStrategy: 'partial',
+            childStoreStrategy: 'partial'
+          }
+        }
+      });
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: provider,
+        treeData: {
+          enabled: true,
+          mode: 'server',
+          treeColumnId: 'name',
+          idField: 'id',
+          parentIdField: 'parentId',
+          hasChildrenField: 'hasChildren'
+        },
+        height: 360,
+        rowHeight: 30,
+        overscan: 3
+      });
+
+      function collectPreviewRows() {
+        const activeProvider = grid.getDataProvider();
+        const rows = [];
+        for (let index = 0; index < Math.min(6, activeProvider.getRowCount()); index += 1) {
+          rows.push({
+            index,
+            row: activeProvider.getRow ? activeProvider.getRow(index) : null,
+            metadata: provider.getRowMetadata(index)
+          });
+        }
+        return rows;
+      }
+
+      function renderLogs() {
+        statusNode.textContent = 'mode: remote tree / expanded=' + JSON.stringify(
+          provider.getServerSideQueryModel() && provider.getServerSideQueryModel().tree
+            ? provider.getServerSideQueryModel().tree.expandedNodeKeys || []
+            : []
+        );
+        contractLogNode.textContent = JSON.stringify(
+          {
+            queryModel: provider.getQueryModel(),
+            serverSideQueryModel: provider.getServerSideQueryModel(),
+            debugState: provider.getDebugState(),
+            lastRequest,
+            lastResponse
+          },
+          null,
+          2
+        );
+        previewLogNode.textContent = JSON.stringify(
+          {
+            previewRows: collectPreviewRows()
+          },
+          null,
+          2
+        );
+      }
+
+      provider.onRowsChanged(renderLogs);
+
+      document.getElementById('expand-root1').addEventListener('click', async () => {
+        await grid.setTreeExpanded('root-1', true);
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('expand-root2').addEventListener('click', async () => {
+        await grid.setTreeExpanded('root-2', true);
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('collapse-all').addEventListener('click', async () => {
+        await grid.collapseAllTreeNodes();
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('filter-node1').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          name: {
+            kind: 'text',
+            operator: 'contains',
+            value: '1'
+          }
+        });
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('clear-query').addEventListener('click', async () => {
+        await grid.setFilterModel({});
+        await grid.collapseAllTreeNodes();
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderLogs();
+      });
+
+      window.__example61 = {
+        provider,
+        grid,
+        inspect() {
+          renderLogs();
+        }
+      };
+
+      void waitFrame().then(renderLogs);
+    </script>
+  </body>
+</html>

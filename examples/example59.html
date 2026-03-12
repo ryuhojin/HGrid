@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 59 - Server Grouping</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --panel-border: #d7e0ea;
+        --panel-bg: #fbfdff;
+        --accent: #0f766e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 260px),
+          linear-gradient(180deg, #f8fbff 0%, #f4f8fc 100%);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 21px;
+      }
+
+      p {
+        margin: 0 0 14px;
+        color: var(--muted);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .controls button {
+        border: 1px solid #c8d3de;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.94);
+        padding: 8px 13px;
+        cursor: pointer;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 420px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 1px solid var(--panel-border);
+        background: var(--panel-bg);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .panel + .panel {
+        margin-top: 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .status {
+        margin-bottom: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      @media (max-width: 1240px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 59 - Server Grouping</h1>
+    <p>
+      server grouping 전용 예제입니다. 원격 응답의 `rowMetadata.kind/groupKey/aggregateValues`를 이용해 그룹 행을 렌더하고,
+      `expandedGroupKeys`가 query contract에 어떻게 반영되는지 보여줍니다.
+    </p>
+
+    <div class="controls">
+      <button id="expand-apac" type="button">expand APAC</button>
+      <button id="collapse-all" type="button">collapse all</button>
+      <button id="sort-sales" type="button">sort sales desc</button>
+      <button id="filter-emea" type="button">filter EMEA</button>
+      <button id="clear-query" type="button">clear query</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="status" id="status">mode: remote grouping</div>
+        <div id="grid"></div>
+      </div>
+      <div>
+        <section class="panel">
+          <h2>Grouping Contract</h2>
+          <pre id="contract-log">Initializing...</pre>
+        </section>
+        <section class="panel">
+          <h2>Preview Rows</h2>
+          <pre id="preview-log">Initializing...</pre>
+        </section>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'region', header: 'Region', width: 180, type: 'text', pinned: 'left' },
+        { id: 'country', header: 'Country', width: 180, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' },
+        { id: 'month', header: 'Month', width: 140, type: 'text' }
+      ];
+      const sourceRows = [
+        { id: 'kr', region: 'APAC', country: 'KR', month: 'Jan', sales: 70 },
+        { id: 'jp', region: 'APAC', country: 'JP', month: 'Feb', sales: 50 },
+        { id: 'de', region: 'EMEA', country: 'DE', month: 'Jan', sales: 60 },
+        { id: 'fr', region: 'EMEA', country: 'FR', month: 'Feb', sales: 90 }
+      ];
+
+      const statusNode = document.getElementById('status');
+      const contractLogNode = document.getElementById('contract-log');
+      const previewLogNode = document.getElementById('preview-log');
+
+      let lastRequest = null;
+      let lastResponse = null;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+
+      function deepClone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function getExpandedGroupKeys(request) {
+        return request.queryModel.serverSide && request.queryModel.serverSide.grouping
+          ? request.queryModel.serverSide.grouping.expandedGroupKeys || []
+          : [];
+      }
+
+      function getRegionFilterValues(filterModel) {
+        const regionFilter = filterModel && filterModel.region;
+        if (!regionFilter || typeof regionFilter !== 'object' || regionFilter.kind !== 'set' || !Array.isArray(regionFilter.values)) {
+          return null;
+        }
+        return regionFilter.values;
+      }
+
+      function summarizeByRegion(rows) {
+        const grouped = new Map();
+        rows.forEach((row) => {
+          if (!grouped.has(row.region)) {
+            grouped.set(row.region, {
+              region: row.region,
+              total: 0,
+              children: []
+            });
+          }
+          const group = grouped.get(row.region);
+          group.total += row.sales;
+          group.children.push(row);
+        });
+        return Array.from(grouped.values());
+      }
+
+      function createResponse(request) {
+        const regionFilterValues = getRegionFilterValues(request.queryModel.filterModel);
+        const filteredRows = regionFilterValues
+          ? sourceRows.filter((row) => regionFilterValues.indexOf(row.region) >= 0)
+          : sourceRows.slice();
+        const sortDirection = request.queryModel.sortModel[0] && request.queryModel.sortModel[0].direction === 'desc' ? -1 : 1;
+        const grouped = summarizeByRegion(filteredRows).sort((left, right) => {
+          if (left.total === right.total) {
+            return 0;
+          }
+          return left.total > right.total ? sortDirection : -sortDirection;
+        });
+        const expandedGroupKeys = getExpandedGroupKeys(request);
+        const rows = [];
+        const rowMetadata = [];
+
+        grouped.forEach((group) => {
+          rows.push({
+            region: group.region,
+            sales: group.total
+          });
+          rowMetadata.push({
+            kind: 'group',
+            level: 0,
+            childCount: group.children.length,
+            isExpanded: expandedGroupKeys.indexOf(group.region) >= 0,
+            groupColumnId: 'region',
+            groupKey: group.region,
+            aggregateValues: {
+              region: group.region,
+              sales: group.total
+            }
+          });
+
+          if (expandedGroupKeys.indexOf(group.region) >= 0) {
+            group.children.forEach((row) => {
+              rows.push({
+                region: row.region,
+                country: row.country,
+                sales: row.sales,
+                month: row.month
+              });
+              rowMetadata.push({
+                kind: 'leaf',
+                level: 1
+              });
+            });
+          }
+        });
+
+        return {
+          rows,
+          rowMetadata,
+          totalRowCount: rows.length
+        };
+      }
+
+      const provider = new HGrid.RemoteDataProvider({
+        dataSource: {
+          fetchBlock(request) {
+            lastRequest = deepClone({
+              startIndex: request.startIndex,
+              endIndex: request.endIndex,
+              operationId: request.operationId,
+              queryModel: request.queryModel
+            });
+
+            const response = createResponse(request);
+            lastResponse = deepClone({
+              totalRowCount: response.totalRowCount,
+              rowMetadata: response.rowMetadata
+            });
+
+            return new Promise((resolve) => {
+              setTimeout(() => resolve(response), 18);
+            });
+          }
+        },
+        rowCount: 4,
+        cache: {
+          blockSize: 20,
+          maxBlocks: 2,
+          prefetchBlocks: 0
+        },
+        queryModel: {
+          serverSide: {
+            schemaVersion: 'v2',
+            requestKind: 'root',
+            route: [],
+            rootStoreStrategy: 'partial',
+            childStoreStrategy: 'partial'
+          }
+        }
+      });
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: provider,
+        grouping: {
+          mode: 'server',
+          groupModel: [{ columnId: 'region' }],
+          aggregations: [{ columnId: 'sales', type: 'sum' }],
+          defaultExpanded: false
+        },
+        height: 360,
+        rowHeight: 30,
+        overscan: 3
+      });
+
+      function collectPreviewRows() {
+        const activeProvider = grid.getDataProvider();
+        const rows = [];
+        for (let index = 0; index < Math.min(6, activeProvider.getRowCount()); index += 1) {
+          rows.push({
+            index,
+            row: activeProvider.getRow ? activeProvider.getRow(index) : null,
+            metadata: provider.getRowMetadata(index)
+          });
+        }
+        return rows;
+      }
+
+      function renderLogs() {
+        statusNode.textContent = 'mode: remote grouping / expanded=' + JSON.stringify(
+          (provider.getServerSideQueryModel() && provider.getServerSideQueryModel().grouping
+            ? provider.getServerSideQueryModel().grouping.expandedGroupKeys || []
+            : [])
+        );
+
+        contractLogNode.textContent = JSON.stringify(
+          {
+            queryModel: provider.getQueryModel(),
+            serverSideQueryModel: provider.getServerSideQueryModel(),
+            debugState: provider.getDebugState(),
+            lastRequest,
+            lastResponse
+          },
+          null,
+          2
+        );
+
+        previewLogNode.textContent = JSON.stringify(
+          {
+            previewRows: collectPreviewRows()
+          },
+          null,
+          2
+        );
+      }
+
+      provider.onRowsChanged(renderLogs);
+
+      document.getElementById('expand-apac').addEventListener('click', async () => {
+        await grid.setGroupExpanded('APAC', true);
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('collapse-all').addEventListener('click', async () => {
+        await grid.collapseAllGroups();
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('sort-sales').addEventListener('click', async () => {
+        await grid.setSortModel([{ columnId: 'sales', direction: 'desc' }]);
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('filter-emea').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          region: {
+            kind: 'set',
+            values: ['EMEA']
+          }
+        });
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('clear-query').addEventListener('click', async () => {
+        await grid.setFilterModel({});
+        await grid.clearSortModel();
+        await grid.collapseAllGroups();
+        await waitFrame();
+        renderLogs();
+      });
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderLogs();
+      });
+
+      window.__example59 = {
+        provider,
+        grid,
+        inspect() {
+          renderLogs();
+        },
+        expandApac() {
+          return grid.setGroupExpanded('APAC', true);
+        }
+      };
+
+      void waitFrame().then(renderLogs);
+    </script>
+  </body>
+</html>

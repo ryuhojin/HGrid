@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 56 - Remote Group Pivot Tree Contract Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        --panel-border: #d7e0ea;
+        --panel-bg: #fbfdff;
+        --ink: #0f172a;
+        --muted: #4b5563;
+        --accent: #0f766e;
+        --accent-soft: #dff7f3;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 280px),
+          linear-gradient(180deg, #f8fbff 0%, #f4f8fc 100%);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 21px;
+      }
+
+      p {
+        margin: 0 0 14px;
+        color: var(--muted);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .controls button {
+        border: 1px solid #c8d3de;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        padding: 8px 13px;
+        cursor: pointer;
+        color: var(--ink);
+      }
+
+      .controls button[data-active="true"] {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        color: #0b4f49;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 440px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 1px solid var(--panel-border);
+        background: var(--panel-bg);
+        border-radius: 14px;
+        padding: 14px;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.04);
+      }
+
+      .panel + .panel {
+        margin-top: 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .status {
+        margin-bottom: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      @media (max-width: 1280px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 56 - Remote Group Pivot Tree Contract Smoke</h1>
+    <p>
+      E2.2 기준 원격 grouping row metadata, server pivot result columns, remote tree contract를 한 화면에서 확인하는 예제입니다.
+      grouping + pivot은 동시 지원하고, remote tree는 별도 server tree contract로 동작합니다.
+    </p>
+
+    <div class="controls">
+      <button id="mode-grouping" type="button">remote grouping</button>
+      <button id="mode-group-pivot" type="button">remote grouping + pivot</button>
+      <button id="mode-tree" type="button">remote tree</button>
+      <button id="sort-primary" type="button">sort primary desc</button>
+      <button id="filter-focus" type="button">filter focus</button>
+      <button id="clear-filter" type="button">clear filter</button>
+      <button id="expand-first" type="button">expand first</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="status" id="status">mode: remote grouping</div>
+        <div id="grid"></div>
+      </div>
+      <div>
+        <section class="panel">
+          <h2>Remote Contract Snapshot</h2>
+          <pre id="contract-log">Initializing...</pre>
+        </section>
+        <section class="panel">
+          <h2>Preview Rows / Metadata</h2>
+          <pre id="preview-log">Initializing...</pre>
+        </section>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const GROUPING_COLUMNS = [
+        { id: 'region', header: 'Region', width: 180, type: 'text', pinned: 'left' },
+        { id: 'country', header: 'Country', width: 180, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' },
+        { id: 'month', header: 'Month', width: 140, type: 'text' }
+      ];
+      const TREE_COLUMNS = [
+        { id: 'name', header: 'Name', width: 260, type: 'text', pinned: 'left' },
+        { id: 'status', header: 'Status', width: 180, type: 'text' },
+        { id: 'owner', header: 'Owner', width: 180, type: 'text' }
+      ];
+      const PIVOT_RESULT_COLUMNS = [
+        { id: 'region', header: 'Region', width: 180, type: 'text', pinned: 'left' },
+        { id: 'sales::Jan', header: 'Sales Jan', width: 140, type: 'number' },
+        { id: 'sales::Feb', header: 'Sales Feb', width: 140, type: 'number' }
+      ];
+
+      const GROUP_ROWS = [
+        { id: 'kr', region: 'APAC', country: 'KR', month: 'Jan', sales: 70 },
+        { id: 'jp', region: 'APAC', country: 'JP', month: 'Feb', sales: 50 },
+        { id: 'de', region: 'EMEA', country: 'DE', month: 'Jan', sales: 60 },
+        { id: 'fr', region: 'EMEA', country: 'FR', month: 'Feb', sales: 90 }
+      ];
+      const TREE_ROWS = [
+        { id: 'root-1', parentId: null, hasChildren: true, name: 'Root 1', status: 'active', owner: 'Seoul' },
+        { id: 'root-2', parentId: null, hasChildren: true, name: 'Root 2', status: 'idle', owner: 'Berlin' },
+        { id: 'child-1', parentId: 'root-1', hasChildren: false, name: 'Child 1', status: 'active', owner: 'Busan' },
+        { id: 'child-2', parentId: 'root-1', hasChildren: false, name: 'Child 2', status: 'idle', owner: 'Tokyo' },
+        { id: 'child-3', parentId: 'root-2', hasChildren: false, name: 'Child 3', status: 'active', owner: 'Paris' }
+      ];
+
+      const statusNode = document.getElementById('status');
+      const contractLogNode = document.getElementById('contract-log');
+      const previewLogNode = document.getElementById('preview-log');
+      const gridContainer = document.getElementById('grid');
+
+      let currentMode = 'grouping';
+      let grid = null;
+      let provider = null;
+      let unsubscribe = null;
+      let lastRequest = null;
+      let lastResponse = null;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+
+      function deepClone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function getRegionFilterValues(filterModel) {
+        const regionFilter = filterModel && filterModel.region;
+        if (!regionFilter || typeof regionFilter !== 'object' || regionFilter.kind !== 'set' || !Array.isArray(regionFilter.values)) {
+          return null;
+        }
+
+        return regionFilter.values;
+      }
+
+      function getNameContains(filterModel) {
+        const nameFilter = filterModel && filterModel.name;
+        if (!nameFilter || typeof nameFilter !== 'object' || nameFilter.kind !== 'text' || typeof nameFilter.value !== 'string') {
+          return '';
+        }
+
+        return nameFilter.value.toLowerCase();
+      }
+
+      function getExpandedGroupKeys(request) {
+        return request.queryModel.serverSide && request.queryModel.serverSide.grouping
+          ? request.queryModel.serverSide.grouping.expandedGroupKeys || []
+          : [];
+      }
+
+      function getExpandedTreeKeys(request) {
+        return request.queryModel.serverSide && request.queryModel.serverSide.tree
+          ? request.queryModel.serverSide.tree.expandedNodeKeys || []
+          : [];
+      }
+
+      function summarizeByRegion(rows) {
+        const grouped = new Map();
+        rows.forEach((row) => {
+          if (!grouped.has(row.region)) {
+            grouped.set(row.region, {
+              region: row.region,
+              jan: 0,
+              feb: 0,
+              total: 0,
+              children: []
+            });
+          }
+
+          const group = grouped.get(row.region);
+          if (row.month === 'Jan') {
+            group.jan += row.sales;
+          } else if (row.month === 'Feb') {
+            group.feb += row.sales;
+          }
+          group.total += row.sales;
+          group.children.push(row);
+        });
+
+        return Array.from(grouped.values());
+      }
+
+      function applyGroupingFilters(rows, request) {
+        const regionFilterValues = getRegionFilterValues(request.queryModel.filterModel);
+        if (!regionFilterValues || regionFilterValues.length === 0) {
+          return rows.slice();
+        }
+
+        return rows.filter((row) => regionFilterValues.indexOf(row.region) >= 0);
+      }
+
+      function applyGroupingSort(rows, request, usePivotResult) {
+        const sortModel = request.queryModel.sortModel || [];
+        if (sortModel.length === 0) {
+          return rows.slice();
+        }
+
+        const sortItem = sortModel[0];
+        const direction = sortItem.direction === 'desc' ? -1 : 1;
+        const sorted = rows.slice();
+        sorted.sort((left, right) => {
+          let leftValue;
+          let rightValue;
+          if (usePivotResult && sortItem.columnId === 'sales::Feb') {
+            leftValue = left.month === 'Feb' ? left.sales : 0;
+            rightValue = right.month === 'Feb' ? right.sales : 0;
+          } else {
+            leftValue = left[sortItem.columnId];
+            rightValue = right[sortItem.columnId];
+          }
+
+          if (leftValue === rightValue) {
+            return 0;
+          }
+
+          return leftValue > rightValue ? direction : -direction;
+        });
+        return sorted;
+      }
+
+      function createGroupingResponse(request, usePivotResult) {
+        const filteredRows = applyGroupingFilters(GROUP_ROWS, request);
+        const sortedRows = applyGroupingSort(filteredRows, request, usePivotResult);
+        const grouped = summarizeByRegion(sortedRows);
+        const expandedGroupKeys = getExpandedGroupKeys(request);
+        const responseRows = [];
+        const rowMetadata = [];
+
+        grouped.forEach((group) => {
+          const groupRow = usePivotResult
+            ? {
+                region: group.region,
+                'sales::Jan': group.jan,
+                'sales::Feb': group.feb
+              }
+            : {
+                region: group.region,
+                sales: group.total
+              };
+
+          responseRows.push(groupRow);
+          rowMetadata.push({
+            kind: 'group',
+            level: 0,
+            childCount: group.children.length,
+            isExpanded: expandedGroupKeys.indexOf(group.region) >= 0,
+            groupColumnId: 'region',
+            groupKey: group.region,
+            aggregateValues: groupRow
+          });
+
+          if (expandedGroupKeys.indexOf(group.region) >= 0) {
+            group.children.forEach((row) => {
+              responseRows.push(
+                usePivotResult
+                  ? {
+                      region: row.country,
+                      'sales::Jan': row.month === 'Jan' ? row.sales : 0,
+                      'sales::Feb': row.month === 'Feb' ? row.sales : 0
+                    }
+                  : {
+                      region: row.region,
+                      country: row.country,
+                      sales: row.sales,
+                      month: row.month
+                    }
+              );
+              rowMetadata.push({
+                kind: 'leaf',
+                level: 1
+              });
+            });
+          }
+        });
+
+        return {
+          rows: responseRows,
+          rowMetadata,
+          pivotResult: usePivotResult
+            ? {
+                columns: PIVOT_RESULT_COLUMNS
+              }
+            : undefined,
+          totalRowCount: responseRows.length
+        };
+      }
+
+      function createTreeResponse(request) {
+        const expandedNodeKeys = getExpandedTreeKeys(request);
+        const nameContains = getNameContains(request.queryModel.filterModel);
+        const visibleRows = [];
+        const rowMetadata = [];
+
+        function pushRow(row, depth) {
+          if (nameContains && row.name.toLowerCase().indexOf(nameContains) < 0) {
+            return;
+          }
+
+          visibleRows.push({
+            id: row.id,
+            parentId: row.parentId,
+            hasChildren: row.hasChildren,
+            name: row.name,
+            status: row.status,
+            owner: row.owner
+          });
+          rowMetadata.push({
+            kind: 'leaf',
+            treeNodeKey: row.id,
+            treeParentNodeKey: row.parentId,
+            treeDepth: depth,
+            treeHasChildren: row.hasChildren,
+            treeExpanded: expandedNodeKeys.indexOf(row.id) >= 0,
+            treeColumnId: 'name'
+          });
+        }
+
+        pushRow(TREE_ROWS[0], 0);
+        if (expandedNodeKeys.indexOf('root-1') >= 0) {
+          pushRow(TREE_ROWS[2], 1);
+          pushRow(TREE_ROWS[3], 1);
+        }
+
+        pushRow(TREE_ROWS[1], 0);
+        if (expandedNodeKeys.indexOf('root-2') >= 0) {
+          pushRow(TREE_ROWS[4], 1);
+        }
+
+        return {
+          rows: visibleRows,
+          rowMetadata,
+          totalRowCount: visibleRows.length
+        };
+      }
+
+      const dataSource = {
+        fetchBlock(request) {
+          lastRequest = deepClone({
+            startIndex: request.startIndex,
+            endIndex: request.endIndex,
+            operationId: request.operationId,
+            queryModel: request.queryModel
+          });
+
+          const response =
+            currentMode === 'tree'
+              ? createTreeResponse(request)
+              : createGroupingResponse(request, currentMode === 'group-pivot');
+
+          lastResponse = deepClone({
+            totalRowCount: response.totalRowCount,
+            rowMetadata: response.rowMetadata,
+            pivotResultColumnIds: response.pivotResult ? response.pivotResult.columns.map((column) => column.id) : []
+          });
+
+          return new Promise((resolve) => {
+            setTimeout(() => resolve(response), 18);
+          });
+        }
+      };
+
+      function updateModeButtons() {
+        document.getElementById('mode-grouping').dataset.active = String(currentMode === 'grouping');
+        document.getElementById('mode-group-pivot').dataset.active = String(currentMode === 'group-pivot');
+        document.getElementById('mode-tree').dataset.active = String(currentMode === 'tree');
+      }
+
+      function collectPreviewRows() {
+        if (!grid || !provider) {
+          return [];
+        }
+
+        const activeProvider = grid.getDataProvider();
+        const previewRows = [];
+        for (let index = 0; index < Math.min(6, activeProvider.getRowCount()); index += 1) {
+          previewRows.push({
+            index,
+            row: activeProvider.getRow ? activeProvider.getRow(index) : null,
+            metadata: provider.getRowMetadata(index)
+          });
+        }
+        return previewRows;
+      }
+
+      function renderLogs() {
+        if (!provider) {
+          contractLogNode.textContent = 'Provider is not ready';
+          previewLogNode.textContent = 'Grid is not ready';
+          return;
+        }
+
+        contractLogNode.textContent = JSON.stringify(
+          {
+            mode: currentMode,
+            queryModel: provider.getQueryModel(),
+            serverSideQueryModel: provider.getServerSideQueryModel(),
+            debugState: provider.getDebugState(),
+            lastRequest,
+            lastResponse
+          },
+          null,
+          2
+        );
+
+        previewLogNode.textContent = JSON.stringify(
+          {
+            pivotResultColumnIds: provider.getPivotResultColumns().map((column) => column.id),
+            previewRows: collectPreviewRows()
+          },
+          null,
+          2
+        );
+      }
+
+      async function mountGrid(mode) {
+        currentMode = mode;
+        updateModeButtons();
+        statusNode.textContent =
+          mode === 'tree'
+            ? 'mode: remote tree (server tree contract)'
+            : mode === 'group-pivot'
+              ? 'mode: remote grouping + pivot (group rows + pivot result columns)'
+              : 'mode: remote grouping (row metadata driven group rows)';
+
+        if (unsubscribe) {
+          unsubscribe();
+          unsubscribe = null;
+        }
+        if (grid) {
+          grid.destroy();
+          grid = null;
+        }
+
+        lastRequest = null;
+        lastResponse = null;
+        provider = new HGrid.RemoteDataProvider({
+          dataSource,
+          rowCount: mode === 'tree' ? 2 : 4,
+          cache: {
+            blockSize: 20,
+            maxBlocks: 2,
+            prefetchBlocks: 0
+          },
+          queryModel: {
+            serverSide: {
+              schemaVersion: 'v2',
+              requestKind: mode === 'tree' ? 'tree' : 'root',
+              route: [],
+              rootStoreStrategy: 'partial',
+              childStoreStrategy: 'partial'
+            }
+          }
+        });
+
+        grid = new HGrid.Grid(gridContainer, {
+          columns: mode === 'tree' ? TREE_COLUMNS : GROUPING_COLUMNS,
+          dataProvider: provider,
+          grouping:
+            mode === 'tree'
+              ? undefined
+              : {
+                  mode: 'server',
+                  groupModel: [{ columnId: 'region' }],
+                  aggregations: [{ columnId: 'sales', type: 'sum' }],
+                  defaultExpanded: false
+                },
+          pivoting:
+            mode === 'group-pivot'
+              ? {
+                  mode: 'server',
+                  pivotModel: [{ columnId: 'month' }],
+                  values: [{ columnId: 'sales', type: 'sum' }]
+                }
+              : undefined,
+          treeData:
+            mode === 'tree'
+              ? {
+                  enabled: true,
+                  mode: 'server',
+                  treeColumnId: 'name',
+                  idField: 'id',
+                  parentIdField: 'parentId',
+                  hasChildrenField: 'hasChildren'
+                }
+              : undefined,
+          height: 360,
+          rowHeight: 30,
+          overscan: 3
+        });
+
+        unsubscribe = provider.onRowsChanged(() => {
+          renderLogs();
+        });
+
+        await waitFrame();
+        await waitFrame();
+        renderLogs();
+      }
+
+      async function applyPrimarySort() {
+        if (!grid) {
+          return;
+        }
+
+        if (currentMode === 'tree') {
+          await grid.setSortModel([{ columnId: 'name', direction: 'desc' }]);
+        } else if (currentMode === 'group-pivot') {
+          await grid.setSortModel([{ columnId: 'sales::Feb', direction: 'desc' }]);
+        } else {
+          await grid.setSortModel([{ columnId: 'sales', direction: 'desc' }]);
+        }
+
+        await waitFrame();
+        renderLogs();
+      }
+
+      async function applyFocusFilter() {
+        if (!grid) {
+          return;
+        }
+
+        if (currentMode === 'tree') {
+          await grid.setFilterModel({
+            name: {
+              kind: 'text',
+              operator: 'contains',
+              value: '1'
+            }
+          });
+        } else {
+          await grid.setFilterModel({
+            region: {
+              kind: 'set',
+              values: ['APAC']
+            }
+          });
+        }
+
+        await waitFrame();
+        renderLogs();
+      }
+
+      async function clearFilter() {
+        if (!grid) {
+          return;
+        }
+
+        await grid.setFilterModel({});
+        await waitFrame();
+        renderLogs();
+      }
+
+      async function expandFirst() {
+        if (!grid) {
+          return;
+        }
+
+        if (currentMode === 'tree') {
+          await grid.setTreeExpanded('root-1', true);
+        } else {
+          await grid.setGroupExpanded('APAC', true);
+        }
+
+        await waitFrame();
+        renderLogs();
+      }
+
+      document.getElementById('mode-grouping').addEventListener('click', () => {
+        void mountGrid('grouping');
+      });
+      document.getElementById('mode-group-pivot').addEventListener('click', () => {
+        void mountGrid('group-pivot');
+      });
+      document.getElementById('mode-tree').addEventListener('click', () => {
+        void mountGrid('tree');
+      });
+      document.getElementById('sort-primary').addEventListener('click', () => {
+        void applyPrimarySort();
+      });
+      document.getElementById('filter-focus').addEventListener('click', () => {
+        void applyFocusFilter();
+      });
+      document.getElementById('clear-filter').addEventListener('click', () => {
+        void clearFilter();
+      });
+      document.getElementById('expand-first').addEventListener('click', () => {
+        void expandFirst();
+      });
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderLogs();
+      });
+
+      window.__example56 = {
+        mountGrouping() {
+          return mountGrid('grouping');
+        },
+        mountGroupPivot() {
+          return mountGrid('group-pivot');
+        },
+        mountTree() {
+          return mountGrid('tree');
+        },
+        inspect() {
+          renderLogs();
+        }
+      };
+
+      void mountGrid('grouping');
+    </script>
+  </body>
+</html>

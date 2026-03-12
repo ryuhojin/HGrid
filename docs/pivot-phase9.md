@@ -45,6 +45,8 @@
 - remote provider + `pivoting.mode = "server"`:
   - Grid는 pivot 모델을 서버 query로 전달한다.
   - 실제 pivot 계산은 서버가 담당한다.
+  - 서버 응답은 `RemoteBlockResponse.pivotResult.columns`로 렌더 컬럼을 직접 내려줄 수 있다.
+  - remote grouping이 같이 활성화된 경우 행은 grouping metadata를 사용하고, 컬럼은 server pivot result contract를 사용한다.
 - local provider + `pivoting.mode = "client"`:
   - 코어의 pivot executor가 로컬 집계를 수행한다.
   - cancel/yield 지원으로 UI 프리즈를 완화한다.

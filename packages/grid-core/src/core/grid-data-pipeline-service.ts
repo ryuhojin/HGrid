@@ -2,6 +2,11 @@ import type { DataProvider, RowKey } from '../data/data-provider';
 import type { GroupExecutionResult, GroupViewRow } from '../data/group-executor';
 import { GroupedDataProvider } from '../data/grouped-data-provider';
 import { LocalDataProvider } from '../data/local-data-provider';
+import type { RemoteDataProvider } from '../data/remote-data-provider';
+import {
+  RemoteServerSideViewDataProvider,
+  type RemoteServerSideViewMode
+} from '../data/remote-server-side-view-data-provider';
 import type { PivotExecutionResult } from '../data/pivot-executor';
 import type { ViewToDataMapping } from '../data/row-model';
 import { TreeDataProvider } from '../data/tree-data-provider';
@@ -17,6 +22,7 @@ export interface GridDataPipelineState {
   treeNodeKeys: RowKey[];
   treeNodeKeyTokens: string[];
   treeDataProvider: TreeDataProvider | null;
+  remoteServerSideDataProvider: RemoteServerSideViewDataProvider | null;
 }
 
 export interface GridDataPipelineApplyResult {
@@ -51,6 +57,14 @@ export interface GridDataPipelineTreeParams {
   treeColumnId: string;
 }
 
+export interface GridDataPipelineRemoteServerSideParams {
+  state: GridDataPipelineState;
+  sourceDataProvider: RemoteDataProvider;
+  rowModel: GridDerivedViewRowModelPort;
+  viewMode: RemoteServerSideViewMode;
+  treeColumnId: string;
+}
+
 export class GridDataPipelineService {
   public createEmptyState(): GridDataPipelineState {
     return {
@@ -61,7 +75,8 @@ export class GridDataPipelineService {
       treeRows: [],
       treeNodeKeys: [],
       treeNodeKeyTokens: [],
-      treeDataProvider: null
+      treeDataProvider: null,
+      remoteServerSideDataProvider: null
     };
   }
 
@@ -109,7 +124,8 @@ export class GridDataPipelineService {
       treeRows: [],
       treeNodeKeys: [],
       treeNodeKeyTokens: [],
-      treeDataProvider: null
+      treeDataProvider: null,
+      remoteServerSideDataProvider: null
     };
 
     params.rowModel.setRowCount(pivotDataProvider.getRowCount());
@@ -143,7 +159,8 @@ export class GridDataPipelineService {
       treeRows: [],
       treeNodeKeys: [],
       treeNodeKeyTokens: [],
-      treeDataProvider: null
+      treeDataProvider: null,
+      remoteServerSideDataProvider: null
     };
 
     params.rowModel.setRowCount(groupedDataProvider.getRowCount());
@@ -179,7 +196,8 @@ export class GridDataPipelineService {
       treeRows: params.result.rows.slice(),
       treeNodeKeys: params.result.nodeKeys.slice(),
       treeNodeKeyTokens: params.result.nodeKeyTokens.slice(),
-      treeDataProvider
+      treeDataProvider,
+      remoteServerSideDataProvider: null
     };
 
     params.rowModel.setRowCount(treeDataProvider.getRowCount());
@@ -188,6 +206,36 @@ export class GridDataPipelineService {
 
     return {
       dataProvider: treeDataProvider,
+      nextState
+    };
+  }
+
+  public applyRemoteServerSideView(params: GridDataPipelineRemoteServerSideParams): GridDataPipelineApplyResult {
+    let remoteServerSideDataProvider = params.state.remoteServerSideDataProvider;
+    if (!remoteServerSideDataProvider) {
+      remoteServerSideDataProvider = new RemoteServerSideViewDataProvider(params.sourceDataProvider);
+    }
+
+    remoteServerSideDataProvider.configure(params.sourceDataProvider, params.viewMode, params.treeColumnId);
+
+    const nextState: GridDataPipelineState = {
+      groupRows: [],
+      groupKeys: [],
+      groupedDataProvider: null,
+      pivotDataProvider: null,
+      treeRows: [],
+      treeNodeKeys: [],
+      treeNodeKeyTokens: [],
+      treeDataProvider: null,
+      remoteServerSideDataProvider
+    };
+
+    params.rowModel.setRowCount(params.sourceDataProvider.getRowCount());
+    params.rowModel.setBaseIdentityMapping();
+    params.rowModel.setFilterViewToData(null);
+
+    return {
+      dataProvider: remoteServerSideDataProvider,
       nextState
     };
   }

@@ -22,6 +22,8 @@ function createBaseParams(
     syncColumnsToRenderer: () => undefined,
     isTreeDataActive: () => false,
     isClientGroupingActive: () => false,
+    isTreeToggleActive: () => false,
+    isGroupingToggleActive: () => false,
     getDataProvider: () => defaultDataProvider,
     getTreeColumnId: () => '',
     toggleGroupExpanded: () => undefined,
@@ -126,6 +128,7 @@ describe('GridCommandEventService', () => {
     service.register(
       createBaseParams(eventBus, {
         isClientGroupingActive: () => true,
+        isGroupingToggleActive: () => true,
         getDataProvider: () => groupedDataProvider,
         toggleGroupExpanded,
         applyGroupingView,
@@ -207,6 +210,7 @@ describe('GridCommandEventService', () => {
     service.register(
       createBaseParams(eventBus, {
         isTreeDataActive: () => true,
+        isTreeToggleActive: () => true,
         getDataProvider: () => treeDataProvider,
         getTreeColumnId: () => 'name',
         toggleTreeExpanded,
@@ -242,5 +246,71 @@ describe('GridCommandEventService', () => {
     expect(toggleTreeExpanded).toHaveBeenCalledTimes(1);
     expect(toggleTreeExpanded).toHaveBeenCalledWith(1);
     expect(applyTreeView).toHaveBeenCalledTimes(1);
+  });
+
+  it('toggles decorated remote grouping rows without GroupedDataProvider', () => {
+    const service = new GridCommandEventService();
+    const eventBus = new EventBus();
+    const toggleGroupExpanded = vi.fn();
+    const remoteGroupingProvider = new LocalDataProvider([
+      {
+        region: 'APAC',
+        __hgrid_internal_row_kind: 'group',
+        __hgrid_internal_group_key: 'APAC',
+        __hgrid_internal_group_column_id: 'region'
+      }
+    ]);
+
+    service.register(
+      createBaseParams(eventBus, {
+        isGroupingToggleActive: () => true,
+        getDataProvider: () => remoteGroupingProvider,
+        toggleGroupExpanded
+      })
+    );
+
+    eventBus.emit('cellClick', {
+      rowIndex: 0,
+      dataIndex: 0,
+      columnId: 'region',
+      value: 'APAC'
+    });
+
+    expect(toggleGroupExpanded).toHaveBeenCalledTimes(1);
+    expect(toggleGroupExpanded).toHaveBeenCalledWith('APAC');
+  });
+
+  it('toggles decorated remote tree rows without TreeDataProvider', () => {
+    const service = new GridCommandEventService();
+    const eventBus = new EventBus();
+    const toggleTreeExpanded = vi.fn();
+    const remoteTreeProvider = new LocalDataProvider([
+      {
+        name: 'Root',
+        __hgrid_internal_row_kind_tree: 'tree',
+        __hgrid_internal_tree_node_key: 'root-1',
+        __hgrid_internal_tree_has_children: true,
+        __hgrid_internal_tree_column_id: 'name'
+      }
+    ]);
+
+    service.register(
+      createBaseParams(eventBus, {
+        isTreeToggleActive: () => true,
+        getDataProvider: () => remoteTreeProvider,
+        getTreeColumnId: () => 'name',
+        toggleTreeExpanded
+      })
+    );
+
+    eventBus.emit('cellClick', {
+      rowIndex: 0,
+      dataIndex: 0,
+      columnId: 'name',
+      value: 'Root'
+    });
+
+    expect(toggleTreeExpanded).toHaveBeenCalledTimes(1);
+    expect(toggleTreeExpanded).toHaveBeenCalledWith('root-1');
   });
 });

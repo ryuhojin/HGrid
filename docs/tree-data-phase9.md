@@ -37,7 +37,10 @@
 ## 동작 정책
 - `treeData.enabled=true`일 때 트리 파이프라인이 그룹 파이프라인보다 우선 적용된다.
 - `mode=server`는 `loadChildren` 훅 기반 lazy fetch를 의미한다.
-- remote provider(`RemoteDataProvider`)와 tree 파이프라인 동시 적용은 현재 범위에서 제외한다.
+- remote provider(`RemoteDataProvider`) + `treeData.mode="server"` 조합은 E2.2부터 지원한다.
+- remote tree는 `serverSide.tree` envelope와 `rowMetadata.tree*` 필드로 계약된다.
+- remote tree가 활성화되면 현재 구조에서는 server grouping/pivot보다 우선하며, 같은 request cycle에 동시 적용하지 않는다.
+- remote global expand-all/collapse-all은 서버 전체 keyspace를 모르는 상태라 정책 보강이 더 필요하다.
 
 ## 검증
 - unit:

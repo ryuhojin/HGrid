@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 57 - Remote Cache Diff And Refresh Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        --panel-border: #d8e0e8;
+        --panel-bg: #fbfdff;
+        --ink: #0f172a;
+        --muted: #475569;
+        --accent: #0f766e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top right, rgba(15, 118, 110, 0.07), transparent 260px),
+          linear-gradient(180deg, #f8fbff 0%, #f4f8fc 100%);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 21px;
+      }
+
+      p {
+        margin: 0 0 14px;
+        color: var(--muted);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .controls button {
+        border: 1px solid #c8d3de;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.94);
+        padding: 8px 13px;
+        cursor: pointer;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 430px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 1px solid var(--panel-border);
+        background: var(--panel-bg);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .panel + .panel {
+        margin-top: 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .status {
+        margin-bottom: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      @media (max-width: 1280px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 57 - Remote Cache Diff And Refresh Smoke</h1>
+    <p>
+      E2.3 기준으로 query diff, targeted cache invalidate, background refresh, failed block retry를 확인하는 예제입니다.
+      첫 block의 revision을 바꾸고 stale row를 유지한 채 refresh 상태가 바뀌는지 확인할 수 있습니다.
+    </p>
+
+    <div class="controls">
+      <button id="sort-desc" type="button">sort id desc</button>
+      <button id="filter-active" type="button">filter active</button>
+      <button id="clear-query" type="button">clear query</button>
+      <button id="mutate-block0" type="button">mutate block0 revision</button>
+      <button id="refresh-block0" type="button">background refresh block0</button>
+      <button id="invalidate-block0" type="button">invalidate block0</button>
+      <button id="fail-next" type="button">fail next block0 refresh</button>
+      <button id="retry-failed" type="button">retry failed block0</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="status" id="status">block0 revision: v1</div>
+        <div id="grid"></div>
+      </div>
+      <div>
+        <section class="panel">
+          <h2>Provider Runtime State</h2>
+          <pre id="state-log">Initializing...</pre>
+        </section>
+        <section class="panel">
+          <h2>Preview Rows</h2>
+          <pre id="preview-log">Initializing...</pre>
+        </section>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const TOTAL_ROWS = 120;
+      const BLOCK_SIZE = 20;
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' },
+        { id: 'revision', header: 'Revision', width: 120, type: 'text' },
+        { id: 'blockLabel', header: 'Block', width: 120, type: 'text' }
+      ];
+
+      const statusNode = document.getElementById('status');
+      const stateLogNode = document.getElementById('state-log');
+      const previewLogNode = document.getElementById('preview-log');
+
+      let block0Revision = 1;
+      let failNextBlock0Refresh = false;
+      let lastRequest = null;
+      let grid = null;
+      let provider = null;
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+
+      function deepClone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function getStatusFilterValues(filterModel) {
+        const statusFilter = filterModel && filterModel.status;
+        if (!statusFilter || typeof statusFilter !== 'object' || statusFilter.kind !== 'set' || !Array.isArray(statusFilter.values)) {
+          return null;
+        }
+
+        return statusFilter.values;
+      }
+
+      function buildVisibleSourceIndexes(queryModel) {
+        const sourceIndexes = [];
+        const statusFilterValues = getStatusFilterValues(queryModel.filterModel);
+        for (let sourceIndex = 0; sourceIndex < TOTAL_ROWS; sourceIndex += 1) {
+          const rowStatus = sourceIndex % 2 === 0 ? 'active' : 'idle';
+          if (statusFilterValues && statusFilterValues.indexOf(rowStatus) < 0) {
+            continue;
+          }
+          sourceIndexes.push(sourceIndex);
+        }
+
+        if (Array.isArray(queryModel.sortModel) && queryModel.sortModel.length > 0 && queryModel.sortModel[0].direction === 'desc') {
+          sourceIndexes.reverse();
+        }
+
+        return sourceIndexes;
+      }
+
+      const dataSource = {
+        fetchBlock(request) {
+          lastRequest = deepClone({
+            startIndex: request.startIndex,
+            endIndex: request.endIndex,
+            operationId: request.operationId,
+            queryModel: request.queryModel
+          });
+
+          const blockIndex = Math.floor(request.startIndex / BLOCK_SIZE);
+          if (blockIndex === 0 && failNextBlock0Refresh) {
+            failNextBlock0Refresh = false;
+            return new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('forced block0 refresh failure')), 24);
+            });
+          }
+
+          const visibleSourceIndexes = buildVisibleSourceIndexes(request.queryModel);
+          const startIndex = Math.max(0, Math.min(visibleSourceIndexes.length, request.startIndex));
+          const endIndex = Math.max(startIndex, Math.min(visibleSourceIndexes.length, request.endIndex));
+          const rows = [];
+          for (let visibleIndex = startIndex; visibleIndex < endIndex; visibleIndex += 1) {
+            const sourceIndex = visibleSourceIndexes[visibleIndex];
+            const currentBlockIndex = Math.floor(visibleIndex / BLOCK_SIZE);
+            rows.push({
+              id: sourceIndex + 1,
+              name: 'Remote-' + String(sourceIndex + 1).padStart(4, '0'),
+              status: sourceIndex % 2 === 0 ? 'active' : 'idle',
+              revision: 'v' + String(currentBlockIndex === 0 ? block0Revision : 1),
+              blockLabel: 'block-' + currentBlockIndex
+            });
+          }
+
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              resolve({
+                rows,
+                totalRowCount: visibleSourceIndexes.length
+              });
+            }, 24);
+          });
+        }
+      };
+
+      provider = new HGrid.RemoteDataProvider({
+        dataSource,
+        rowCount: TOTAL_ROWS,
+        cache: {
+          blockSize: BLOCK_SIZE,
+          maxBlocks: 4,
+          prefetchBlocks: 0
+        },
+        queryModel: {
+          serverSide: {
+            schemaVersion: 'v2',
+            requestKind: 'root',
+            route: [],
+            rootStoreStrategy: 'partial',
+            childStoreStrategy: 'partial'
+          }
+        }
+      });
+
+      grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: provider,
+        height: 360,
+        rowHeight: 30,
+        overscan: 3
+      });
+
+      function updateStatus() {
+        statusNode.textContent = 'block0 revision: v' + String(block0Revision);
+      }
+
+      function collectPreviewRows() {
+        const activeProvider = grid.getDataProvider();
+        const rows = [];
+        for (let index = 0; index < Math.min(8, activeProvider.getRowCount()); index += 1) {
+          rows.push({
+            index,
+            row: activeProvider.getRow ? activeProvider.getRow(index) : null
+          });
+        }
+        return rows;
+      }
+
+      function renderLogs() {
+        updateStatus();
+        stateLogNode.textContent = JSON.stringify(
+          {
+            lastQueryChange: provider.getLastQueryChange(),
+            blockStates: provider.getBlockStates(),
+            debugState: provider.getDebugState(),
+            lastRequest
+          },
+          null,
+          2
+        );
+
+        previewLogNode.textContent = JSON.stringify(
+          {
+            previewRows: collectPreviewRows()
+          },
+          null,
+          2
+        );
+      }
+
+      provider.onRowsChanged(() => {
+        renderLogs();
+      });
+
+      async function sortDesc() {
+        await grid.setSortModel([{ columnId: 'id', direction: 'desc' }]);
+        await waitFrame();
+        renderLogs();
+      }
+
+      async function filterActive() {
+        await grid.setFilterModel({
+          status: {
+            kind: 'set',
+            values: ['active']
+          }
+        });
+        await waitFrame();
+        renderLogs();
+      }
+
+      async function clearQuery() {
+        await grid.setSortModel([]);
+        await grid.setFilterModel({});
+        await waitFrame();
+        renderLogs();
+      }
+
+      function mutateBlock0() {
+        block0Revision += 1;
+        renderLogs();
+      }
+
+      function refreshBlock0() {
+        provider.refreshBlocks({
+          blockIndexes: [0],
+          background: true
+        });
+        renderLogs();
+      }
+
+      function invalidateBlock0() {
+        provider.invalidateBlocks({
+          blockIndexes: [0]
+        });
+        renderLogs();
+      }
+
+      function failNext() {
+        failNextBlock0Refresh = true;
+        renderLogs();
+      }
+
+      function retryFailed() {
+        provider.retryFailedBlocks({
+          blockIndexes: [0]
+        });
+        renderLogs();
+      }
+
+      document.getElementById('sort-desc').addEventListener('click', () => {
+        void sortDesc();
+      });
+      document.getElementById('filter-active').addEventListener('click', () => {
+        void filterActive();
+      });
+      document.getElementById('clear-query').addEventListener('click', () => {
+        void clearQuery();
+      });
+      document.getElementById('mutate-block0').addEventListener('click', mutateBlock0);
+      document.getElementById('refresh-block0').addEventListener('click', refreshBlock0);
+      document.getElementById('invalidate-block0').addEventListener('click', invalidateBlock0);
+      document.getElementById('fail-next').addEventListener('click', failNext);
+      document.getElementById('retry-failed').addEventListener('click', retryFailed);
+      document.getElementById('inspect').addEventListener('click', renderLogs);
+
+      window.__example57 = {
+        sortDesc,
+        filterActive,
+        clearQuery,
+        mutateBlock0,
+        refreshBlock0,
+        invalidateBlock0,
+        failNext,
+        retryFailed,
+        inspect: renderLogs
+      };
+
+      updateStatus();
+      renderLogs();
+    </script>
+  </body>
+</html>

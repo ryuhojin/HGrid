@@ -46,6 +46,8 @@
 - remote provider + `grouping.mode = "server"`:
   - Grid는 `queryModel.groupModel`을 provider에 전달한다.
   - 실제 그룹 계산/집계는 서버가 담당한다.
+  - 서버 응답은 `rowMetadata.kind="group" | "aggregate" | "leaf"`와 `aggregateValues`, `childCount`, `isExpanded`를 통해 remote group row를 렌더링할 수 있다.
+  - remote pivot이 같이 활성화된 경우에도 grouping metadata는 유지되고, 컬럼은 `pivotResult.columns`를 사용한다.
 - remote provider + `grouping.mode = "client"`:
   - 전체 데이터가 로컬에 없을 수 있어 정확한 그룹 계산이 어려우므로 비권장이다.
   - 현재 코어는 remote를 항상 query 우선으로 처리한다.

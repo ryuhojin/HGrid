@@ -27,8 +27,16 @@ describe('GridRemoteQueryService', () => {
       groupModel: [{ columnId: 'region' }],
       pivotModel: [{ columnId: 'quarter' }],
       pivotValues: [{ columnId: 'sales', type: 'sum' }],
+      groupAggregations: [{ columnId: 'sales', type: 'sum' }],
+      groupExpansionState: { 'region:KR': true },
+      groupDefaultExpanded: false,
+      treeDataOptions: {
+        enabled: false
+      },
+      treeExpansionState: {},
       useServerGrouping: true,
-      useServerPivot: false
+      useServerPivot: false,
+      useServerTree: false
     });
 
     expect(queryModel).toEqual({
@@ -42,7 +50,20 @@ describe('GridRemoteQueryService', () => {
       },
       groupModel: [{ columnId: 'region' }],
       pivotModel: undefined,
-      pivotValues: undefined
+      pivotValues: undefined,
+      serverSide: {
+        schemaVersion: 'v1',
+        requestKind: 'root',
+        route: [],
+        rootStoreStrategy: 'partial',
+        childStoreStrategy: 'partial',
+        grouping: {
+          expandedGroupKeys: ['region:KR'],
+          defaultExpanded: false,
+          aggregations: [{ columnId: 'sales', type: 'sum' }]
+        },
+        tree: undefined
+      }
     });
     expect(queryModel.sortModel).not.toBe(sortModel);
     expect(queryModel.filterModel).not.toBe(filterModel);
@@ -68,8 +89,16 @@ describe('GridRemoteQueryService', () => {
       groupModel: [],
       pivotModel: [],
       pivotValues: [],
+      groupAggregations: [],
+      groupExpansionState: {},
+      groupDefaultExpanded: true,
+      treeDataOptions: {
+        enabled: false
+      },
+      treeExpansionState: {},
       useServerGrouping: false,
-      useServerPivot: false
+      useServerPivot: false,
+      useServerTree: false
     });
 
     expect(dataProvider.setQueryModel).toHaveBeenCalledWith({
@@ -83,6 +112,49 @@ describe('GridRemoteQueryService', () => {
     expect(rowModel.getState().rowCount).toBe(5);
     expect(rowModel.getDataIndex(0)).toBe(0);
     expect(rowModel.getViewRowCount()).toBe(5);
+  });
+
+  it('creates a remote grouping + pivot query model with pivot request kind and grouping envelope', () => {
+    const service = new GridRemoteQueryService();
+
+    const queryModel = service.createQueryModel({
+      sortModel: [],
+      filterModel: {},
+      groupModel: [{ columnId: 'region' }],
+      pivotModel: [{ columnId: 'month' }],
+      pivotValues: [{ columnId: 'sales', type: 'sum' }],
+      groupAggregations: [{ columnId: 'sales', type: 'sum' }],
+      groupExpansionState: { APAC: true },
+      groupDefaultExpanded: false,
+      treeDataOptions: {
+        enabled: false
+      },
+      treeExpansionState: {},
+      useServerGrouping: true,
+      useServerPivot: true,
+      useServerTree: false
+    });
+
+    expect(queryModel).toEqual({
+      sortModel: [],
+      filterModel: {},
+      groupModel: [{ columnId: 'region' }],
+      pivotModel: [{ columnId: 'month' }],
+      pivotValues: [{ columnId: 'sales', type: 'sum' }],
+      serverSide: {
+        schemaVersion: 'v1',
+        requestKind: 'pivot',
+        route: [],
+        rootStoreStrategy: 'partial',
+        childStoreStrategy: 'partial',
+        grouping: {
+          expandedGroupKeys: ['APAC'],
+          defaultExpanded: false,
+          aggregations: [{ columnId: 'sales', type: 'sum' }]
+        },
+        tree: undefined
+      }
+    });
   });
 
   it('updates row count when the remote provider row count changes', () => {

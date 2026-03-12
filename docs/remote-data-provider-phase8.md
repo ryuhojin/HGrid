@@ -19,7 +19,9 @@
   - forward-compatible server-side contract:
     - `queryModel.serverSide?`
     - `rowMetadata?`
+    - `pivotResult?`
     - `getRowMetadata(dataIndex)`
+    - `getPivotResult()` / `getPivotResultColumns()`
   - data 변경 이벤트:
     - `onRowsChanged(listener) => unsubscribe`
   - loading policy:
@@ -53,4 +55,6 @@
 ## 리스크 메모
 - `groupModel`은 프로토콜 필드만 선반영했고 실제 그룹 연산은 Phase 9에서 구현한다.
 - 로딩 skeleton은 DOM class 토글 기반이며, 스크롤 중 DOM 생성/삭제 없이 기존 pool 재사용을 유지한다.
-- block cache provider 자체는 Phase 8 범위지만, SSRM envelope는 [server-side-row-model-phase-e2.md](./server-side-row-model-phase-e2.md)에서 추가로 고정한다.
+- block cache provider 자체는 Phase 8 범위지만, SSRM envelope와 remote grouping/pivot/tree contract은 [server-side-row-model-phase-e2.md](./server-side-row-model-phase-e2.md)에서 추가로 고정한다.
+- targeted invalidate / query diff / background refresh / retry runtime 상태는 E2.3에서 추가로 고도화한다.
+- server-side pending change tracking / `acceptPendingChanges` / `discardPendingChanges` / `revertPendingChange`는 E2.4에서 이 provider 위에 추가된다.

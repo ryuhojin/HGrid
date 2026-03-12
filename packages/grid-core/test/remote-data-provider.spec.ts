@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { Grid } from '../src';
+import {
+  Grid,
+  GROUP_ROW_COLUMN_ID_FIELD,
+  GROUP_ROW_KIND_FIELD,
+  TREE_ROW_DEPTH_FIELD,
+  TREE_ROW_KIND_FIELD,
+  TREE_ROW_NODE_KEY_FIELD
+} from '../src';
 import {
   RemoteDataProvider,
   type RemoteBlockRequest,
   type RemoteBlockResponse,
-  type RemoteDataSource
+  type RemoteDataSource,
+  type RemoteServerSideRowMetadata
 } from '../src/data/remote-data-provider';
 import type { RemoteServerSideQueryModel } from '../src/data/remote-server-side-contracts';
 
@@ -41,6 +49,20 @@ async function waitForFrame(): Promise<void> {
       resolve();
     });
   });
+}
+
+async function waitForCondition(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+
+    await flushAsync();
+    await waitForFrame();
+  }
+
+  throw new Error('Timed out waiting for condition');
 }
 
 function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -209,6 +231,188 @@ describe('RemoteDataProvider', () => {
     expect(latestRequest.queryModel.pivotValues).toEqual([{ columnId: 'id', type: 'count' }]);
   });
 
+  it('tracks query diff summary when query model changes', () => {
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(): Promise<RemoteBlockResponse> {
+          return {
+            rows: []
+          };
+        }
+      },
+      rowCount: 10
+    });
+
+    provider.setQueryModel({
+      sortModel: [{ columnId: 'name', direction: 'desc' }]
+    });
+
+    expect(provider.getLastQueryChange()).toEqual({
+      scope: 'sort',
+      changedKeys: ['sort'],
+      invalidationPolicy: 'full'
+    });
+  });
+
+  it('invalidates only targeted cached blocks', async () => {
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          return {
+            rows: createRows(request.startIndex, request.endIndex),
+            totalRowCount: 30
+          };
+        }
+      },
+      rowCount: 30,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 8,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'name');
+    await flushAsync();
+    provider.getValue(6, 'name');
+    await flushAsync();
+    provider.getValue(12, 'name');
+    await flushAsync();
+
+    provider.invalidateBlocks({
+      startIndex: 5,
+      endIndex: 10
+    });
+
+    expect(provider.getDebugState().cachedBlockIndexes).toEqual([0, 2]);
+  });
+
+  it('keeps stale rows visible during background refresh and exposes refreshing state', async () => {
+    const refreshDeferred = createDeferred<RemoteBlockResponse>();
+    let requestCount = 0;
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          requestCount += 1;
+          if (requestCount === 1) {
+            return {
+              rows: createRows(request.startIndex, request.endIndex).map((row) => ({
+                ...row,
+                revision: 'v1'
+              })),
+              totalRowCount: 20
+            };
+          }
+
+          return refreshDeferred.promise;
+        }
+      },
+      rowCount: 20,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 4,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'name');
+    await flushAsync();
+    expect(provider.getValue(0, 'revision')).toBe('v1');
+
+    provider.refreshBlocks({
+      startIndex: 0,
+      endIndex: 5,
+      background: true
+    });
+
+    expect(provider.getValue(0, 'revision')).toBe('v1');
+    expect(provider.getDebugState().refreshingBlockIndexes).toEqual([0]);
+    expect(provider.getBlockStates()).toEqual([
+      {
+        blockIndex: 0,
+        startIndex: 0,
+        endIndex: 5,
+        status: 'refreshing',
+        hasData: true,
+        errorMessage: null
+      }
+    ]);
+
+    refreshDeferred.resolve({
+      rows: createRows(0, 5).map((row) => ({
+        ...row,
+        revision: 'v2'
+      })),
+      totalRowCount: 20
+    });
+    await flushAsync();
+
+    expect(provider.getValue(0, 'revision')).toBe('v2');
+    expect(provider.getDebugState().refreshingBlockIndexes).toEqual([]);
+  });
+
+  it('retries failed blocks while keeping stale rows available', async () => {
+    let requestCount = 0;
+    let shouldFailRefresh = false;
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          requestCount += 1;
+          if (requestCount === 1) {
+            return {
+              rows: createRows(request.startIndex, request.endIndex).map((row) => ({
+                ...row,
+                revision: 'v1'
+              })),
+              totalRowCount: 20
+            };
+          }
+
+          if (shouldFailRefresh) {
+            throw new Error('forced refresh failure');
+          }
+
+          return {
+            rows: createRows(request.startIndex, request.endIndex).map((row) => ({
+              ...row,
+              revision: 'v2'
+            })),
+            totalRowCount: 20
+          };
+        }
+      },
+      rowCount: 20,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 4,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'name');
+    await flushAsync();
+    expect(provider.getValue(0, 'revision')).toBe('v1');
+
+    shouldFailRefresh = true;
+    provider.refreshBlocks({
+      blockIndexes: [0],
+      background: true
+    });
+    await flushAsync();
+
+    expect(provider.getValue(0, 'revision')).toBe('v1');
+    expect(provider.getDebugState().errorBlockIndexes).toEqual([0]);
+
+    shouldFailRefresh = false;
+    provider.retryFailedBlocks({
+      blockIndexes: [0]
+    });
+    await flushAsync();
+
+    expect(provider.getValue(0, 'revision')).toBe('v2');
+    expect(provider.getDebugState().errorBlockIndexes).toEqual([]);
+  });
+
   it('supports loading row policy', () => {
     const dataSource: RemoteDataSource = {
       async fetchBlock(_request): Promise<RemoteBlockResponse> {
@@ -368,6 +572,175 @@ describe('RemoteDataProvider', () => {
     provider.setServerSideQueryModel(undefined);
     expect(provider.getServerSideQueryModel()).toBeUndefined();
   });
+
+  it('preserves pending changes across cache eviction and refetch', async () => {
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          return {
+            rows: createRows(request.startIndex, request.endIndex),
+            totalRowCount: 20
+          };
+        }
+      },
+      rowCount: 20,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 1,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'name');
+    await flushAsync();
+    provider.setValue(0, 'name', 'Remote-1-Edited');
+    expect(provider.getValue(0, 'name')).toBe('Remote-1-Edited');
+    expect(provider.getPendingChanges()).toEqual([
+      {
+        rowKey: 1,
+        changes: [
+          {
+            columnId: 'name',
+            originalValue: 'Remote-1',
+            value: 'Remote-1-Edited'
+          }
+        ]
+      }
+    ]);
+
+    provider.getValue(6, 'name');
+    await flushAsync();
+    expect(provider.getDebugState().cachedBlockIndexes).toEqual([1]);
+
+    expect(provider.getValue(0, 'name')).toBeUndefined();
+    await flushAsync();
+
+    expect(provider.getValue(0, 'name')).toBe('Remote-1-Edited');
+    expect(provider.getPendingChangeSummary()).toEqual({
+      rowCount: 1,
+      cellCount: 1,
+      rowKeys: [1]
+    });
+    expect(provider.getDebugState().pendingChangeSummary).toEqual({
+      rowCount: 1,
+      cellCount: 1,
+      rowKeys: [1]
+    });
+  });
+
+  it('supports accept, discard, and revert for pending remote edits', async () => {
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          return {
+            rows: createRows(request.startIndex, request.endIndex),
+            totalRowCount: 20
+          };
+        }
+      },
+      rowCount: 20,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 2,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'name');
+    provider.getValue(1, 'status');
+    await flushAsync();
+
+    provider.setValue(0, 'name', 'Remote-1-Edited');
+    provider.setValue(0, 'status', 'paused');
+    provider.setValue(1, 'status', 'archived');
+
+    expect(provider.hasPendingChanges()).toBe(true);
+    expect(provider.getPendingChangeSummary()).toEqual({
+      rowCount: 2,
+      cellCount: 3,
+      rowKeys: [1, 2]
+    });
+
+    provider.revertPendingChange(1, 'status');
+    expect(provider.getValue(0, 'status')).toBe('active');
+    expect(provider.getPendingChanges()).toEqual([
+      {
+        rowKey: 1,
+        changes: [
+          {
+            columnId: 'name',
+            originalValue: 'Remote-1',
+            value: 'Remote-1-Edited'
+          }
+        ]
+      },
+      {
+        rowKey: 2,
+        changes: [
+          {
+            columnId: 'status',
+            originalValue: 'idle',
+            value: 'archived'
+          }
+        ]
+      }
+    ]);
+
+    provider.acceptPendingChanges({
+      rowKeys: [1]
+    });
+    expect(provider.getValue(0, 'name')).toBe('Remote-1-Edited');
+    expect(provider.getPendingChangeSummary()).toEqual({
+      rowCount: 1,
+      cellCount: 1,
+      rowKeys: [2]
+    });
+
+    provider.discardPendingChanges();
+    expect(provider.getValue(1, 'status')).toBe('idle');
+    expect(provider.hasPendingChanges()).toBe(false);
+    expect(provider.getPendingChanges()).toEqual([]);
+  });
+
+  it('ignores pending edits for remote group rows', async () => {
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(): Promise<RemoteBlockResponse> {
+          return {
+            rows: [{ region: 'APAC', score: 300 }],
+            rowMetadata: [
+              {
+                kind: 'group',
+                level: 0,
+                childCount: 2,
+                groupColumnId: 'region',
+                groupKey: 'APAC',
+                aggregateValues: {
+                  region: 'APAC',
+                  score: 300
+                }
+              }
+            ],
+            totalRowCount: 1
+          };
+        }
+      },
+      rowCount: 1,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 1,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'region');
+    await flushAsync();
+
+    provider.setValue(0, 'region', 'EMEA');
+
+    expect(provider.getValue(0, 'region')).toBe('APAC');
+    expect(provider.hasPendingChanges()).toBe(false);
+  });
 });
 
 describe('Grid + RemoteDataProvider', () => {
@@ -491,7 +864,10 @@ describe('Grid + RemoteDataProvider', () => {
       requestKind: 'root',
       route: [],
       rootStoreStrategy: 'partial',
-      childStoreStrategy: 'full'
+      childStoreStrategy: 'full',
+      grouping: {
+        defaultExpanded: true
+      }
     });
     expect(remoteQueryModel.sortModel).toEqual([{ columnId: 'id', direction: 'desc' }]);
     expect(remoteQueryModel.filterModel).toEqual({
@@ -504,5 +880,455 @@ describe('Grid + RemoteDataProvider', () => {
     expect(requests.length).toBeGreaterThan(0);
 
     grid.destroy();
+  });
+
+  it('renders remote grouping rows from row metadata', async () => {
+    const container = document.createElement('div');
+    container.style.width = '760px';
+    document.body.append(container);
+
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          return {
+            rows: [
+              { region: 'APAC', score: 300 },
+              { id: 1, region: 'KR', score: 120 },
+              { id: 2, region: 'JP', score: 180 }
+            ],
+            rowMetadata: [
+              {
+                kind: 'group',
+                level: 0,
+                childCount: 2,
+                isExpanded: true,
+                groupColumnId: 'region',
+                groupKey: 'APAC',
+                aggregateValues: {
+                  region: 'APAC',
+                  score: 300
+                }
+              },
+              { kind: 'leaf', level: 1 },
+              { kind: 'leaf', level: 1 }
+            ],
+            totalRowCount: 3
+          };
+        }
+      },
+      rowCount: 3,
+      cache: {
+        blockSize: 8,
+        maxBlocks: 2,
+        prefetchBlocks: 0
+      },
+      queryModel: {
+        serverSide: {
+          schemaVersion: 'v2',
+          requestKind: 'root',
+          route: [],
+          rootStoreStrategy: 'partial',
+          childStoreStrategy: 'partial'
+        }
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'region', header: 'Region', width: 180, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ],
+      dataProvider: provider,
+      grouping: {
+        mode: 'server',
+        groupModel: [{ columnId: 'region' }]
+      },
+      height: 200,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await flushAsync();
+    await waitForFrame();
+
+    const activeProvider = grid.getDataProvider();
+    const firstRow = activeProvider.getRow?.(0);
+    expect(firstRow?.[GROUP_ROW_KIND_FIELD]).toBe('group');
+    expect(firstRow?.[GROUP_ROW_COLUMN_ID_FIELD]).toBe('region');
+    expect(firstRow?.region).toBe('APAC');
+    expect(firstRow?.score).toBe(300);
+
+    grid.destroy();
+  });
+
+  it('renders remote tree rows and syncs expanded node keys to the query contract', async () => {
+    const requests: Array<Omit<RemoteBlockRequest, 'signal'>> = [];
+    const container = document.createElement('div');
+    container.style.width = '760px';
+    document.body.append(container);
+
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          requests.push(cloneRequestWithoutSignal(request));
+          const expandedNodeKeys = request.queryModel.serverSide?.tree?.expandedNodeKeys ?? [];
+          const rows =
+            expandedNodeKeys.indexOf('root-1') >= 0
+              ? [
+                  { id: 'root-1', name: 'Root 1' },
+                  { id: 'child-1', name: 'Child 1' }
+                ]
+              : [{ id: 'root-1', name: 'Root 1' }];
+          const rowMetadata: RemoteServerSideRowMetadata[] =
+            expandedNodeKeys.indexOf('root-1') >= 0
+              ? [
+                  {
+                    kind: 'leaf',
+                    treeNodeKey: 'root-1',
+                    treeParentNodeKey: null,
+                    treeDepth: 0,
+                    treeHasChildren: true,
+                    treeExpanded: true,
+                    treeColumnId: 'name'
+                  },
+                  {
+                    kind: 'leaf',
+                    treeNodeKey: 'child-1',
+                    treeParentNodeKey: 'root-1',
+                    treeDepth: 1,
+                    treeHasChildren: false,
+                    treeExpanded: false,
+                    treeColumnId: 'name'
+                  }
+                ]
+              : [
+                  {
+                    kind: 'leaf',
+                    treeNodeKey: 'root-1',
+                    treeParentNodeKey: null,
+                    treeDepth: 0,
+                    treeHasChildren: true,
+                    treeExpanded: false,
+                    treeColumnId: 'name'
+                  }
+                ];
+
+          return {
+            rows,
+            rowMetadata,
+            totalRowCount: rows.length
+          };
+        }
+      },
+      rowCount: 1,
+      cache: {
+        blockSize: 8,
+        maxBlocks: 2,
+        prefetchBlocks: 0
+      },
+      queryModel: {
+        serverSide: {
+          schemaVersion: 'v2',
+          requestKind: 'tree',
+          route: [],
+          rootStoreStrategy: 'partial',
+          childStoreStrategy: 'partial'
+        }
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'name', header: 'Name', width: 220, type: 'text' }
+      ],
+      dataProvider: provider,
+      treeData: {
+        enabled: true,
+        mode: 'server',
+        treeColumnId: 'name',
+        idField: 'id',
+        parentIdField: 'parentId',
+        hasChildrenField: 'hasChildren'
+      },
+      height: 200,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await flushAsync();
+    await waitForFrame();
+
+    let activeProvider = grid.getDataProvider();
+    let firstRow = activeProvider.getRow?.(0);
+    expect(firstRow?.[TREE_ROW_KIND_FIELD]).toBe('tree');
+    expect(firstRow?.[TREE_ROW_NODE_KEY_FIELD]).toBe('root-1');
+    expect(firstRow?.[TREE_ROW_DEPTH_FIELD]).toBe(0);
+
+    await grid.setTreeExpanded('root-1', true);
+    await waitForCondition(() => {
+      const providerAfterExpand = grid.getDataProvider();
+      return providerAfterExpand.getRow?.(1)?.[TREE_ROW_KIND_FIELD] === 'tree';
+    });
+
+    const latestRequest = requests[requests.length - 1];
+    expect(latestRequest.queryModel.serverSide?.tree?.expandedNodeKeys).toEqual(['root-1']);
+
+    activeProvider = grid.getDataProvider();
+    firstRow = activeProvider.getRow?.(1);
+    expect(firstRow?.[TREE_ROW_KIND_FIELD]).toBe('tree');
+    expect(firstRow?.[TREE_ROW_NODE_KEY_FIELD]).toBe('child-1');
+    expect(firstRow?.[TREE_ROW_DEPTH_FIELD]).toBe(1);
+
+    grid.destroy();
+  });
+
+  it('applies remote pivot result columns from the server response', async () => {
+    const container = document.createElement('div');
+    container.style.width = '920px';
+    document.body.append(container);
+
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(_request): Promise<RemoteBlockResponse> {
+          return {
+            rows: [
+              {
+                region: 'APAC',
+                'sales::Jan': 100,
+                'sales::Feb': 200
+              }
+            ],
+            pivotResult: {
+              columns: [
+                { id: 'region', header: 'Region', width: 180, type: 'text' },
+                { id: 'sales::Jan', header: 'Sales Jan', width: 140, type: 'number' },
+                { id: 'sales::Feb', header: 'Sales Feb', width: 140, type: 'number' }
+              ]
+            },
+            totalRowCount: 1
+          };
+        }
+      },
+      rowCount: 1,
+      cache: {
+        blockSize: 8,
+        maxBlocks: 2,
+        prefetchBlocks: 0
+      },
+      queryModel: {
+        serverSide: {
+          schemaVersion: 'v2',
+          requestKind: 'pivot',
+          route: [],
+          rootStoreStrategy: 'partial',
+          childStoreStrategy: 'partial'
+        }
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'region', header: 'Region', width: 180, type: 'text' },
+        { id: 'month', header: 'Month', width: 140, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 120, type: 'number' }
+      ],
+      dataProvider: provider,
+      pivoting: {
+        mode: 'server',
+        pivotModel: [{ columnId: 'month' }],
+        values: [{ columnId: 'sales', type: 'sum' }]
+      },
+      height: 200,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await flushAsync();
+    await waitForFrame();
+
+    const visibleColumnIds = grid.getVisibleColumns().map((column) => column.id);
+    expect(visibleColumnIds).toContain('sales::Jan');
+    expect(visibleColumnIds).toContain('sales::Feb');
+    expect(provider.getPivotResultColumns().map((column) => column.id)).toEqual(['region', 'sales::Jan', 'sales::Feb']);
+
+    grid.destroy();
+  });
+
+  it('prioritizes remote tree contract over server grouping and pivot query payloads', async () => {
+    const requests: Array<Omit<RemoteBlockRequest, 'signal'>> = [];
+    const container = document.createElement('div');
+    container.style.width = '920px';
+    document.body.append(container);
+
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          requests.push(cloneRequestWithoutSignal(request));
+          return {
+            rows: [
+              { id: 'root-1', parentId: null, hasChildren: true, name: 'Root 1', region: 'APAC', month: 'Jan', sales: 120 }
+            ],
+            rowMetadata: [
+              {
+                kind: 'leaf',
+                treeNodeKey: 'root-1',
+                treeParentNodeKey: null,
+                treeDepth: 0,
+                treeHasChildren: true,
+                treeExpanded: false,
+                treeColumnId: 'name'
+              }
+            ],
+            totalRowCount: 1
+          };
+        }
+      },
+      rowCount: 1,
+      cache: {
+        blockSize: 8,
+        maxBlocks: 2,
+        prefetchBlocks: 0
+      },
+      queryModel: {
+        serverSide: {
+          schemaVersion: 'v2',
+          requestKind: 'tree',
+          route: [],
+          rootStoreStrategy: 'partial',
+          childStoreStrategy: 'partial'
+        }
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'region', header: 'Region', width: 160, type: 'text' },
+        { id: 'month', header: 'Month', width: 120, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' }
+      ],
+      dataProvider: provider,
+      grouping: {
+        mode: 'server',
+        groupModel: [{ columnId: 'region' }]
+      },
+      pivoting: {
+        mode: 'server',
+        pivotModel: [{ columnId: 'month' }],
+        values: [{ columnId: 'sales', type: 'sum' }]
+      },
+      treeData: {
+        enabled: true,
+        mode: 'server',
+        treeColumnId: 'name',
+        idField: 'id',
+        parentIdField: 'parentId',
+        hasChildrenField: 'hasChildren'
+      },
+      height: 200,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await flushAsync();
+    await waitForFrame();
+
+    const queryModel = provider.getQueryModel();
+    expect(queryModel.groupModel).toBeUndefined();
+    expect(queryModel.pivotModel).toBeUndefined();
+    expect(queryModel.pivotValues).toBeUndefined();
+    expect(queryModel.serverSide?.requestKind).toBe('tree');
+    expect(queryModel.serverSide?.tree).toEqual({
+      idField: 'id',
+      parentIdField: 'parentId',
+      hasChildrenField: 'hasChildren',
+      treeColumnId: 'name'
+    });
+    expect(requests.length).toBeGreaterThan(0);
+
+    grid.destroy();
+  });
+
+  it('keeps remote edit UX immediate while tracking pending changes for save/discard', async () => {
+    const container = document.createElement('div');
+    container.style.width = '760px';
+    document.body.append(container);
+
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          return {
+            rows: createRows(request.startIndex, request.endIndex),
+            totalRowCount: 2
+          };
+        }
+      },
+      rowCount: 2,
+      cache: {
+        blockSize: 8,
+        maxBlocks: 2,
+        prefetchBlocks: 0
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text' }
+      ],
+      dataProvider: provider,
+      height: 200,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await flushAsync();
+    await waitForFrame();
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          startEditingAtCell: (rowIndex: number, colIndex: number) => boolean;
+          editorInputElement: HTMLInputElement;
+        };
+      }
+    ).renderer;
+
+    expect(renderer.startEditingAtCell(0, 1)).toBe(true);
+    renderer.editorInputElement.value = 'Remote-1-Edited';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(provider.getValue(0, 'name')).toBe('Remote-1-Edited');
+    expect(provider.getPendingChanges()).toEqual([
+      {
+        rowKey: 1,
+        changes: [
+          {
+            columnId: 'name',
+            originalValue: 'Remote-1',
+            value: 'Remote-1-Edited'
+          }
+        ]
+      }
+    ]);
+
+    const editedNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement | null;
+    expect(editedNameCell?.textContent).toBe('Remote-1-Edited');
+
+    provider.discardPendingChanges();
+    await waitForFrame();
+
+    const revertedNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement | null;
+    expect(provider.getValue(0, 'name')).toBe('Remote-1');
+    expect(revertedNameCell?.textContent).toBe('Remote-1');
+
+    grid.destroy();
+    container.remove();
   });
 });

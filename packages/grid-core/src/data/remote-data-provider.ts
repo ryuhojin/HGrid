@@ -1,19 +1,28 @@
 import type { DataProvider, DataTransaction, GridRowData, RowKey, RowsChangedListener } from './data-provider';
-import type { GroupModelItem, PivotModelItem, PivotValueDef } from '../core/grid-options';
+import type { ColumnDef, GroupModelItem, PivotModelItem, PivotValueDef } from '../core/grid-options';
 import {
+  cloneRemoteServerSidePivotResult,
   cloneRemoteServerSideQueryModel,
   cloneRemoteServerSideRowMetadata,
   cloneRemoteServerSideRowMetadataList,
   isSameRemoteServerSideQueryModel
 } from './remote-server-side-contracts';
-import type { RemoteServerSideQueryModel, RemoteServerSideRowMetadata } from './remote-server-side-contracts';
+import type {
+  RemoteServerSidePivotResult,
+  RemoteServerSideQueryModel,
+  RemoteServerSideRowMetadata
+} from './remote-server-side-contracts';
 export type {
+  RemoteServerSideGroupingAggregation,
+  RemoteServerSideGroupingQuery,
+  RemoteServerSidePivotResult,
   RemoteServerSideQueryModel,
   RemoteServerSideRequestKind,
   RemoteServerSideRouteItem,
   RemoteServerSideRowKind,
   RemoteServerSideRowMetadata,
-  RemoteServerSideStoreStrategy
+  RemoteServerSideStoreStrategy,
+  RemoteServerSideTreeQuery
 } from './remote-server-side-contracts';
 
 const DEFAULT_BLOCK_SIZE = 1000;
@@ -51,6 +60,7 @@ export interface RemoteBlockResponse {
   rows: GridRowData[];
   rowKeys?: RowKey[];
   rowMetadata?: Array<RemoteServerSideRowMetadata | undefined>;
+  pivotResult?: RemoteServerSidePivotResult;
   totalRowCount?: number;
 }
 
@@ -62,6 +72,56 @@ export interface RemoteCacheConfig {
   blockSize: number;
   maxBlocks: number;
   prefetchBlocks?: number;
+}
+
+export type RemoteBlockRuntimeStatus = 'loading' | 'ready' | 'refreshing' | 'error';
+export type RemoteQueryChangeScope = 'none' | 'sort' | 'filter' | 'group' | 'pivot' | 'serverSide' | 'mixed';
+export type RemoteQueryInvalidationPolicy = 'none' | 'full';
+
+export interface RemoteBlockRangeOptions {
+  startIndex?: number;
+  endIndex?: number;
+  blockIndexes?: number[];
+}
+
+export interface RemoteBlockRefreshOptions extends RemoteBlockRangeOptions {
+  background?: boolean;
+}
+
+export interface RemoteBlockState {
+  blockIndex: number;
+  startIndex: number;
+  endIndex: number;
+  status: RemoteBlockRuntimeStatus;
+  hasData: boolean;
+  errorMessage: string | null;
+}
+
+export interface RemoteQueryChangeSummary {
+  scope: RemoteQueryChangeScope;
+  changedKeys: Array<'sort' | 'filter' | 'group' | 'pivot' | 'serverSide'>;
+  invalidationPolicy: RemoteQueryInvalidationPolicy;
+}
+
+export interface RemotePendingCellChange {
+  columnId: string;
+  originalValue: unknown;
+  value: unknown;
+}
+
+export interface RemotePendingRowChange {
+  rowKey: RowKey;
+  changes: RemotePendingCellChange[];
+}
+
+export interface RemotePendingChangeSummary {
+  rowCount: number;
+  cellCount: number;
+  rowKeys: RowKey[];
+}
+
+export interface RemotePendingChangeOptions {
+  rowKeys?: RowKey[];
 }
 
 export interface RemoteDataProviderOptions {
@@ -79,8 +139,14 @@ export interface RemoteDataProviderDebugState {
   prefetchBlocks: number;
   cachedBlockIndexes: number[];
   loadingBlockIndexes: number[];
+  refreshingBlockIndexes: number[];
+  errorBlockIndexes: number[];
+  blockStates: RemoteBlockState[];
   queryModel: RemoteQueryModel;
+  lastQueryChange: RemoteQueryChangeSummary;
   inFlightOperations: number;
+  pendingChangeSummary: RemotePendingChangeSummary;
+  pivotResultColumnIds: string[];
 }
 
 export interface RemoteDataProvider extends DataProvider {
@@ -88,12 +154,25 @@ export interface RemoteDataProvider extends DataProvider {
   getQueryModel(): RemoteQueryModel;
   setServerSideQueryModel(serverSideQueryModel: Partial<RemoteServerSideQueryModel> | undefined): void;
   getServerSideQueryModel(): RemoteServerSideQueryModel | undefined;
+  getPivotResult(): RemoteServerSidePivotResult | undefined;
+  getPivotResultColumns(): ColumnDef[];
   setDataSource(dataSource: RemoteDataSource): void;
   invalidateCache(): void;
+  invalidateBlocks(options?: RemoteBlockRangeOptions): void;
+  refreshBlocks(options?: RemoteBlockRefreshOptions): void;
+  retryFailedBlocks(options?: RemoteBlockRangeOptions): void;
   cancelOperation(operationId: string): void;
   getCacheConfig(): RemoteCacheConfig;
   getLoadingRowPolicy(): RemoteLoadingRowPolicy;
   getRowMetadata(dataIndex: number): RemoteServerSideRowMetadata | undefined;
+  getBlockStates(): RemoteBlockState[];
+  getLastQueryChange(): RemoteQueryChangeSummary;
+  hasPendingChanges(): boolean;
+  getPendingChanges(): RemotePendingRowChange[];
+  getPendingChangeSummary(): RemotePendingChangeSummary;
+  acceptPendingChanges(options?: RemotePendingChangeOptions): void;
+  discardPendingChanges(options?: RemotePendingChangeOptions): void;
+  revertPendingChange(rowKey: RowKey, columnId?: string): void;
   getDebugState(): RemoteDataProviderDebugState;
 }
 
@@ -101,7 +180,7 @@ interface CachedBlock {
   blockIndex: number;
   startIndex: number;
   endIndex: number;
-  status: 'loading' | 'ready' | 'error';
+  status: RemoteBlockRuntimeStatus;
   rows: GridRowData[];
   rowKeys: RowKey[];
   rowMetadata: Array<RemoteServerSideRowMetadata | undefined>;
@@ -112,6 +191,15 @@ interface CachedBlock {
 interface InFlightOperation {
   blockIndex: number;
   abortController: AbortController | null;
+}
+
+interface InternalRemotePendingCellChange extends RemotePendingCellChange {
+  hadOriginalValue: boolean;
+}
+
+interface InternalRemotePendingRowChange {
+  rowKey: RowKey;
+  changes: Map<string, InternalRemotePendingCellChange>;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -326,6 +414,97 @@ function isSameQueryModel(left: RemoteQueryModel, right: RemoteQueryModel): bool
   return true;
 }
 
+function createNoQueryChangeSummary(): RemoteQueryChangeSummary {
+  return {
+    scope: 'none',
+    changedKeys: [],
+    invalidationPolicy: 'none'
+  };
+}
+
+function createQueryChangeSummary(left: RemoteQueryModel, right: RemoteQueryModel): RemoteQueryChangeSummary {
+  const changedKeys: Array<'sort' | 'filter' | 'group' | 'pivot' | 'serverSide'> = [];
+  if (!isSameSortModel(left.sortModel, right.sortModel)) {
+    changedKeys.push('sort');
+  }
+
+  if (!isSameFilterModel(left.filterModel, right.filterModel)) {
+    changedKeys.push('filter');
+  }
+
+  if (JSON.stringify(left.groupModel) !== JSON.stringify(right.groupModel)) {
+    changedKeys.push('group');
+  }
+
+  if (JSON.stringify(left.pivotModel) !== JSON.stringify(right.pivotModel) || JSON.stringify(left.pivotValues) !== JSON.stringify(right.pivotValues)) {
+    changedKeys.push('pivot');
+  }
+
+  if (!isSameRemoteServerSideQueryModel(left.serverSide, right.serverSide)) {
+    changedKeys.push('serverSide');
+  }
+
+  if (changedKeys.length === 0) {
+    return createNoQueryChangeSummary();
+  }
+
+  return {
+    scope: changedKeys.length === 1 ? changedKeys[0] : 'mixed',
+    changedKeys,
+    invalidationPolicy: 'full'
+  };
+}
+
+function hasBlockData(block: CachedBlock): boolean {
+  return block.rows.length > 0;
+}
+
+function canReadFromBlock(block: CachedBlock | null | undefined): boolean {
+  if (!block) {
+    return false;
+  }
+
+  return block.status === 'ready' || block.status === 'refreshing' || (block.status === 'error' && hasBlockData(block));
+}
+
+function isRemoteEditableRow(metadata: RemoteServerSideRowMetadata | undefined): boolean {
+  return !metadata || metadata.kind === 'leaf';
+}
+
+function clonePendingRowChange(rowChange: InternalRemotePendingRowChange): RemotePendingRowChange {
+  return {
+    rowKey: rowChange.rowKey,
+    changes: Array.from(rowChange.changes.values()).map((cellChange) => ({
+      columnId: cellChange.columnId,
+      originalValue: cellChange.originalValue,
+      value: cellChange.value
+    }))
+  };
+}
+
+function createPendingChangeSummary(rowChanges: Map<RowKey, InternalRemotePendingRowChange>): RemotePendingChangeSummary {
+  const rowKeys = Array.from(rowChanges.keys());
+  let cellCount = 0;
+  rowChanges.forEach((rowChange) => {
+    cellCount += rowChange.changes.size;
+  });
+
+  return {
+    rowCount: rowKeys.length,
+    cellCount,
+    rowKeys
+  };
+}
+
+function applyCellValue(row: GridRowData, columnId: string, value: unknown, hadOriginalValue = true): void {
+  if (value === undefined && !hadOriginalValue) {
+    delete row[columnId];
+    return;
+  }
+
+  row[columnId] = value;
+}
+
 export class RemoteDataProvider implements DataProvider {
   private dataSource: RemoteDataSource;
   private rowCount: number;
@@ -336,9 +515,12 @@ export class RemoteDataProvider implements DataProvider {
   private readonly inFlightOperations: Map<string, InFlightOperation> = new Map();
   private readonly listeners: Set<RowsChangedListener> = new Set();
   private readonly canceledOperationIds: Set<string> = new Set();
+  private readonly pendingRowChanges: Map<RowKey, InternalRemotePendingRowChange> = new Map();
+  private pivotResult: RemoteServerSidePivotResult | undefined;
   private requestSequence = 0;
   private queryVersion = 0;
   private lastAccessedDataIndex: number | null = null;
+  private lastQueryChange: RemoteQueryChangeSummary = createNoQueryChangeSummary();
 
   public constructor(options: RemoteDataProviderOptions) {
     this.dataSource = options.dataSource;
@@ -362,7 +544,7 @@ export class RemoteDataProvider implements DataProvider {
     }
 
     const block = this.ensureBlockForDataIndex(dataIndex, true);
-    if (!block || block.status !== 'ready') {
+    if (!block || !canReadFromBlock(block)) {
       return dataIndex;
     }
 
@@ -381,7 +563,7 @@ export class RemoteDataProvider implements DataProvider {
     }
 
     const block = this.ensureBlockForDataIndex(dataIndex, true);
-    if (!block || block.status !== 'ready') {
+    if (!block || !canReadFromBlock(block)) {
       return undefined;
     }
 
@@ -399,7 +581,7 @@ export class RemoteDataProvider implements DataProvider {
     }
 
     const block = this.ensureBlockForDataIndex(dataIndex, true);
-    if (!block || block.status !== 'ready') {
+    if (!block || !canReadFromBlock(block)) {
       return undefined;
     }
 
@@ -413,17 +595,23 @@ export class RemoteDataProvider implements DataProvider {
 
     const blockIndex = this.getBlockIndexByDataIndex(dataIndex);
     const block = this.blockCache.get(blockIndex);
-    if (!block || block.status !== 'ready') {
+    if (!block || !canReadFromBlock(block)) {
       return;
     }
 
     const rowOffset = dataIndex - block.startIndex;
     const row = block.rows[rowOffset];
-    if (!row) {
+    if (!row || !isRemoteEditableRow(block.rowMetadata[rowOffset])) {
       return;
     }
 
-    row[columnId] = value;
+    if (Object.is(row[columnId], value)) {
+      return;
+    }
+
+    const rowKey = this.resolveRowKey(block, rowOffset);
+    this.recordPendingValue(rowKey, row, columnId, value);
+    applyCellValue(row, columnId, value);
     this.emitRowsChanged();
   }
 
@@ -504,7 +692,7 @@ export class RemoteDataProvider implements DataProvider {
 
     const blockIndex = this.getBlockIndexByDataIndex(dataIndex);
     const block = this.blockCache.get(blockIndex);
-    return !block || block.status !== 'ready';
+    return !block || block.status === 'loading';
   }
 
   public setQueryModel(queryModel: Partial<RemoteQueryModel>): void {
@@ -524,11 +712,13 @@ export class RemoteDataProvider implements DataProvider {
       serverSide: hasServerSide ? cloneRemoteServerSideQueryModel(queryModel.serverSide) : this.queryModel.serverSide
     };
 
-    if (isSameQueryModel(this.queryModel, nextQueryModel)) {
+    const queryChange = createQueryChangeSummary(this.queryModel, nextQueryModel);
+    if (queryChange.invalidationPolicy === 'none') {
       return;
     }
 
     this.queryModel = cloneQueryModel(nextQueryModel);
+    this.lastQueryChange = queryChange;
     this.queryVersion += 1;
     this.invalidateCache();
   }
@@ -547,8 +737,17 @@ export class RemoteDataProvider implements DataProvider {
     return cloneRemoteServerSideQueryModel(this.queryModel.serverSide);
   }
 
+  public getPivotResult(): RemoteServerSidePivotResult | undefined {
+    return cloneRemoteServerSidePivotResult(this.pivotResult);
+  }
+
+  public getPivotResultColumns(): ColumnDef[] {
+    return cloneRemoteServerSidePivotResult(this.pivotResult)?.columns ?? [];
+  }
+
   public setDataSource(dataSource: RemoteDataSource): void {
     this.dataSource = dataSource;
+    this.pendingRowChanges.clear();
     this.queryVersion += 1;
     this.invalidateCache();
   }
@@ -556,8 +755,69 @@ export class RemoteDataProvider implements DataProvider {
   public invalidateCache(): void {
     this.cancelAllInFlightOperations();
     this.blockCache.clear();
+    this.pivotResult = undefined;
     this.lastAccessedDataIndex = null;
     this.emitRowsChanged();
+  }
+
+  public invalidateBlocks(options?: RemoteBlockRangeOptions): void {
+    const targetBlockIndexes = this.resolveTargetBlockIndexes(options, false);
+    let hasChanged = false;
+
+    for (let index = 0; index < targetBlockIndexes.length; index += 1) {
+      const blockIndex = targetBlockIndexes[index];
+      if (!this.blockCache.has(blockIndex)) {
+        continue;
+      }
+
+      this.cancelInFlightOperationsForBlock(blockIndex);
+      this.blockCache.delete(blockIndex);
+      hasChanged = true;
+    }
+
+    if (hasChanged) {
+      if (this.blockCache.size === 0) {
+        this.pivotResult = undefined;
+        this.lastAccessedDataIndex = null;
+      }
+      this.emitRowsChanged();
+    }
+  }
+
+  public refreshBlocks(options?: RemoteBlockRefreshOptions): void {
+    this.refreshTargetBlocks(this.resolveTargetBlockIndexes(options, true), options?.background === true);
+  }
+
+  public retryFailedBlocks(options?: RemoteBlockRangeOptions): void {
+    const targetBlockIndexes = this.resolveTargetBlockIndexes(options, false).filter((blockIndex) => {
+      const block = this.blockCache.get(blockIndex);
+      return Boolean(block && block.status === 'error');
+    });
+
+    let hasChanged = false;
+    for (let index = 0; index < targetBlockIndexes.length; index += 1) {
+      const blockIndex = targetBlockIndexes[index];
+      const block = this.blockCache.get(blockIndex);
+      if (!block) {
+        continue;
+      }
+
+      this.cancelInFlightOperationsForBlock(blockIndex);
+      if (!hasBlockData(block)) {
+        block.rows = [];
+        block.rowKeys = [];
+        block.rowMetadata = [];
+      }
+      block.endIndex = this.getExpectedBlockEndIndex(blockIndex);
+      block.status = hasBlockData(block) ? 'refreshing' : 'loading';
+      block.errorMessage = null;
+      this.fetchBlock(block, { background: hasBlockData(block) });
+      hasChanged = true;
+    }
+
+    if (hasChanged) {
+      this.emitRowsChanged();
+    }
   }
 
   public cancelOperation(operationId: string): void {
@@ -584,11 +844,104 @@ export class RemoteDataProvider implements DataProvider {
     return this.loadingRowPolicy;
   }
 
+  public getBlockStates(): RemoteBlockState[] {
+    const states = Array.from(this.blockCache.values()).map((block) => ({
+      blockIndex: block.blockIndex,
+      startIndex: block.startIndex,
+      endIndex: block.endIndex,
+      status: block.status,
+      hasData: hasBlockData(block),
+      errorMessage: block.errorMessage
+    }));
+
+    states.sort((left, right) => left.blockIndex - right.blockIndex);
+    return states;
+  }
+
+  public getLastQueryChange(): RemoteQueryChangeSummary {
+    return {
+      scope: this.lastQueryChange.scope,
+      changedKeys: this.lastQueryChange.changedKeys.slice(),
+      invalidationPolicy: this.lastQueryChange.invalidationPolicy
+    };
+  }
+
+  public hasPendingChanges(): boolean {
+    return this.pendingRowChanges.size > 0;
+  }
+
+  public getPendingChanges(): RemotePendingRowChange[] {
+    return Array.from(this.pendingRowChanges.values()).map((rowChange) => clonePendingRowChange(rowChange));
+  }
+
+  public getPendingChangeSummary(): RemotePendingChangeSummary {
+    return createPendingChangeSummary(this.pendingRowChanges);
+  }
+
+  public acceptPendingChanges(options?: RemotePendingChangeOptions): void {
+    const targetRowKeys = this.resolvePendingTargetRowKeys(options);
+    if (targetRowKeys.length === 0) {
+      return;
+    }
+
+    for (let index = 0; index < targetRowKeys.length; index += 1) {
+      this.pendingRowChanges.delete(targetRowKeys[index]);
+    }
+
+    this.emitRowsChanged();
+  }
+
+  public discardPendingChanges(options?: RemotePendingChangeOptions): void {
+    const targetRowKeys = this.resolvePendingTargetRowKeys(options);
+    if (targetRowKeys.length === 0) {
+      return;
+    }
+
+    for (let index = 0; index < targetRowKeys.length; index += 1) {
+      this.revertPendingRow(targetRowKeys[index]);
+    }
+
+    this.emitRowsChanged();
+  }
+
+  public revertPendingChange(rowKey: RowKey, columnId?: string): void {
+    const rowChange = this.pendingRowChanges.get(rowKey);
+    if (!rowChange) {
+      return;
+    }
+
+    if (typeof columnId === 'string' && columnId.length > 0) {
+      const cellChange = rowChange.changes.get(columnId);
+      if (!cellChange) {
+        return;
+      }
+
+      this.applyPendingCellRollback(rowKey, cellChange);
+      rowChange.changes.delete(columnId);
+      if (rowChange.changes.size === 0) {
+        this.pendingRowChanges.delete(rowKey);
+      }
+      this.emitRowsChanged();
+      return;
+    }
+
+    this.revertPendingRow(rowKey);
+    this.emitRowsChanged();
+  }
+
   public getDebugState(): RemoteDataProviderDebugState {
     const cachedBlockIndexes = Array.from(this.blockCache.keys()).sort((left, right) => left - right);
     const loadingBlockIndexes = cachedBlockIndexes.filter((blockIndex) => {
       const block = this.blockCache.get(blockIndex);
       return block?.status === 'loading';
+    });
+    const refreshingBlockIndexes = cachedBlockIndexes.filter((blockIndex) => {
+      const block = this.blockCache.get(blockIndex);
+      return block?.status === 'refreshing';
+    });
+    const errorBlockIndexes = cachedBlockIndexes.filter((blockIndex) => {
+      const block = this.blockCache.get(blockIndex);
+      return block?.status === 'error';
     });
 
     return {
@@ -598,8 +951,14 @@ export class RemoteDataProvider implements DataProvider {
       prefetchBlocks: this.cacheConfig.prefetchBlocks,
       cachedBlockIndexes,
       loadingBlockIndexes,
+      refreshingBlockIndexes,
+      errorBlockIndexes,
+      blockStates: this.getBlockStates(),
       queryModel: this.getQueryModel(),
-      inFlightOperations: this.inFlightOperations.size
+      lastQueryChange: this.getLastQueryChange(),
+      inFlightOperations: this.inFlightOperations.size,
+      pendingChangeSummary: this.getPendingChangeSummary(),
+      pivotResultColumnIds: this.getPivotResultColumns().map((column) => column.id)
     };
   }
 
@@ -645,10 +1004,31 @@ export class RemoteDataProvider implements DataProvider {
       return block;
     }
 
-    if (block.status === 'error') {
+    const expectedEndIndex = this.getExpectedBlockEndIndex(blockIndex);
+    const expectedLength = expectedEndIndex - block.startIndex;
+    if (block.endIndex !== expectedEndIndex) {
+      block.endIndex = expectedEndIndex;
+      if (block.status === 'ready') {
+        block.rows = block.rows.slice(0, expectedLength);
+        block.rowKeys = block.rowKeys.slice(0, expectedLength);
+        block.rowMetadata = block.rowMetadata.slice(0, expectedLength);
+      }
+    }
+
+    if (
+      (block.status === 'ready' || block.status === 'refreshing') &&
+      expectedLength > 0 &&
+      (block.rows.length < expectedLength || block.rowKeys.length < expectedLength || block.rowMetadata.length < expectedLength)
+    ) {
       block.status = 'loading';
       block.errorMessage = null;
-      this.fetchBlock(block);
+      this.fetchBlock(block, { background: false });
+    }
+
+    if (block.status === 'error' && !hasBlockData(block)) {
+      block.status = 'loading';
+      block.errorMessage = null;
+      this.fetchBlock(block, { background: false });
     }
 
     this.touchBlock(blockIndex);
@@ -658,7 +1038,7 @@ export class RemoteDataProvider implements DataProvider {
     return block;
   }
 
-  private fetchBlock(block: CachedBlock): void {
+  private fetchBlock(block: CachedBlock, options?: { background?: boolean }): void {
     const blockIndex = block.blockIndex;
     const currentOperationId = block.operationId;
     if (currentOperationId && this.inFlightOperations.has(currentOperationId)) {
@@ -667,7 +1047,8 @@ export class RemoteDataProvider implements DataProvider {
 
     const operationId = `remote-${this.queryVersion}-${blockIndex}-${++this.requestSequence}`;
     const abortController = typeof AbortController === 'function' ? new AbortController() : null;
-    block.status = 'loading';
+    const shouldUseBackgroundRefresh = options?.background === true && hasBlockData(block);
+    block.status = shouldUseBackgroundRefresh ? 'refreshing' : 'loading';
     block.operationId = operationId;
     block.errorMessage = null;
     this.inFlightOperations.set(operationId, {
@@ -705,26 +1086,7 @@ export class RemoteDataProvider implements DataProvider {
           return;
         }
 
-        const expectedLength = currentBlock.endIndex - currentBlock.startIndex;
         const sourceRows = Array.isArray(response.rows) ? response.rows : [];
-        const rows: GridRowData[] = new Array(expectedLength);
-        const rowKeys: RowKey[] = new Array(expectedLength);
-        const rowMetadata = cloneRemoteServerSideRowMetadataList(response.rowMetadata, expectedLength);
-        for (let rowOffset = 0; rowOffset < expectedLength; rowOffset += 1) {
-          const row = sourceRows[rowOffset] ? { ...sourceRows[rowOffset] } : {};
-          rows[rowOffset] = row;
-          rowKeys[rowOffset] =
-            Array.isArray(response.rowKeys) && response.rowKeys.length > rowOffset
-              ? response.rowKeys[rowOffset]
-              : getFallbackRowKey(row, currentBlock.startIndex + rowOffset);
-        }
-
-        currentBlock.rows = rows;
-        currentBlock.rowKeys = rowKeys;
-        currentBlock.rowMetadata = rowMetadata;
-        currentBlock.status = 'ready';
-        currentBlock.errorMessage = null;
-        this.touchBlock(blockIndex);
 
         if (Number.isFinite(response.totalRowCount)) {
           const nextRowCount = Math.max(0, Math.floor(Number(response.totalRowCount)));
@@ -733,6 +1095,36 @@ export class RemoteDataProvider implements DataProvider {
             this.trimInvalidBlocks();
           }
         }
+
+        const maxBlockEndIndex = this.getExpectedBlockEndIndex(blockIndex);
+        if (sourceRows.length > currentBlock.endIndex - currentBlock.startIndex) {
+          currentBlock.endIndex = Math.min(currentBlock.startIndex + sourceRows.length, maxBlockEndIndex);
+        } else {
+          currentBlock.endIndex = Math.min(currentBlock.endIndex, maxBlockEndIndex);
+        }
+
+        const expectedLength = currentBlock.endIndex - currentBlock.startIndex;
+        const rows: GridRowData[] = new Array(expectedLength);
+        const rowKeys: RowKey[] = new Array(expectedLength);
+        const rowMetadata = cloneRemoteServerSideRowMetadataList(response.rowMetadata, expectedLength);
+        for (let rowOffset = 0; rowOffset < expectedLength; rowOffset += 1) {
+          const row = sourceRows[rowOffset] ? { ...sourceRows[rowOffset] } : {};
+          const rowKey =
+            Array.isArray(response.rowKeys) && response.rowKeys.length > rowOffset
+              ? response.rowKeys[rowOffset]
+              : getFallbackRowKey(row, currentBlock.startIndex + rowOffset);
+          this.applyPendingValuesToRow(rowKey, row);
+          rows[rowOffset] = row;
+          rowKeys[rowOffset] = rowKey;
+        }
+
+        currentBlock.rows = rows;
+        currentBlock.rowKeys = rowKeys;
+        currentBlock.rowMetadata = rowMetadata;
+        this.pivotResult = cloneRemoteServerSidePivotResult(response.pivotResult);
+        currentBlock.status = 'ready';
+        currentBlock.errorMessage = null;
+        this.touchBlock(blockIndex);
 
         this.evictIfNeeded(blockIndex);
         this.emitRowsChanged();
@@ -790,12 +1182,64 @@ export class RemoteDataProvider implements DataProvider {
     }
   }
 
+  private resolveTargetBlockIndexes(options: RemoteBlockRangeOptions | RemoteBlockRefreshOptions | undefined, includeMissing: boolean): number[] {
+    const blockCount = this.getBlockCount();
+    const seenBlockIndexes = new Set<number>();
+    const targetBlockIndexes: number[] = [];
+
+    if (Array.isArray(options?.blockIndexes) && options.blockIndexes.length > 0) {
+      for (let index = 0; index < options.blockIndexes.length; index += 1) {
+        const blockIndex = Math.floor(options.blockIndexes[index]);
+        if (blockIndex < 0 || blockIndex >= blockCount || seenBlockIndexes.has(blockIndex)) {
+          continue;
+        }
+
+        if (includeMissing || this.blockCache.has(blockIndex)) {
+          seenBlockIndexes.add(blockIndex);
+          targetBlockIndexes.push(blockIndex);
+        }
+      }
+    } else if (Number.isFinite(options?.startIndex) || Number.isFinite(options?.endIndex)) {
+      const startIndex = Math.max(0, Math.floor(Number(options?.startIndex ?? 0)));
+      const endIndex = Math.max(startIndex + 1, Math.floor(Number(options?.endIndex ?? startIndex + 1)));
+      const startBlockIndex = this.getBlockIndexByDataIndex(startIndex);
+      const endBlockIndex = this.getBlockIndexByDataIndex(Math.max(startIndex, endIndex - 1));
+      for (let blockIndex = startBlockIndex; blockIndex <= endBlockIndex; blockIndex += 1) {
+        if (blockIndex < 0 || blockIndex >= blockCount || seenBlockIndexes.has(blockIndex)) {
+          continue;
+        }
+
+        if (includeMissing || this.blockCache.has(blockIndex)) {
+          seenBlockIndexes.add(blockIndex);
+          targetBlockIndexes.push(blockIndex);
+        }
+      }
+    } else {
+      const cachedBlockIndexes = Array.from(this.blockCache.keys()).sort((left, right) => left - right);
+      for (let index = 0; index < cachedBlockIndexes.length; index += 1) {
+        const blockIndex = cachedBlockIndexes[index];
+        if (seenBlockIndexes.has(blockIndex)) {
+          continue;
+        }
+
+        seenBlockIndexes.add(blockIndex);
+        targetBlockIndexes.push(blockIndex);
+      }
+    }
+
+    return targetBlockIndexes;
+  }
+
   private getBlockCount(): number {
     if (this.rowCount <= 0) {
       return 0;
     }
 
     return Math.ceil(this.rowCount / this.cacheConfig.blockSize);
+  }
+
+  private getExpectedBlockEndIndex(blockIndex: number): number {
+    return Math.min(this.rowCount, (blockIndex + 1) * this.cacheConfig.blockSize);
   }
 
   private getBlockIndexByDataIndex(dataIndex: number): number {
@@ -848,12 +1292,191 @@ export class RemoteDataProvider implements DataProvider {
     }
   }
 
+  private refreshTargetBlocks(blockIndexes: number[], background: boolean): void {
+    let hasChanged = false;
+
+    for (let index = 0; index < blockIndexes.length; index += 1) {
+      const blockIndex = blockIndexes[index];
+      let block = this.blockCache.get(blockIndex);
+      if (!block) {
+        if (blockIndex < 0 || blockIndex >= this.getBlockCount()) {
+          continue;
+        }
+
+        block = {
+          blockIndex,
+          startIndex: blockIndex * this.cacheConfig.blockSize,
+          endIndex: this.getExpectedBlockEndIndex(blockIndex),
+          status: 'loading',
+          rows: [],
+          rowKeys: [],
+          rowMetadata: [],
+          operationId: null,
+          errorMessage: null
+        };
+        this.blockCache.set(blockIndex, block);
+      }
+
+      this.cancelInFlightOperationsForBlock(blockIndex);
+      block.endIndex = this.getExpectedBlockEndIndex(blockIndex);
+      if (!background || !hasBlockData(block)) {
+        block.rows = [];
+        block.rowKeys = [];
+        block.rowMetadata = [];
+      }
+      block.status = background && hasBlockData(block) ? 'refreshing' : 'loading';
+      block.errorMessage = null;
+      this.fetchBlock(block, { background });
+      hasChanged = true;
+    }
+
+    if (hasChanged) {
+      this.emitRowsChanged();
+    }
+  }
+
   private cancelAllInFlightOperations(): void {
     const operationIds = Array.from(this.inFlightOperations.keys());
     for (let operationIndex = 0; operationIndex < operationIds.length; operationIndex += 1) {
       this.cancelOperation(operationIds[operationIndex]);
     }
     this.inFlightOperations.clear();
+  }
+
+  private cancelInFlightOperationsForBlock(blockIndex: number): void {
+    const inFlightEntries = Array.from(this.inFlightOperations.entries());
+    for (let index = 0; index < inFlightEntries.length; index += 1) {
+      const [operationId, inFlightOperation] = inFlightEntries[index];
+      if (inFlightOperation.blockIndex !== blockIndex) {
+        continue;
+      }
+
+      this.cancelOperation(operationId);
+      this.inFlightOperations.delete(operationId);
+      const block = this.blockCache.get(blockIndex);
+      if (block && block.operationId === operationId) {
+        block.operationId = null;
+      }
+    }
+  }
+
+  private resolveRowKey(block: CachedBlock, rowOffset: number): RowKey {
+    const rowKey = block.rowKeys[rowOffset];
+    if (typeof rowKey === 'string' || typeof rowKey === 'number') {
+      return rowKey;
+    }
+
+    return getFallbackRowKey(block.rows[rowOffset], block.startIndex + rowOffset);
+  }
+
+  private recordPendingValue(rowKey: RowKey, row: GridRowData, columnId: string, value: unknown): void {
+    let rowChange = this.pendingRowChanges.get(rowKey);
+    if (!rowChange) {
+      rowChange = {
+        rowKey,
+        changes: new Map()
+      };
+      this.pendingRowChanges.set(rowKey, rowChange);
+    }
+
+    const existingCellChange = rowChange.changes.get(columnId);
+    if (!existingCellChange) {
+      rowChange.changes.set(columnId, {
+        columnId,
+        originalValue: row[columnId],
+        value,
+        hadOriginalValue: Object.prototype.hasOwnProperty.call(row, columnId)
+      });
+      return;
+    }
+
+    if (Object.is(value, existingCellChange.originalValue)) {
+      rowChange.changes.delete(columnId);
+      if (rowChange.changes.size === 0) {
+        this.pendingRowChanges.delete(rowKey);
+      }
+      return;
+    }
+
+    existingCellChange.value = value;
+  }
+
+  private applyPendingValuesToRow(rowKey: RowKey, row: GridRowData): void {
+    const rowChange = this.pendingRowChanges.get(rowKey);
+    if (!rowChange) {
+      return;
+    }
+
+    rowChange.changes.forEach((cellChange) => {
+      applyCellValue(row, cellChange.columnId, cellChange.value);
+    });
+  }
+
+  private resolvePendingTargetRowKeys(options?: RemotePendingChangeOptions): RowKey[] {
+    if (!Array.isArray(options?.rowKeys) || options.rowKeys.length === 0) {
+      return Array.from(this.pendingRowChanges.keys());
+    }
+
+    const targetRowKeys: RowKey[] = [];
+    for (let index = 0; index < options.rowKeys.length; index += 1) {
+      const rowKey = options.rowKeys[index];
+      if (!this.pendingRowChanges.has(rowKey)) {
+        continue;
+      }
+
+      targetRowKeys.push(rowKey);
+    }
+
+    return targetRowKeys;
+  }
+
+  private revertPendingRow(rowKey: RowKey): void {
+    const rowChange = this.pendingRowChanges.get(rowKey);
+    if (!rowChange) {
+      return;
+    }
+
+    rowChange.changes.forEach((cellChange) => {
+      this.applyPendingCellRollback(rowKey, cellChange);
+    });
+    this.pendingRowChanges.delete(rowKey);
+  }
+
+  private applyPendingCellRollback(rowKey: RowKey, cellChange: InternalRemotePendingCellChange): void {
+    const loadedRows = this.findLoadedRowsByKey(rowKey);
+    for (let index = 0; index < loadedRows.length; index += 1) {
+      const match = loadedRows[index];
+      applyCellValue(match.row, cellChange.columnId, cellChange.originalValue, cellChange.hadOriginalValue);
+    }
+  }
+
+  private findLoadedRowsByKey(rowKey: RowKey): Array<{ row: GridRowData; dataIndex: number }> {
+    const matches: Array<{ row: GridRowData; dataIndex: number }> = [];
+    const blocks = Array.from(this.blockCache.values());
+    for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+      const block = blocks[blockIndex];
+      if (!canReadFromBlock(block)) {
+        continue;
+      }
+
+      for (let rowOffset = 0; rowOffset < block.rows.length; rowOffset += 1) {
+        if (this.resolveRowKey(block, rowOffset) !== rowKey) {
+          continue;
+        }
+
+        const row = block.rows[rowOffset];
+        if (!row) {
+          continue;
+        }
+
+        matches.push({
+          row,
+          dataIndex: block.startIndex + rowOffset
+        });
+      }
+    }
+
+    return matches;
   }
 
   private emitRowsChanged(): void {

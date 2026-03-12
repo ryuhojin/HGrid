@@ -36,7 +36,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Excel(xlsx) plugin pipeline (plugin 분리, export/import, header mapping, validation)
 - CSS Variables theme token pipeline (`.h-theme-light` / `.h-theme-dark` + `setTheme()` runtime override)
 - SI Design Guide pipeline (토큰 매핑표 + 커스터마이징 레시피 + 고객사 테마 샘플)
-- RemoteDataProvider block cache/LRU/prefetch + server query model(sort/filter/group/pivot)
+- RemoteDataProvider block cache/LRU/prefetch + server query model(sort/filter/group/pivot/tree) + remote grouping/tree row metadata + server pivot result columns + targeted invalidate/query diff/background refresh/retry + rowKey 기반 pending change/save-discard API
 - 성능 스모크(e2e heartbeat max gap)로 그룹/트리/피벗 UI freeze 회귀 점검
 - ARIA Grid semantics pipeline (`aria-rowcount/colcount/rowindex/colindex` + `aria-activedescendant` focus strategy)
 - Keyboard-only pipeline (navigation/selection/editing, `Ctrl/Cmd+A`, `F2`, editor `Tab/Shift+Tab`)
@@ -48,7 +48,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 아직 엔터프라이즈 상용 제품으로 완료되지 않은 범위:
 
-- mature server-side row model (`RemoteDataProvider`는 block cache/query model 중심)
+- mature server-side row model (store hierarchy, save orchestration, conflict UI는 아직 부족)
 - enterprise UI surface (column menu, filter UI, side bar/tool panel, status bar 등)
 - React/Vue product package 및 plugin SDK
 - release/commercial readiness (`Phase 15`)

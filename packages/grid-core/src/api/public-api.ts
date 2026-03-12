@@ -104,6 +104,14 @@ export type {
 export { RemoteDataProvider } from '../data/remote-data-provider';
 export type {
   FilterModel,
+  RemoteBlockRangeOptions,
+  RemoteBlockRefreshOptions,
+  RemoteBlockRuntimeStatus,
+  RemoteBlockState,
+  RemotePendingCellChange,
+  RemotePendingChangeOptions,
+  RemotePendingChangeSummary,
+  RemotePendingRowChange,
   RemoteDataProviderDebugState,
   RemoteDataProviderOptions,
   RemoteBlockRequest,
@@ -111,17 +119,24 @@ export type {
   RemoteCacheConfig,
   RemoteDataSource,
   RemoteLoadingRowPolicy,
+  RemoteQueryChangeScope,
+  RemoteQueryChangeSummary,
+  RemoteQueryInvalidationPolicy,
   RemoteQueryModel,
   SortDirection,
   SortModelItem
 } from '../data/remote-data-provider';
 export type {
+  RemoteServerSideGroupingAggregation,
+  RemoteServerSideGroupingQuery,
+  RemoteServerSidePivotResult,
   RemoteServerSideQueryModel,
   RemoteServerSideRequestKind,
   RemoteServerSideRouteItem,
   RemoteServerSideRowKind,
   RemoteServerSideRowMetadata,
-  RemoteServerSideStoreStrategy
+  RemoteServerSideStoreStrategy,
+  RemoteServerSideTreeQuery
 } from '../data/remote-server-side-contracts';
 export { CooperativeSortExecutor } from '../data/sort-executor';
 export type { SortExecutionContext, SortExecutionRequest, SortExecutionResult, SortExecutor } from '../data/sort-executor';

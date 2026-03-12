@@ -61,16 +61,47 @@
   - `getQueryModel()`
   - `setServerSideQueryModel(partialServerSideQuery | undefined)`
   - `getServerSideQueryModel()`
+  - `getPivotResult()`
+  - `getPivotResultColumns()`
   - `getRowMetadata(dataIndex)`
   - `invalidateCache()`
+  - `invalidateBlocks(range?)`
+  - `refreshBlocks({ startIndex?, endIndex?, blockIndexes?, background? })`
+  - `retryFailedBlocks(range?)`
+  - `getBlockStates()`
+  - `getLastQueryChange()`
+  - `hasPendingChanges()`
+  - `getPendingChanges()`
+  - `getPendingChangeSummary()`
+  - `acceptPendingChanges({ rowKeys? })`
+  - `discardPendingChanges({ rowKeys? })`
+  - `revertPendingChange(rowKey, columnId?)`
   - `cancelOperation(operationId)`
   - `getCacheConfig()`
+  - remote pending change types (Phase E2.4):
+    - `RemotePendingCellChange`: `{ columnId, originalValue, value }`
+    - `RemotePendingRowChange`: `{ rowKey, changes[] }`
+    - `RemotePendingChangeSummary`: `{ rowCount, cellCount, rowKeys }`
   - `queryModel.serverSide?` / `rowMetadata?` (Phase E2.1):
     - `schemaVersion: string`
     - `requestKind: "root" | "children" | "pivot" | "tree"`
     - `route: Array<{ columnId, key }>`
     - `rootStoreStrategy: "partial" | "full"`
     - `childStoreStrategy: "partial" | "full"`
+  - `queryModel.serverSide.grouping?` / `queryModel.serverSide.tree?` / `RemoteBlockResponse.pivotResult?` (Phase E2.2):
+    - `grouping.expandedGroupKeys?: string[]`
+    - `grouping.defaultExpanded?: boolean`
+    - `grouping.aggregations?: Array<{ columnId, type? }>`
+    - `tree.idField?`, `tree.parentIdField?`, `tree.hasChildrenField?`, `tree.treeColumnId?`
+    - `tree.expandedNodeKeys?: Array<string | number>`
+    - `pivotResult.columns?: ColumnDef[]`
+  - runtime cache/sync API (Phase E2.3):
+    - `RemoteBlockState.status: "loading" | "ready" | "refreshing" | "error"`
+    - `getBlockStates()` for loading/error/retry overlay consumers
+    - `getLastQueryChange(): { scope, changedKeys, invalidationPolicy }`
+    - `invalidateBlocks()` for targeted cache eviction
+    - `refreshBlocks({ background: true })` for stale-data-preserving background refresh
+    - `retryFailedBlocks()` for explicit retry
 - `RowModelOptions`: row-model runtime options (`enableDataToViewIndex` can be toggled at runtime).
 - `GridConfig` runtime virtualization options:
   - `overscan`: vertical row overscan count

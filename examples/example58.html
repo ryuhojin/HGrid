@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 58 - Remote Pending Changes</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --panel-border: #d7e0ea;
+        --panel-bg: rgba(255, 255, 255, 0.92);
+        --accent: #0f766e;
+        --warn: #b45309;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 280px),
+          linear-gradient(180deg, #f8fbff 0%, #f3f7fb 100%);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 21px;
+      }
+
+      p {
+        margin: 0 0 14px;
+        color: var(--muted);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.96);
+        padding: 8px 13px;
+        cursor: pointer;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 440px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 1px solid var(--panel-border);
+        background: var(--panel-bg);
+        border-radius: 14px;
+        padding: 14px;
+        backdrop-filter: blur(10px);
+      }
+
+      .panel + .panel {
+        margin-top: 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .status {
+        margin-bottom: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .status strong {
+        color: var(--accent);
+      }
+
+      .hint {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--warn);
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      @media (max-width: 1280px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 58 - Remote Pending Changes</h1>
+    <p>
+      E2.4 smoke입니다. 서버모드에서도 셀 편집은 즉시 반영되고, 변경값은 pending change로 누적됩니다.
+      더블클릭 또는 Enter로 편집한 뒤 `inspect`, `invalidate block0`, `save changes`, `discard changes`를 눌러
+      payload와 refetch 동작을 확인할 수 있습니다.
+    </p>
+
+    <div class="controls">
+      <button id="inspect" type="button">inspect</button>
+      <button id="invalidate-block0" type="button">invalidate block0</button>
+      <button id="refresh-block0" type="button">background refresh block0</button>
+      <button id="revert-first" type="button">revert first change</button>
+      <button id="save" type="button">save changes</button>
+      <button id="discard" type="button">discard changes</button>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="status" id="status">pending summary: waiting for first block</div>
+        <div id="grid"></div>
+        <div class="hint">
+          editable columns: <strong>name</strong>, <strong>status</strong>, <strong>owner</strong>. group row는 없고 leaf row만 편집합니다.
+        </div>
+      </div>
+      <div>
+        <section class="panel">
+          <h2>Pending Payload</h2>
+          <pre id="pending-log">Initializing...</pre>
+        </section>
+        <section class="panel">
+          <h2>Provider Debug</h2>
+          <pre id="debug-log">Initializing...</pre>
+        </section>
+        <section class="panel">
+          <h2>Server Preview</h2>
+          <pre id="server-log">Initializing...</pre>
+        </section>
+        <section class="panel">
+          <h2>Last Save Payload</h2>
+          <pre id="save-log">No save yet.</pre>
+        </section>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const TOTAL_ROWS = 80;
+      const BLOCK_SIZE = 20;
+      const LATENCY_MS = 36;
+      const serverRows = Array.from({ length: TOTAL_ROWS }, (_, index) => ({
+        id: index + 1,
+        name: 'Remote-' + String(index + 1).padStart(3, '0'),
+        status: index % 3 === 0 ? 'active' : index % 3 === 1 ? 'idle' : 'hold',
+        owner: ['Kim', 'Park', 'Lee', 'Choi'][index % 4],
+        revision: 1
+      }));
+      const serverRowsById = new Map(serverRows.map((row) => [row.id, row]));
+
+      const statusNode = document.getElementById('status');
+      const pendingLogNode = document.getElementById('pending-log');
+      const debugLogNode = document.getElementById('debug-log');
+      const serverLogNode = document.getElementById('server-log');
+      const saveLogNode = document.getElementById('save-log');
+
+      let lastSavePayload = [];
+      let provider = null;
+      let grid = null;
+
+      function wait(delayMs) {
+        return new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      function deepClone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function readServerSlice(startIndex, endIndex) {
+        const rows = [];
+        for (let dataIndex = startIndex; dataIndex < Math.min(endIndex, serverRows.length); dataIndex += 1) {
+          const sourceRow = serverRows[dataIndex];
+          rows.push({
+            id: sourceRow.id,
+            name: sourceRow.name,
+            status: sourceRow.status,
+            owner: sourceRow.owner,
+            revision: 'srv-v' + sourceRow.revision
+          });
+        }
+        return rows;
+      }
+
+      function renderState() {
+        const pendingChanges = provider.getPendingChanges();
+        const pendingSummary = provider.getPendingChangeSummary();
+        const debugState = provider.getDebugState();
+        const serverPreview = serverRows.slice(0, 8).map((row) => ({
+          id: row.id,
+          name: row.name,
+          status: row.status,
+          owner: row.owner,
+          revision: row.revision
+        }));
+
+        statusNode.innerHTML =
+          'pending rows: <strong>' +
+          pendingSummary.rowCount +
+          '</strong> / pending cells: <strong>' +
+          pendingSummary.cellCount +
+          '</strong>';
+        pendingLogNode.textContent = JSON.stringify(
+          {
+            summary: pendingSummary,
+            changes: pendingChanges
+          },
+          null,
+          2
+        );
+        debugLogNode.textContent = JSON.stringify(
+          {
+            blockStates: debugState.blockStates,
+            pendingChangeSummary: debugState.pendingChangeSummary,
+            cachedBlockIndexes: debugState.cachedBlockIndexes,
+            loadingBlockIndexes: debugState.loadingBlockIndexes,
+            refreshingBlockIndexes: debugState.refreshingBlockIndexes
+          },
+          null,
+          2
+        );
+        serverLogNode.textContent = JSON.stringify(serverPreview, null, 2);
+        saveLogNode.textContent = JSON.stringify(lastSavePayload, null, 2);
+      }
+
+      const dataSource = {
+        async fetchBlock(request) {
+          await wait(LATENCY_MS);
+          return {
+            rows: readServerSlice(request.startIndex, request.endIndex),
+            totalRowCount: serverRows.length
+          };
+        }
+      };
+
+      provider = new HGrid.RemoteDataProvider({
+        dataSource,
+        rowCount: TOTAL_ROWS,
+        cache: {
+          blockSize: BLOCK_SIZE,
+          maxBlocks: 4,
+          prefetchBlocks: 0
+        }
+      });
+
+      provider.onRowsChanged(renderState);
+
+      grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: [
+          { id: 'id', header: 'ID', width: 90, type: 'number', pinned: 'left' },
+          { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+          { id: 'status', header: 'Status', width: 150, type: 'text', editable: true },
+          { id: 'owner', header: 'Owner', width: 150, type: 'text', editable: true },
+          { id: 'revision', header: 'Revision', width: 120, type: 'text' }
+        ],
+        dataProvider: provider,
+        height: 420,
+        rowHeight: 28,
+        overscan: 4
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderState();
+      });
+
+      document.getElementById('invalidate-block0').addEventListener('click', () => {
+        provider.invalidateBlocks({
+          startIndex: 0,
+          endIndex: BLOCK_SIZE
+        });
+        renderState();
+      });
+
+      document.getElementById('refresh-block0').addEventListener('click', () => {
+        provider.refreshBlocks({
+          startIndex: 0,
+          endIndex: BLOCK_SIZE,
+          background: true
+        });
+        renderState();
+      });
+
+      document.getElementById('revert-first').addEventListener('click', () => {
+        const pendingChanges = provider.getPendingChanges();
+        if (pendingChanges.length === 0 || pendingChanges[0].changes.length === 0) {
+          return;
+        }
+
+        const rowChange = pendingChanges[0];
+        provider.revertPendingChange(rowChange.rowKey, rowChange.changes[0].columnId);
+      });
+
+      document.getElementById('save').addEventListener('click', async () => {
+        const payload = provider.getPendingChanges();
+        lastSavePayload = deepClone(payload);
+        for (let rowIndex = 0; rowIndex < payload.length; rowIndex += 1) {
+          const rowChange = payload[rowIndex];
+          const serverRow = serverRowsById.get(Number(rowChange.rowKey));
+          if (!serverRow) {
+            continue;
+          }
+
+          for (let changeIndex = 0; changeIndex < rowChange.changes.length; changeIndex += 1) {
+            const cellChange = rowChange.changes[changeIndex];
+            serverRow[cellChange.columnId] = cellChange.value;
+          }
+
+          serverRow.revision += 1;
+        }
+
+        await wait(40);
+        provider.acceptPendingChanges();
+        provider.invalidateBlocks({
+          startIndex: 0,
+          endIndex: BLOCK_SIZE
+        });
+        renderState();
+      });
+
+      document.getElementById('discard').addEventListener('click', () => {
+        provider.discardPendingChanges();
+        renderState();
+      });
+
+      window.__example58 = {
+        provider,
+        grid,
+        getPendingChanges() {
+          return provider.getPendingChanges();
+        },
+        getServerRows() {
+          return deepClone(serverRows.slice(0, 10));
+        },
+        saveChanges() {
+          document.getElementById('save').click();
+        },
+        discardChanges() {
+          document.getElementById('discard').click();
+        }
+      };
+
+      renderState();
+    </script>
+  </body>
+</html>

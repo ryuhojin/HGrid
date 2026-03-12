@@ -68,6 +68,8 @@ export interface GridColumnMutationPort {
 export interface GridDerivedViewControllerPort {
   isTreeDataActive(): boolean;
   isClientGroupingActive(): boolean;
+  isTreeToggleActive(): boolean;
+  isGroupingToggleActive(): boolean;
   getDataProvider(): DataProvider;
   getTreeColumnId(): string;
   toggleGroupExpanded(groupKey: string): Promise<void> | void;

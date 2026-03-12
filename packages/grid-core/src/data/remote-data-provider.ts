@@ -1,5 +1,20 @@
 import type { DataProvider, DataTransaction, GridRowData, RowKey, RowsChangedListener } from './data-provider';
 import type { GroupModelItem, PivotModelItem, PivotValueDef } from '../core/grid-options';
+import {
+  cloneRemoteServerSideQueryModel,
+  cloneRemoteServerSideRowMetadata,
+  cloneRemoteServerSideRowMetadataList,
+  isSameRemoteServerSideQueryModel
+} from './remote-server-side-contracts';
+import type { RemoteServerSideQueryModel, RemoteServerSideRowMetadata } from './remote-server-side-contracts';
+export type {
+  RemoteServerSideQueryModel,
+  RemoteServerSideRequestKind,
+  RemoteServerSideRouteItem,
+  RemoteServerSideRowKind,
+  RemoteServerSideRowMetadata,
+  RemoteServerSideStoreStrategy
+} from './remote-server-side-contracts';
 
 const DEFAULT_BLOCK_SIZE = 1000;
 const DEFAULT_MAX_BLOCKS = 24;
@@ -21,6 +36,7 @@ export interface RemoteQueryModel {
   groupModel?: GroupModelItem[];
   pivotModel?: PivotModelItem[];
   pivotValues?: PivotValueDef[];
+  serverSide?: RemoteServerSideQueryModel;
 }
 
 export interface RemoteBlockRequest {
@@ -34,6 +50,7 @@ export interface RemoteBlockRequest {
 export interface RemoteBlockResponse {
   rows: GridRowData[];
   rowKeys?: RowKey[];
+  rowMetadata?: Array<RemoteServerSideRowMetadata | undefined>;
   totalRowCount?: number;
 }
 
@@ -69,11 +86,14 @@ export interface RemoteDataProviderDebugState {
 export interface RemoteDataProvider extends DataProvider {
   setQueryModel(queryModel: Partial<RemoteQueryModel>): void;
   getQueryModel(): RemoteQueryModel;
+  setServerSideQueryModel(serverSideQueryModel: Partial<RemoteServerSideQueryModel> | undefined): void;
+  getServerSideQueryModel(): RemoteServerSideQueryModel | undefined;
   setDataSource(dataSource: RemoteDataSource): void;
   invalidateCache(): void;
   cancelOperation(operationId: string): void;
   getCacheConfig(): RemoteCacheConfig;
   getLoadingRowPolicy(): RemoteLoadingRowPolicy;
+  getRowMetadata(dataIndex: number): RemoteServerSideRowMetadata | undefined;
   getDebugState(): RemoteDataProviderDebugState;
 }
 
@@ -84,6 +104,7 @@ interface CachedBlock {
   status: 'loading' | 'ready' | 'error';
   rows: GridRowData[];
   rowKeys: RowKey[];
+  rowMetadata: Array<RemoteServerSideRowMetadata | undefined>;
   operationId: string | null;
   errorMessage: string | null;
 }
@@ -209,7 +230,8 @@ function cloneQueryModel(queryModel: RemoteQueryModel): RemoteQueryModel {
     filterModel: cloneFilterModel(queryModel.filterModel),
     groupModel: cloneGroupModel(queryModel.groupModel),
     pivotModel: clonePivotModel(queryModel.pivotModel),
-    pivotValues: clonePivotValues(queryModel.pivotValues)
+    pivotValues: clonePivotValues(queryModel.pivotValues),
+    serverSide: cloneRemoteServerSideQueryModel(queryModel.serverSide)
   };
 }
 
@@ -232,7 +254,8 @@ function createInitialQueryModel(input?: Partial<RemoteQueryModel>): RemoteQuery
     filterModel: cloneFilterModel(input?.filterModel),
     groupModel: cloneGroupModel(input?.groupModel),
     pivotModel: clonePivotModel(input?.pivotModel),
-    pivotValues: clonePivotValues(input?.pivotValues)
+    pivotValues: clonePivotValues(input?.pivotValues),
+    serverSide: cloneRemoteServerSideQueryModel(input?.serverSide)
   };
 }
 
@@ -293,6 +316,10 @@ function isSameQueryModel(left: RemoteQueryModel, right: RemoteQueryModel): bool
   }
 
   if (JSON.stringify(left.pivotValues) !== JSON.stringify(right.pivotValues)) {
+    return false;
+  }
+
+  if (!isSameRemoteServerSideQueryModel(left.serverSide, right.serverSide)) {
     return false;
   }
 
@@ -364,6 +391,19 @@ export class RemoteDataProvider implements DataProvider {
   public getValue(dataIndex: number, columnId: string): unknown {
     const row = this.getRow(dataIndex);
     return row ? row[columnId] : undefined;
+  }
+
+  public getRowMetadata(dataIndex: number): RemoteServerSideRowMetadata | undefined {
+    if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= this.rowCount) {
+      return undefined;
+    }
+
+    const block = this.ensureBlockForDataIndex(dataIndex, true);
+    if (!block || block.status !== 'ready') {
+      return undefined;
+    }
+
+    return cloneRemoteServerSideRowMetadata(block.rowMetadata[dataIndex - block.startIndex]);
   }
 
   public setValue(dataIndex: number, columnId: string, value: unknown): void {
@@ -473,13 +513,15 @@ export class RemoteDataProvider implements DataProvider {
     const hasGroupModel = Object.prototype.hasOwnProperty.call(queryModel, 'groupModel');
     const hasPivotModel = Object.prototype.hasOwnProperty.call(queryModel, 'pivotModel');
     const hasPivotValues = Object.prototype.hasOwnProperty.call(queryModel, 'pivotValues');
+    const hasServerSide = Object.prototype.hasOwnProperty.call(queryModel, 'serverSide');
 
     const nextQueryModel: RemoteQueryModel = {
       sortModel: hasSortModel ? cloneSortModel(queryModel.sortModel) : this.queryModel.sortModel,
       filterModel: hasFilterModel ? cloneFilterModel(queryModel.filterModel) : this.queryModel.filterModel,
       groupModel: hasGroupModel ? cloneGroupModel(queryModel.groupModel) : this.queryModel.groupModel,
       pivotModel: hasPivotModel ? clonePivotModel(queryModel.pivotModel) : this.queryModel.pivotModel,
-      pivotValues: hasPivotValues ? clonePivotValues(queryModel.pivotValues) : this.queryModel.pivotValues
+      pivotValues: hasPivotValues ? clonePivotValues(queryModel.pivotValues) : this.queryModel.pivotValues,
+      serverSide: hasServerSide ? cloneRemoteServerSideQueryModel(queryModel.serverSide) : this.queryModel.serverSide
     };
 
     if (isSameQueryModel(this.queryModel, nextQueryModel)) {
@@ -493,6 +535,16 @@ export class RemoteDataProvider implements DataProvider {
 
   public getQueryModel(): RemoteQueryModel {
     return cloneQueryModel(this.queryModel);
+  }
+
+  public setServerSideQueryModel(serverSideQueryModel: Partial<RemoteServerSideQueryModel> | undefined): void {
+    this.setQueryModel({
+      serverSide: cloneRemoteServerSideQueryModel(serverSideQueryModel)
+    });
+  }
+
+  public getServerSideQueryModel(): RemoteServerSideQueryModel | undefined {
+    return cloneRemoteServerSideQueryModel(this.queryModel.serverSide);
   }
 
   public setDataSource(dataSource: RemoteDataSource): void {
@@ -583,6 +635,7 @@ export class RemoteDataProvider implements DataProvider {
         status: 'loading',
         rows: [],
         rowKeys: [],
+        rowMetadata: [],
         operationId: null,
         errorMessage: null
       };
@@ -656,6 +709,7 @@ export class RemoteDataProvider implements DataProvider {
         const sourceRows = Array.isArray(response.rows) ? response.rows : [];
         const rows: GridRowData[] = new Array(expectedLength);
         const rowKeys: RowKey[] = new Array(expectedLength);
+        const rowMetadata = cloneRemoteServerSideRowMetadataList(response.rowMetadata, expectedLength);
         for (let rowOffset = 0; rowOffset < expectedLength; rowOffset += 1) {
           const row = sourceRows[rowOffset] ? { ...sourceRows[rowOffset] } : {};
           rows[rowOffset] = row;
@@ -667,6 +721,7 @@ export class RemoteDataProvider implements DataProvider {
 
         currentBlock.rows = rows;
         currentBlock.rowKeys = rowKeys;
+        currentBlock.rowMetadata = rowMetadata;
         currentBlock.status = 'ready';
         currentBlock.errorMessage = null;
         this.touchBlock(blockIndex);

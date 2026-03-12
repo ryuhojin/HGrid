@@ -28,6 +28,7 @@ function createBaseParams(
     toggleTreeExpanded: () => undefined,
     applyGroupingView: () => undefined,
     applyTreeView: () => undefined,
+    invalidateWorkerProjectionCache: () => undefined,
     getAuditLogHook: () => undefined,
     ...overrides
   };
@@ -102,6 +103,7 @@ describe('GridCommandEventService', () => {
     const groupedDataProvider = new GroupedDataProvider(sourceDataProvider);
     const toggleGroupExpanded = vi.fn();
     const applyGroupingView = vi.fn();
+    const invalidateWorkerProjectionCache = vi.fn();
     const onAuditLog = vi.fn();
 
     groupedDataProvider.applySnapshot({
@@ -127,6 +129,7 @@ describe('GridCommandEventService', () => {
         getDataProvider: () => groupedDataProvider,
         toggleGroupExpanded,
         applyGroupingView,
+        invalidateWorkerProjectionCache,
         getAuditLogHook: () => onAuditLog
       })
     );
@@ -159,6 +162,7 @@ describe('GridCommandEventService', () => {
     expect(toggleGroupExpanded).toHaveBeenCalledTimes(1);
     expect(toggleGroupExpanded).toHaveBeenCalledWith('region:APAC');
     expect(applyGroupingView).toHaveBeenCalledTimes(1);
+    expect(invalidateWorkerProjectionCache).toHaveBeenCalledTimes(1);
     expect(onAuditLog).toHaveBeenCalledWith({
       eventName: 'editCommit',
       rowIndex: 1,

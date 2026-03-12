@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 46 - Worker Prewarm Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 1080px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 46 - Worker Prewarm Smoke</h1>
+    <p>
+      E1 worker prewarm smoke example입니다. cold grid는 첫 대용량 sort 시점에 worker를 만들고,
+      prewarmed grid는 생성 직후 sort/filter/group/pivot/tree worker를 먼저 올려 첫 offload 지연을 줄입니다.
+      같은 페이지에서 둘을 번갈아 재생성해 worker 생성 시점과 재사용 여부를 확인합니다.
+    </p>
+
+    <div class="toolbar">
+      <button id="create-cold" type="button">create cold grid</button>
+      <button id="create-prewarmed" type="button">create prewarmed grid</button>
+      <button id="run-sort" type="button">run sort</button>
+      <button id="export-visible" type="button">export visible</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>Runtime State</h2>
+        <pre id="state-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Worker Activity</h2>
+        <pre id="worker-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Preview</h2>
+        <pre id="preview-panel">No export yet.</pre>
+      </section>
+      <section class="panel">
+        <h2>Action Log</h2>
+        <pre id="log-panel">Ready</pre>
+      </section>
+    </div>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const workerUrls = [];
+      const workerMessages = [];
+      const workerCounts = {
+        sort: 0,
+        filter: 0,
+        group: 0,
+        pivot: 0,
+        tree: 0
+      };
+      const NativeWorker = window.Worker;
+
+      if (typeof NativeWorker === 'function') {
+        function inferWorkerKind(url) {
+          if (url.indexOf('sort.worker.js') >= 0) {
+            return 'sort';
+          }
+          if (url.indexOf('filter.worker.js') >= 0) {
+            return 'filter';
+          }
+          if (url.indexOf('group.worker.js') >= 0) {
+            return 'group';
+          }
+          if (url.indexOf('pivot.worker.js') >= 0) {
+            return 'pivot';
+          }
+          if (url.indexOf('tree.worker.js') >= 0) {
+            return 'tree';
+          }
+          return 'unknown';
+        }
+
+        window.Worker = function WrappedWorker(url, options) {
+          const worker = new NativeWorker(url, options);
+          const workerUrl = String(url);
+          const kind = inferWorkerKind(workerUrl);
+          workerUrls.push(workerUrl);
+          if (workerCounts[kind] !== undefined) {
+            workerCounts[kind] += 1;
+          }
+
+          const originalPostMessage = worker.postMessage.bind(worker);
+          worker.postMessage = function wrappedPostMessage(message, transfer) {
+            workerMessages.unshift({
+              direction: 'main->worker',
+              kind,
+              type: message && typeof message === 'object' ? message.type : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+            return originalPostMessage(message, transfer);
+          };
+
+          worker.addEventListener('message', (event) => {
+            const message = event.data;
+            workerMessages.unshift({
+              direction: 'worker->main',
+              kind,
+              status: message && typeof message === 'object' ? message.status : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+          });
+
+          return worker;
+        };
+        window.Worker.prototype = NativeWorker.prototype;
+      }
+
+      const statePanel = document.getElementById('state-panel');
+      const workerPanel = document.getElementById('worker-panel');
+      const previewPanel = document.getElementById('preview-panel');
+      const logPanel = document.getElementById('log-panel');
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 240, type: 'text' },
+        { id: 'region', header: 'Region', width: 120, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+      const rowData = Array.from({ length: 180 }, (_, index) => ({
+        id: index + 1,
+        name: 'Warm-' + String(index + 1).padStart(3, '0'),
+        region: ['KR', 'US', 'JP'][index % 3],
+        status: index % 2 === 0 ? 'active' : 'hold',
+        score: (index * 41) % 1000,
+        updatedAt: new Date(Date.now() - index * 60000).toISOString()
+      }));
+
+      let grid = null;
+      let currentMode = 'cold';
+
+      function pushLog(message) {
+        const lines = logPanel.textContent ? logPanel.textContent.split('\n') : [];
+        lines.unshift(new Date().toLocaleTimeString('ko-KR') + ' - ' + message);
+        logPanel.textContent = lines.slice(0, 14).join('\n');
+      }
+
+      function resetWorkerActivity() {
+        workerUrls.length = 0;
+        workerMessages.length = 0;
+        workerCounts.sort = 0;
+        workerCounts.filter = 0;
+        workerCounts.group = 0;
+        workerCounts.pivot = 0;
+        workerCounts.tree = 0;
+      }
+
+      function renderPanels() {
+        statePanel.textContent = JSON.stringify(
+          {
+            mode: currentMode,
+            sortModel: grid ? grid.getSortModel() : [],
+            visibleRowRange: grid ? grid.getVisibleRowRange() : null,
+            rowModelState: grid ? grid.getRowModelState() : null,
+            workerRuntime: {
+              enabled: true,
+              largeDataThreshold: 100,
+              prewarm: currentMode === 'prewarm'
+            }
+          },
+          null,
+          2
+        );
+
+        workerPanel.textContent = JSON.stringify(
+          {
+            workerCounts,
+            urls: workerUrls.slice(),
+            messages: workerMessages.slice(0, 12)
+          },
+          null,
+          2
+        );
+      }
+
+      async function refreshPreview() {
+        if (!grid) {
+          previewPanel.textContent = 'No grid.';
+          return;
+        }
+
+        const result = await grid.exportCsv({
+          includeHeaders: false
+        });
+        previewPanel.textContent = result.content.split('\n').slice(0, 8).join('\n');
+      }
+
+      function destroyGrid() {
+        if (!grid) {
+          return;
+        }
+
+        grid.destroy();
+        grid = null;
+      }
+
+      function createGrid(prewarm) {
+        destroyGrid();
+        resetWorkerActivity();
+        currentMode = prewarm ? 'prewarm' : 'cold';
+        grid = new HGrid.Grid(document.getElementById('grid'), {
+          columns,
+          rowData,
+          height: 420,
+          rowHeight: 28,
+          overscan: 6,
+          workerRuntime: {
+            enabled: true,
+            assetBaseUrl: '../packages/grid-core/dist',
+            timeoutMs: 4000,
+            largeDataThreshold: 100,
+            prewarm
+          }
+        });
+
+        pushLog('created ' + (prewarm ? 'prewarmed' : 'cold') + ' grid');
+        renderPanels();
+        void refreshPreview();
+      }
+
+      async function runSort() {
+        if (!grid) {
+          return;
+        }
+
+        await grid.setSortModel([{ columnId: 'score', direction: 'desc' }]);
+        pushLog('sort score desc / sortWorkers=' + String(workerCounts.sort));
+        renderPanels();
+        await refreshPreview();
+      }
+
+      function getSnapshot() {
+        return {
+          currentMode,
+          sortModel: grid ? grid.getSortModel() : [],
+          workerCounts: {
+            sort: workerCounts.sort,
+            filter: workerCounts.filter,
+            group: workerCounts.group,
+            pivot: workerCounts.pivot,
+            tree: workerCounts.tree
+          },
+          workerUrls: workerUrls.slice(),
+          workerMessages: workerMessages.slice(0, 12)
+        };
+      }
+
+      document.getElementById('create-cold').addEventListener('click', () => {
+        createGrid(false);
+      });
+      document.getElementById('create-prewarmed').addEventListener('click', () => {
+        createGrid(true);
+      });
+      document.getElementById('run-sort').addEventListener('click', () => {
+        void runSort();
+      });
+      document.getElementById('export-visible').addEventListener('click', () => {
+        void refreshPreview();
+      });
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderPanels();
+        pushLog('inspect');
+      });
+
+      window.__example46 = {
+        createColdGrid() {
+          createGrid(false);
+        },
+        createPrewarmedGrid() {
+          createGrid(true);
+        },
+        runSort,
+        getSnapshot
+      };
+
+      createGrid(false);
+    </script>
+  </body>
+</html>

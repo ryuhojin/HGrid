@@ -1,4 +1,4 @@
-export type WorkerOperationType = 'sort' | 'filter' | (string & {});
+export type WorkerOperationType = 'sort' | 'filter' | 'group' | 'pivot' | 'tree' | (string & {});
 export type WorkerResponseStatus = 'ok' | 'canceled' | 'error';
 
 export interface WorkerOperationRequest<TPayload = unknown, TType extends string = WorkerOperationType> {
@@ -95,41 +95,59 @@ function addTransferable(uniqueTransferables: Set<Transferable>, candidate: unkn
 function traverseTransferables(source: unknown, uniqueTransferables: Set<Transferable>, visited: WeakSet<object>): void {
   addTransferable(uniqueTransferables, source);
 
-  if (!isRecord(source)) {
+  if (isKnownTransferable(source) || ArrayBuffer.isView(source)) {
     return;
   }
 
-  if (visited.has(source)) {
-    return;
-  }
-  visited.add(source);
+  const traversable = source as unknown;
 
-  if (Array.isArray(source)) {
-    for (let index = 0; index < source.length; index += 1) {
-      traverseTransferables(source[index], uniqueTransferables, visited);
+  if (Array.isArray(traversable)) {
+    if (visited.has(traversable)) {
+      return;
+    }
+    visited.add(traversable);
+    for (let index = 0; index < traversable.length; index += 1) {
+      traverseTransferables(traversable[index], uniqueTransferables, visited);
     }
     return;
   }
 
-  if (source instanceof Map) {
-    source.forEach((mapValue, mapKey) => {
+  if (traversable instanceof Map) {
+    if (visited.has(traversable)) {
+      return;
+    }
+    visited.add(traversable);
+    traversable.forEach((mapValue, mapKey) => {
       traverseTransferables(mapKey, uniqueTransferables, visited);
       traverseTransferables(mapValue, uniqueTransferables, visited);
     });
     return;
   }
 
-  if (source instanceof Set) {
-    source.forEach((setValue) => {
+  if (traversable instanceof Set) {
+    if (visited.has(traversable)) {
+      return;
+    }
+    visited.add(traversable);
+    traversable.forEach((setValue) => {
       traverseTransferables(setValue, uniqueTransferables, visited);
     });
     return;
   }
 
-  const keys = Object.keys(source);
+  if (!isRecord(traversable)) {
+    return;
+  }
+
+  if (visited.has(traversable)) {
+    return;
+  }
+  visited.add(traversable);
+
+  const keys = Object.keys(traversable);
   for (let index = 0; index < keys.length; index += 1) {
     const key = keys[index];
-    traverseTransferables(source[key], uniqueTransferables, visited);
+    traverseTransferables(traversable[key], uniqueTransferables, visited);
   }
 }
 

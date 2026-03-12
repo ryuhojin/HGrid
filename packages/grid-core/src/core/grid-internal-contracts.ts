@@ -15,6 +15,7 @@ export interface GridVisibleRowRange {
 
 export interface GridRendererPort {
   setOptions(options: GridOptions): void;
+  refreshDataView(): void;
   setColumns(columns: ColumnDef[]): void;
   setTheme(themeTokens: Record<string, string>): void;
   getState(): GridRendererState;
@@ -38,8 +39,10 @@ export interface GridDerivedViewRowModelPort {
   getState(): RowModelState;
   setRowCount(rowCount: number): void;
   setBaseViewToData(viewToData: ViewToDataMapping | null): void;
+  setBaseViewToDataTrusted(viewToData: Int32Array | null): void;
   setBaseIdentityMapping(): void;
   setFilterViewToData(viewToData: ViewToDataMapping | null): void;
+  setFilterViewToDataTrusted(viewToData: Int32Array | null): void;
 }
 
 export interface GridExportDataPort {
@@ -71,6 +74,10 @@ export interface GridDerivedViewControllerPort {
   toggleTreeExpanded(nodeKey: RowKey): Promise<void> | void;
   applyGroupingView(): Promise<void> | void;
   applyTreeView(): Promise<void> | void;
+}
+
+export interface GridWorkerProjectionCachePort {
+  invalidateWorkerProjectionCache(): void;
 }
 
 export interface GridAuditLogPort {

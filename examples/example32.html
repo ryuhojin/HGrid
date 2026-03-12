@@ -183,7 +183,11 @@
         },
         height: 460,
         rowHeight: 30,
-        overscan: 8
+        overscan: 8,
+        workerRuntime: {
+          assetBaseUrl: '../packages/grid-core/dist',
+          timeoutMs: 180000
+        }
       });
 
       const applyMode = async (mode) => {

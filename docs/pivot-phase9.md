@@ -60,4 +60,4 @@
 
 ## 성능 스모크
 - `scripts/run-e2e.mjs`는 `__example33.runPerfScenario` 동안 heartbeat(`setInterval(16ms)`) `maxGap`을 측정한다.
-- 현재 기준은 `maxGap < 420ms`이며, 그룹/트리 시나리오(`example31`, `example32`)와 동일한 방식으로 검증한다.
+- 현재 smoke 기준은 `maxGap < 420ms`다.

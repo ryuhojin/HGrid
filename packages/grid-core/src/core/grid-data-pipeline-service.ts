@@ -78,12 +78,20 @@ export class GridDataPipelineService {
     }
 
     if (params.sortMapping) {
-      params.rowModel.setBaseViewToData(params.sortMapping);
+      if (params.sortMapping instanceof Int32Array) {
+        params.rowModel.setBaseViewToDataTrusted(params.sortMapping);
+      } else {
+        params.rowModel.setBaseViewToData(params.sortMapping);
+      }
     } else {
       params.rowModel.setBaseIdentityMapping();
     }
 
-    params.rowModel.setFilterViewToData(params.filterMapping);
+    if (params.filterMapping instanceof Int32Array) {
+      params.rowModel.setFilterViewToDataTrusted(params.filterMapping);
+    } else {
+      params.rowModel.setFilterViewToData(params.filterMapping);
+    }
 
     return {
       dataProvider: params.sourceDataProvider,

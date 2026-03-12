@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 44 - Worker Dispatcher Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 1180px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 44 - Worker Dispatcher Smoke</h1>
+    <p>
+      E1.2 worker dispatcher 연결 smoke example입니다. sort / filter / group / pivot / tree 버튼을 누르면
+      `workerRuntime.assetBaseUrl` 기반 worker가 생성되고, rowCount `126`에 맞춰 threshold를 `50`으로 내려 실제 offload를 확인합니다.
+      page-level `Worker` wrapper가 생성 URL과 메시지 흐름을 기록합니다.
+      callback 기반 comparator / reducer를 쓰지 않는 serializable 경로만 사용해서 실제 worker offload 경로를 확인할 수 있습니다.
+    </p>
+
+    <div class="toolbar">
+      <button id="sort-score" type="button">sort score desc</button>
+      <button id="filter-active" type="button">filter active</button>
+      <button id="group-region" type="button">group region</button>
+      <button id="pivot-status" type="button">pivot status</button>
+      <button id="tree-view" type="button">tree view</button>
+      <button id="reset-flat" type="button">reset flat</button>
+    </div>
+    <div class="toolbar">
+      <button id="export-visible" type="button">export visible CSV</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>Grid State</h2>
+        <pre id="state-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Worker Runtime</h2>
+        <pre id="worker-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Export Preview</h2>
+        <pre id="preview-panel">No export yet.</pre>
+      </section>
+      <section class="panel">
+        <h2>Action Log</h2>
+        <pre id="log-panel">Ready</pre>
+      </section>
+    </div>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const workerUrls = [];
+      const workerMessages = [];
+      const workerCounts = {
+        sort: 0,
+        filter: 0,
+        group: 0,
+        pivot: 0,
+        tree: 0
+      };
+      const NativeWorker = window.Worker;
+
+      if (typeof NativeWorker === 'function') {
+        function inferWorkerKind(url) {
+          if (url.indexOf('sort.worker.js') >= 0) {
+            return 'sort';
+          }
+          if (url.indexOf('filter.worker.js') >= 0) {
+            return 'filter';
+          }
+          if (url.indexOf('group.worker.js') >= 0) {
+            return 'group';
+          }
+          if (url.indexOf('pivot.worker.js') >= 0) {
+            return 'pivot';
+          }
+          if (url.indexOf('tree.worker.js') >= 0) {
+            return 'tree';
+          }
+          return 'unknown';
+        }
+
+        window.Worker = function WrappedWorker(url, options) {
+          const worker = new NativeWorker(url, options);
+          const workerUrl = String(url);
+          const kind = inferWorkerKind(workerUrl);
+          workerUrls.push(workerUrl);
+          if (workerCounts[kind] !== undefined) {
+            workerCounts[kind] += 1;
+          }
+
+          const originalPostMessage = worker.postMessage.bind(worker);
+          worker.postMessage = function wrappedPostMessage(message, transfer) {
+            workerMessages.unshift({
+              direction: 'main->worker',
+              kind,
+              type: message && typeof message === 'object' ? message.type : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+            return originalPostMessage(message, transfer);
+          };
+
+          worker.addEventListener('message', (event) => {
+            const message = event.data;
+            workerMessages.unshift({
+              direction: 'worker->main',
+              kind,
+              status: message && typeof message === 'object' ? message.status : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+          });
+
+          return worker;
+        };
+        window.Worker.prototype = NativeWorker.prototype;
+      }
+
+      const statePanel = document.getElementById('state-panel');
+      const workerPanel = document.getElementById('worker-panel');
+      const previewPanel = document.getElementById('preview-panel');
+      const logPanel = document.getElementById('log-panel');
+      const treeRootSize = 18;
+      const childCountPerRoot = 6;
+      const rowData = [];
+
+      function pushLog(message) {
+        const lines = logPanel.textContent ? logPanel.textContent.split('\n') : [];
+        lines.unshift(new Date().toLocaleTimeString('ko-KR') + ' - ' + message);
+        logPanel.textContent = lines.slice(0, 14).join('\n');
+      }
+
+      for (let rootIndex = 0; rootIndex < treeRootSize; rootIndex += 1) {
+        const rootId = rootIndex + 1;
+        rowData.push({
+          id: rootId,
+          parentId: null,
+          hasChildren: true,
+          name: 'Root-' + String(rootId).padStart(2, '0'),
+          region: ['KR', 'US', 'JP'][rootIndex % 3],
+          status: rootIndex % 2 === 0 ? 'active' : 'idle',
+          score: 100 - rootIndex,
+          updatedAt: new Date(Date.now() - rootIndex * 120000).toISOString()
+        });
+
+        for (let childIndex = 0; childIndex < childCountPerRoot; childIndex += 1) {
+          const id = rootId * 100 + childIndex + 1;
+          rowData.push({
+            id,
+            parentId: rootId,
+            hasChildren: false,
+            name: 'Leaf-' + String(rootId).padStart(2, '0') + '-' + String(childIndex + 1).padStart(2, '0'),
+            region: ['KR', 'US', 'JP'][(rootIndex + childIndex) % 3],
+            status: childIndex % 2 === 0 ? 'active' : 'hold',
+            score: (rootIndex + 1) * 10 + childIndex,
+            updatedAt: new Date(Date.now() - id * 4000).toISOString()
+          });
+        }
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 110, type: 'number' },
+        { id: 'name', header: 'Name', width: 240, type: 'text' },
+        { id: 'region', header: 'Region', width: 120, type: 'text' },
+        { id: 'status', header: 'Status', width: 120, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        workerRuntime: {
+          enabled: true,
+          assetBaseUrl: '../packages/grid-core/dist',
+          timeoutMs: 4000,
+          largeDataThreshold: 50
+        }
+      });
+
+      function inspectState() {
+        return {
+          sortModel: grid.getSortModel(),
+          state: grid.getState(),
+          visibleRowRange: grid.getVisibleRowRange(),
+          groupedRows: grid.getGroupedRowsSnapshot().slice(0, 4),
+          treeRows: grid.getTreeRowsSnapshot().slice(0, 4),
+          rowModelState: grid.getRowModelState()
+        };
+      }
+
+      function renderPanels() {
+        statePanel.textContent = JSON.stringify(inspectState(), null, 2);
+        workerPanel.textContent = JSON.stringify(
+          {
+            createdWorkers: workerCounts,
+            urls: workerUrls.slice(-8),
+            messages: workerMessages.slice(0, 10)
+          },
+          null,
+          2
+        );
+      }
+
+      async function resetFlatState() {
+        await grid.setTreeDataOptions({
+          enabled: false,
+          idField: 'id',
+          parentIdField: 'parentId',
+          hasChildrenField: 'hasChildren',
+          treeColumnId: 'name',
+          defaultExpanded: true
+        });
+        await grid.setPivotModel([]);
+        await grid.setOptions({
+          pivoting: {
+            mode: 'client',
+            values: []
+          }
+        });
+        await grid.setGroupModel([]);
+        await grid.setSortModel([]);
+        await grid.setFilterModel({});
+      }
+
+      document.getElementById('sort-score').addEventListener('click', async () => {
+        await resetFlatState();
+        await grid.setSortModel([{ columnId: 'score', direction: 'desc' }]);
+        pushLog('sort score desc');
+        renderPanels();
+      });
+
+      document.getElementById('filter-active').addEventListener('click', async () => {
+        await resetFlatState();
+        await grid.setFilterModel({
+          status: {
+            kind: 'text',
+            operator: 'equals',
+            value: 'active'
+          }
+        });
+        pushLog('filter status = active');
+        renderPanels();
+      });
+
+      document.getElementById('group-region').addEventListener('click', async () => {
+        await resetFlatState();
+        await grid.setGroupModel([{ columnId: 'region' }]);
+        pushLog('group region');
+        renderPanels();
+      });
+
+      document.getElementById('pivot-status').addEventListener('click', async () => {
+        await resetFlatState();
+        await grid.setOptions({
+          pivoting: {
+            mode: 'client',
+            values: [{ columnId: 'score', type: 'sum' }]
+          }
+        });
+        await grid.setPivotModel([{ columnId: 'status' }]);
+        pushLog('pivot status / sum(score)');
+        renderPanels();
+      });
+
+      document.getElementById('tree-view').addEventListener('click', async () => {
+        await resetFlatState();
+        await grid.setTreeDataOptions({
+          enabled: true,
+          idField: 'id',
+          parentIdField: 'parentId',
+          hasChildrenField: 'hasChildren',
+          treeColumnId: 'name',
+          defaultExpanded: true
+        });
+        pushLog('tree data enabled');
+        renderPanels();
+      });
+
+      document.getElementById('reset-flat').addEventListener('click', async () => {
+        await resetFlatState();
+        pushLog('reset flat');
+        renderPanels();
+      });
+
+      document.getElementById('export-visible').addEventListener('click', async () => {
+        const result = await grid.exportCsv({
+          scope: 'visible',
+          includeHeaders: false
+        });
+        previewPanel.textContent = result.content;
+        pushLog('export visible CSV');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        console.log('example44 inspect', inspectState());
+        pushLog('inspect printed to console');
+        renderPanels();
+      });
+
+      window.__example44 = {
+        grid,
+        inspectState,
+        getSnapshot() {
+          return {
+            state: inspectState(),
+            workerUrls: workerUrls.slice(),
+            workerMessages: workerMessages.slice(),
+            workerCounts: { ...workerCounts }
+          };
+        },
+        workerUrls,
+        workerMessages,
+        workerCounts
+      };
+
+      renderPanels();
+    </script>
+  </body>
+</html>

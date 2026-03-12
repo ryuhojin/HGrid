@@ -47,6 +47,7 @@ interface PivotRowAccumulator {
   rowGroupToken: string;
   rowGroupValues: GridRowData;
   aggregates: Map<string, PivotAggregateState>;
+  customValueDataIndexes: Map<string, number[]> | null;
 }
 
 export interface PivotExecutionRequest {
@@ -58,6 +59,7 @@ export interface PivotExecutionRequest {
   rowGroupModel: GroupModelItem[];
   pivotModel: PivotModelItem[];
   pivotValues: PivotValueDef[];
+  customValueColumnIds?: string[];
 }
 
 export interface PivotExecutionContext {
@@ -73,6 +75,13 @@ export interface PivotExecutionResult {
   pivotColumnCount: number;
   pivotKeyCount: number;
   sourceRowCount: number;
+  customValueDataIndexesByCell?: Array<{
+    rowKey: string;
+    columnId: string;
+    valueColumnId: string;
+    pivotLabel: string;
+    dataIndexes: number[];
+  }>;
 }
 
 export interface PivotExecutor {
@@ -185,11 +194,16 @@ function normalizePivotModel(pivotModel: PivotModelItem[], columns: ColumnDef[])
   return descriptors;
 }
 
-function normalizePivotValues(pivotValues: PivotValueDef[], columns: ColumnDef[]): PivotValueDescriptor[] {
+function normalizePivotValues(
+  pivotValues: PivotValueDef[],
+  columns: ColumnDef[],
+  customValueColumnIds?: string[]
+): PivotValueDescriptor[] {
   if (!Array.isArray(pivotValues) || pivotValues.length === 0) {
     return [];
   }
 
+  const customValueColumnIdSet = new Set<string>(Array.isArray(customValueColumnIds) ? customValueColumnIds : []);
   const descriptors: PivotValueDescriptor[] = [];
   const seen = new Set<string>();
   for (let index = 0; index < pivotValues.length; index += 1) {
@@ -212,7 +226,7 @@ function normalizePivotValues(pivotValues: PivotValueDef[], columns: ColumnDef[]
     descriptors.push({
       columnId,
       column,
-      type: item.type ?? (typeof item.reducer === 'function' ? 'custom' : 'sum'),
+      type: customValueColumnIdSet.has(columnId) ? 'custom' : item.type ?? (typeof item.reducer === 'function' ? 'custom' : 'sum'),
       reducer: typeof item.reducer === 'function' ? item.reducer : undefined
     });
   }
@@ -418,7 +432,8 @@ export class CooperativePivotExecutor implements PivotExecutor {
       const sourceOrder = request.sourceOrder ?? createIdentitySourceOrder(request.rowCount);
       const rowGroupDescriptors = normalizeRowGroupModel(request.rowGroupModel, request.columns);
       const pivotKeyDescriptors = normalizePivotModel(request.pivotModel, request.columns);
-      const pivotValueDescriptors = normalizePivotValues(request.pivotValues, request.columns);
+      const captureCustomValueIndexes = Array.isArray(request.customValueColumnIds) && request.customValueColumnIds.length > 0;
+      const pivotValueDescriptors = normalizePivotValues(request.pivotValues, request.columns, request.customValueColumnIds);
       const yieldInterval = normalizeYieldInterval(context?.yieldInterval);
       const processedCounter = { value: 0 };
       const maxRowCount = Math.max(0, Math.floor(request.rowCount));
@@ -461,7 +476,8 @@ export class CooperativePivotExecutor implements PivotExecutor {
           rowAccumulator = {
             rowGroupToken,
             rowGroupValues,
-            aggregates: new Map<string, PivotAggregateState>()
+            aggregates: new Map<string, PivotAggregateState>(),
+            customValueDataIndexes: captureCustomValueIndexes ? new Map<string, number[]>() : null
           };
           rowAccumulatorByToken.set(rowGroupToken, rowAccumulator);
           rowAccumulatorOrder.push(rowAccumulator);
@@ -508,6 +524,14 @@ export class CooperativePivotExecutor implements PivotExecutor {
 
           const cellValue = request.dataProvider.getValue(dataIndex, valueDescriptor.columnId);
           updateAggregateState(aggregateState, valueDescriptor.type, cellValue);
+          if (captureCustomValueIndexes && valueDescriptor.type === 'custom' && rowAccumulator.customValueDataIndexes) {
+            let cellIndexes = rowAccumulator.customValueDataIndexes.get(aggregateKey);
+            if (!cellIndexes) {
+              cellIndexes = [];
+              rowAccumulator.customValueDataIndexes.set(aggregateKey, cellIndexes);
+            }
+            cellIndexes.push(dataIndex);
+          }
         }
 
         processedCounter.value += 1;
@@ -550,10 +574,12 @@ export class CooperativePivotExecutor implements PivotExecutor {
       }
 
       const rows: GridRowData[] = [];
+      const customValueDataIndexesByCell: PivotExecutionResult['customValueDataIndexesByCell'] = [];
       for (let rowIndex = 0; rowIndex < rowAccumulatorOrder.length; rowIndex += 1) {
         const rowAccumulator = rowAccumulatorOrder[rowIndex];
+        const rowKey = rowAccumulator.rowGroupToken.length > 0 ? rowAccumulator.rowGroupToken : `pivot-row-${String(rowIndex + 1)}`;
         const row: GridRowData = {
-          __pivot_row_key: rowAccumulator.rowGroupToken.length > 0 ? rowAccumulator.rowGroupToken : `pivot-row-${String(rowIndex + 1)}`,
+          __pivot_row_key: rowKey,
           ...rowAccumulator.rowGroupValues
         };
         const aggregateEntries = Array.from(rowAccumulator.aggregates.entries());
@@ -575,12 +601,25 @@ export class CooperativePivotExecutor implements PivotExecutor {
           }
 
           const valueDescriptor = pivotValueDescriptors[valueDescriptorIndex];
-          row[columnEntry.columnId] = finalizeAggregateValue(
-            aggregateState,
-            valueDescriptor,
-            rowAccumulator.rowGroupToken,
-            columnEntry.pivotLabel
-          );
+          if (captureCustomValueIndexes && valueDescriptor.type === 'custom') {
+            const customDataIndexes = rowAccumulator.customValueDataIndexes?.get(aggregateKey);
+            if (customDataIndexes && customDataIndexes.length > 0) {
+              customValueDataIndexesByCell.push({
+                rowKey,
+                columnId: columnEntry.columnId,
+                valueColumnId: valueDescriptor.columnId,
+                pivotLabel: columnEntry.pivotLabel,
+                dataIndexes: customDataIndexes.slice()
+              });
+            }
+          } else {
+            row[columnEntry.columnId] = finalizeAggregateValue(
+              aggregateState,
+              valueDescriptor,
+              rowAccumulator.rowGroupToken,
+              columnEntry.pivotLabel
+            );
+          }
         }
 
         rows.push(row);
@@ -597,7 +636,8 @@ export class CooperativePivotExecutor implements PivotExecutor {
         rowGroupColumnIds: rowGroupDescriptors.map((descriptor) => descriptor.columnId),
         pivotColumnCount: columns.length - rowGroupDescriptors.length,
         pivotKeyCount: pivotColumnOrder.length,
-        sourceRowCount: maxRowCount
+        sourceRowCount: maxRowCount,
+        customValueDataIndexesByCell: customValueDataIndexesByCell.length > 0 ? customValueDataIndexesByCell : undefined
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to execute pivot model';

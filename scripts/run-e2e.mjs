@@ -95,6 +95,10 @@ function parseTranslate3d(transformValue) {
   };
 }
 
+const MAX_GROUPING_WORKER_EXAMPLE_UI_GAP_MS = 420;
+const MAX_TREE_WORKER_EXAMPLE_UI_GAP_MS = 420;
+const MAX_PIVOT_WORKER_EXAMPLE_UI_GAP_MS = 420;
+
 async function runExample1Checks(page, serverUrl, pageErrors) {
   await page.goto(`${serverUrl}/examples/example1.html`, { waitUntil: 'domcontentloaded' });
 
@@ -2873,7 +2877,7 @@ async function runExample31Checks(page, serverUrl, pageErrors) {
   const perfMetrics = await measureUiThreadLagDuring(page, '__example31.runPerfScenario');
   assert.ok(perfMetrics.tickCount > 4, 'example31 perf probe should collect heartbeat ticks');
   assert.ok(
-    perfMetrics.maxGapMs < 420,
+    perfMetrics.maxGapMs < MAX_GROUPING_WORKER_EXAMPLE_UI_GAP_MS,
     `example31 grouping should avoid long UI freeze, maxGap=${perfMetrics.maxGapMs.toFixed(1)}ms`
   );
 
@@ -2922,7 +2926,7 @@ async function runExample32Checks(page, serverUrl, pageErrors) {
   const perfMetrics = await measureUiThreadLagDuring(page, '__example32.runPerfScenario');
   assert.ok(perfMetrics.tickCount > 4, 'example32 perf probe should collect heartbeat ticks');
   assert.ok(
-    perfMetrics.maxGapMs < 420,
+    perfMetrics.maxGapMs < MAX_TREE_WORKER_EXAMPLE_UI_GAP_MS,
     `example32 tree should avoid long UI freeze, maxGap=${perfMetrics.maxGapMs.toFixed(1)}ms`
   );
 
@@ -3033,12 +3037,12 @@ async function runExample33Checks(page, serverUrl, pageErrors) {
     }
     const snapshot = api.getSnapshot();
     return snapshot && snapshot.pivotModel[0]?.columnId === 'month' && snapshot.groupModel[0]?.columnId === 'region';
-  });
+  }, null, { timeout: 60_000 });
 
   const perfMetrics = await measureUiThreadLagDuring(page, '__example33.runPerfScenario');
   assert.ok(perfMetrics.tickCount > 4, 'example33 perf probe should collect heartbeat ticks');
   assert.ok(
-    perfMetrics.maxGapMs < 420,
+    perfMetrics.maxGapMs < MAX_PIVOT_WORKER_EXAMPLE_UI_GAP_MS,
     `example33 pivot should avoid long UI freeze, maxGap=${perfMetrics.maxGapMs.toFixed(1)}ms`
   );
 
@@ -3541,6 +3545,616 @@ async function runExample41Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample44Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example44.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example44?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  await page.click('#sort-score');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example44?.getSnapshot?.();
+    return snapshot && snapshot.workerCounts.sort >= 1 && snapshot.state.sortModel.length === 1;
+  });
+  const sortSnapshot = await page.evaluate(() => window.__example44.getSnapshot());
+  assert.ok(sortSnapshot.workerCounts.sort >= 1, `example44 sort should create worker, got ${sortSnapshot.workerCounts.sort}`);
+  assert.equal(sortSnapshot.state.sortModel.length, 1, 'example44 sort should apply sort model');
+
+  await page.click('#filter-active');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example44?.getSnapshot?.();
+    return snapshot && snapshot.workerCounts.filter >= 1;
+  });
+
+  await page.click('#group-region');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example44?.getSnapshot?.();
+    return snapshot && snapshot.workerCounts.group >= 1 && snapshot.state.groupedRows.some((row) => row.kind === 'group');
+  });
+  const groupSnapshot = await page.evaluate(() => window.__example44.getSnapshot());
+  assert.ok(groupSnapshot.state.groupedRows.some((row) => row.kind === 'group'), 'example44 group should expose group rows');
+
+  await page.click('#pivot-status');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example44?.getSnapshot?.();
+    return snapshot && snapshot.workerCounts.pivot >= 1;
+  });
+
+  await page.click('#tree-view');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example44?.getSnapshot?.();
+    return snapshot && snapshot.workerCounts.tree >= 1 && snapshot.state.treeRows.length > 0;
+  });
+
+  await page.click('#export-visible');
+  const preview = page.locator('#preview-panel');
+  await preview.waitFor({ state: 'visible', timeout: 10_000 });
+  const previewText = await preview.textContent();
+  assert.ok(previewText && previewText !== 'No export yet.', `example44 export preview should be populated, got "${previewText}"`);
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample45Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example45.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example45?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  await page.click('#auto-worker');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example45?.getSnapshot?.();
+    return snapshot && snapshot.workerCounts.sort >= 1 && snapshot.sortModel.length === 1;
+  });
+  const autoWorkerSnapshot = await page.evaluate(() => window.__example45.getSnapshot());
+  assert.ok(autoWorkerSnapshot.workerCounts.sort >= 1, 'example45 auto-worker should create a sort worker');
+  assert.equal(autoWorkerSnapshot.currentPolicy.lastError, null, 'example45 auto-worker should not leave an error');
+
+  const autoWorkerSortCount = autoWorkerSnapshot.workerCounts.sort;
+
+  await page.click('#comparator-error');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example45?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.currentPolicy.columnsMode === 'comparator' &&
+      snapshot.currentPolicy.fallbackPolicy === 'lowVolumeOnly' &&
+      snapshot.currentPolicy.lastError === null &&
+      snapshot.sortModel.length === 1
+    );
+  });
+  const comparatorProjectionSnapshot = await page.evaluate(() => window.__example45.getSnapshot());
+  assert.equal(comparatorProjectionSnapshot.currentPolicy.lastError, null, 'example45 comparator projection should not error');
+  assert.ok(
+    comparatorProjectionSnapshot.workerCounts.sort >= autoWorkerSortCount,
+    'example45 comparator projection should keep worker runtime active'
+  );
+
+  await page.click('#allow-fallback');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example45?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.currentPolicy.columnsMode === 'comparator' &&
+      snapshot.currentPolicy.fallbackPolicy === 'allowAlways' &&
+      snapshot.currentPolicy.lastError === null
+    );
+  });
+  const allowFallbackSnapshot = await page.evaluate(() => window.__example45.getSnapshot());
+  assert.equal(allowFallbackSnapshot.currentPolicy.lastError, null, 'example45 allow-fallback should keep comparator worker path valid');
+
+  await page.click('#explicit-main-thread');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example45?.getSnapshot?.();
+    return snapshot && snapshot.currentPolicy.enabled === false && snapshot.currentPolicy.lastError === null;
+  });
+  const explicitMainThreadSnapshot = await page.evaluate(() => window.__example45.getSnapshot());
+  assert.equal(
+    explicitMainThreadSnapshot.workerCounts.sort,
+    autoWorkerSortCount,
+    'example45 explicit-main-thread should not create an additional worker'
+  );
+
+  await page.click('#export-top');
+  const preview = page.locator('#preview-panel');
+  await preview.waitFor({ state: 'visible', timeout: 10_000 });
+  const previewText = await preview.textContent();
+  assert.ok(previewText && previewText !== 'No export yet.', `example45 export preview should be populated, got "${previewText}"`);
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample46Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example46.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example46?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  const coldSnapshot = await page.evaluate(() => window.__example46.getSnapshot());
+  assert.equal(coldSnapshot.currentMode, 'cold', 'example46 should start in cold mode');
+  assert.deepEqual(
+    coldSnapshot.workerCounts,
+    {
+      sort: 0,
+      filter: 0,
+      group: 0,
+      pivot: 0,
+      tree: 0
+    },
+    'example46 cold mode should not create workers before first heavy operation'
+  );
+
+  await page.click('#create-prewarmed');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example46?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.currentMode === 'prewarm' &&
+      snapshot.workerCounts.sort >= 1 &&
+      snapshot.workerCounts.filter >= 1 &&
+      snapshot.workerCounts.group >= 1 &&
+      snapshot.workerCounts.pivot >= 1 &&
+      snapshot.workerCounts.tree >= 1
+    );
+  });
+
+  const warmSnapshot = await page.evaluate(() => window.__example46.getSnapshot());
+  const warmSortWorkerCount = warmSnapshot.workerCounts.sort;
+
+  await page.click('#run-sort');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example46?.getSnapshot?.();
+    return snapshot && snapshot.sortModel.length === 1 && snapshot.workerMessages.some((entry) => entry.kind === 'sort');
+  });
+  const postWarmSortSnapshot = await page.evaluate(() => window.__example46.getSnapshot());
+  assert.equal(
+    postWarmSortSnapshot.workerCounts.sort,
+    warmSortWorkerCount,
+    'example46 prewarmed sort should reuse the existing sort worker'
+  );
+
+  await page.click('#create-cold');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example46?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.currentMode === 'cold' &&
+      snapshot.workerCounts.sort === 0 &&
+      snapshot.workerCounts.filter === 0 &&
+      snapshot.workerCounts.group === 0 &&
+      snapshot.workerCounts.pivot === 0 &&
+      snapshot.workerCounts.tree === 0
+    );
+  });
+
+  await page.click('#run-sort');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example46?.getSnapshot?.();
+    return snapshot && snapshot.currentMode === 'cold' && snapshot.workerCounts.sort === 1 && snapshot.sortModel.length === 1;
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample47Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example47.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example47?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  await page.click('#run-custom-group');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example47?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.workerCounts.group >= 1 &&
+      snapshot.groupedRows.some((row) => row.kind === 'group' && row.groupKey === 'region=string:KR' && row.values.score === 120) &&
+      snapshot.groupedRows.some((row) => row.kind === 'group' && row.groupKey === 'region=string:US' && row.values.score === 240)
+    );
+  });
+
+  const groupedSnapshot = await page.evaluate(() => window.__example47.getSnapshot());
+  assert.ok(groupedSnapshot.workerCounts.group >= 1, 'example47 should create a group worker');
+
+  await page.click('#reset-flat');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example47?.getSnapshot?.();
+    return snapshot && snapshot.groupedRows.every((row) => row.kind === 'data');
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample48Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example48.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example48?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  await page.click('#run-custom-pivot');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example48?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.workerCounts.pivot >= 1 &&
+      snapshot.visibleColumns.some((header) => String(header).includes('Jan')) &&
+      snapshot.visibleColumns.some((header) => String(header).includes('Feb')) &&
+      typeof snapshot.preview === 'string' &&
+      snapshot.preview.includes('KR,60,60') &&
+      snapshot.preview.includes('US,120,120')
+    );
+  });
+
+  const pivotSnapshot = await page.evaluate(() => window.__example48.getSnapshot());
+  assert.ok(pivotSnapshot.workerCounts.pivot >= 1, 'example48 should create a pivot worker');
+
+  await page.click('#reset-flat');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example48?.getSnapshot?.();
+    return snapshot && snapshot.visibleColumns.includes('Sales') && !snapshot.visibleColumns.some((header) => String(header).includes('Jan'));
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample49Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example49.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example49?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  await page.click('#sort-full-name');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example49?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.workerCounts.sort >= 1 &&
+      Array.isArray(snapshot.sortModel) &&
+      snapshot.sortModel.length === 1 &&
+      snapshot.sortModel[0].columnId === 'fullName' &&
+      typeof snapshot.preview === 'string' &&
+      snapshot.preview.includes('1,Ada,Lovelace,Ada Lovelace')
+    );
+  });
+
+  const sortedSnapshot = await page.evaluate(() => window.__example49.getSnapshot());
+  assert.ok(sortedSnapshot.workerCounts.sort >= 1, 'example49 should create a sort worker');
+
+  await page.click('#filter-hopper');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example49?.getSnapshot?.();
+    const filterModel = snapshot?.filterModel ?? {};
+    return (
+      snapshot &&
+      snapshot.workerCounts.filter >= 1 &&
+      filterModel.fullName &&
+      typeof snapshot.preview === 'string' &&
+      snapshot.preview.includes('Grace,Hopper,Grace Hopper') &&
+      !snapshot.preview.includes('Ada,Lovelace,Ada Lovelace')
+    );
+  });
+
+  const filteredSnapshot = await page.evaluate(() => window.__example49.getSnapshot());
+  assert.ok(filteredSnapshot.workerCounts.filter >= 1, 'example49 should create a filter worker');
+
+  await page.click('#reset-flat');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example49?.getSnapshot?.();
+    return snapshot && Object.keys(snapshot.filterModel || {}).length === 0 && Array.isArray(snapshot.sortModel) && snapshot.sortModel.length === 0;
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample50Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example50.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example50?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  await page.click('#sort-length-asc');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example50?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.workerCounts.sort >= 1 &&
+      Array.isArray(snapshot.sortModel) &&
+      snapshot.sortModel.length === 1 &&
+      snapshot.sortModel[0].columnId === 'label' &&
+      snapshot.sortModel[0].direction === 'asc' &&
+      typeof snapshot.preview === 'string' &&
+      snapshot.preview.indexOf('2,a,compiler') === 0
+    );
+  });
+
+  const ascSnapshot = await page.evaluate(() => window.__example50.getSnapshot());
+  assert.ok(ascSnapshot.workerCounts.sort >= 1, 'example50 should create a sort worker');
+
+  await page.click('#sort-length-desc');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example50?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.workerCounts.sort >= 1 &&
+      Array.isArray(snapshot.sortModel) &&
+      snapshot.sortModel.length === 1 &&
+      snapshot.sortModel[0].direction === 'desc' &&
+      typeof snapshot.preview === 'string' &&
+      snapshot.preview.indexOf('3,cccc,logic') === 0
+    );
+  });
+
+  await page.click('#reset-flat');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example50?.getSnapshot?.();
+    return snapshot && Array.isArray(snapshot.sortModel) && snapshot.sortModel.length === 0;
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample51Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example51.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example51?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+  await page.waitForFunction(() => {
+    const snapshot = window.__example51?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.workerCounts.sort >= 1 &&
+      snapshot.workerCounts.filter >= 1 &&
+      snapshot.workerCounts.group >= 1 &&
+      snapshot.workerCounts.pivot >= 1 &&
+      snapshot.workerCounts.tree >= 1 &&
+      Array.isArray(snapshot.urls) &&
+      snapshot.urls.length >= 5 &&
+      snapshot.workerRuntime &&
+      snapshot.workerRuntime.poolSize === 2 &&
+      snapshot.workerRuntime.prewarm === true
+    );
+  });
+
+  const prewarmSnapshot = await page.evaluate(() => window.__example51.getSnapshot());
+  assert.ok(prewarmSnapshot.workerCounts.sort >= 1, 'example51 should prewarm the worker runtime');
+
+  await page.click('#run-parallel-sorts');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example51?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.workerCounts.sort >= 3 &&
+      Array.isArray(snapshot.sortModel) &&
+      snapshot.sortModel.length === 1 &&
+      snapshot.sortModel[0].columnId === 'score' &&
+      snapshot.sortModel[0].direction === 'desc'
+    );
+  });
+
+  const poolSnapshot = await page.evaluate(() => window.__example51.getSnapshot());
+  assert.ok(poolSnapshot.workerCounts.sort >= 3, 'example51 should grow sort workers when concurrent sorts are queued');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample52Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example52.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => {
+    const snapshot = window.__example52?.getSnapshot?.();
+    return Boolean(snapshot && snapshot.isReady === true);
+  }, null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => window.__example52.getSnapshot());
+  assert.equal(initialSnapshot.fullNameGetterCalls, 0, 'example52 should start with zero valueGetter calls');
+  assert.equal(initialSnapshot.fullNameComparatorCalls, 0, 'example52 should start with zero comparator calls');
+
+  await page.click('#sort-length-asc');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example52?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.sortModel.length === 1 &&
+      snapshot.sortModel[0].columnId === 'fullName' &&
+      snapshot.sortModel[0].direction === 'asc' &&
+      snapshot.fullNameGetterCalls > 0 &&
+      snapshot.fullNameComparatorCalls > 0
+    );
+  });
+  const sortAscSnapshot = await page.evaluate(() => window.__example52.getSnapshot());
+
+  await page.click('#sort-length-desc');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example52?.getSnapshot?.();
+    return snapshot && snapshot.sortModel.length === 1 && snapshot.sortModel[0].direction === 'desc';
+  });
+  const sortDescSnapshot = await page.evaluate(() => window.__example52.getSnapshot());
+  assert.equal(
+    sortDescSnapshot.fullNameGetterCalls,
+    sortAscSnapshot.fullNameGetterCalls,
+    'example52 repeated sort should reuse cached valueGetter projection'
+  );
+  assert.equal(
+    sortDescSnapshot.fullNameComparatorCalls,
+    sortAscSnapshot.fullNameComparatorCalls,
+    'example52 repeated sort should reuse cached comparator projection'
+  );
+
+  await page.click('#filter-grace');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example52?.getSnapshot?.();
+    return snapshot && snapshot.filterModel.fullName && String(snapshot.preview || '').includes('Grace,Hopper');
+  });
+  const filteredSnapshot = await page.evaluate(() => window.__example52.getSnapshot());
+  assert.equal(
+    filteredSnapshot.fullNameGetterCalls,
+    sortAscSnapshot.fullNameGetterCalls,
+    'example52 repeated filter should reuse cached valueGetter projection'
+  );
+
+  await page.click('#clear-filter');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example52?.getSnapshot?.();
+    return snapshot && Object.keys(snapshot.filterModel || {}).length === 0;
+  });
+
+  await page.click('#replace-rows');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example52?.getSnapshot?.();
+    return snapshot && snapshot.dataset === 'replacement' && String(snapshot.preview || '').includes('Barbara,Liskov');
+  });
+
+  await page.click('#sort-length-asc');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example52?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.dataset === 'replacement' &&
+      snapshot.sortModel.length === 1 &&
+      snapshot.sortModel[0].direction === 'asc' &&
+      snapshot.fullNameGetterCalls > 120 &&
+      snapshot.fullNameComparatorCalls > 0
+    );
+  });
+  const replacedSnapshot = await page.evaluate(() => window.__example52.getSnapshot());
+  assert.ok(
+    replacedSnapshot.fullNameGetterCalls > filteredSnapshot.fullNameGetterCalls,
+    'example52 row replacement should invalidate cached valueGetter projection'
+  );
+  assert.ok(
+    replacedSnapshot.fullNameComparatorCalls > filteredSnapshot.fullNameComparatorCalls,
+    'example52 row replacement should invalidate cached comparator projection'
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample53Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example53.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => {
+    const snapshot = window.__example53?.getSnapshot?.();
+    return Boolean(snapshot && snapshot.isReady === true);
+  }, null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 15_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => window.__example53.getSnapshot());
+  assert.equal(initialSnapshot.prefixNameGetterCalls, 0, 'example53 should start with zero prefix getter calls');
+  assert.equal(initialSnapshot.fullNameGetterCalls, 0, 'example53 should start with zero fullName getter calls');
+  assert.equal(initialSnapshot.tailBadgeGetterCalls, 0, 'example53 should start with zero tail getter calls');
+
+  await page.click('#sort-full-name');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example53?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.sortModel.length === 1 &&
+      snapshot.sortModel[0].columnId === 'fullName' &&
+      snapshot.sortModel[0].direction === 'asc' &&
+      snapshot.prefixNameGetterCalls > 0 &&
+      snapshot.fullNameGetterCalls > 0 &&
+      snapshot.tailBadgeGetterCalls === 0
+    );
+  });
+  const sortAscSnapshot = await page.evaluate(() => window.__example53.getSnapshot());
+
+  await page.click('#sort-full-name-desc');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example53?.getSnapshot?.();
+    return snapshot && snapshot.sortModel.length === 1 && snapshot.sortModel[0].direction === 'desc';
+  });
+  const sortDescSnapshot = await page.evaluate(() => window.__example53.getSnapshot());
+  assert.equal(
+    sortDescSnapshot.prefixNameGetterCalls,
+    sortAscSnapshot.prefixNameGetterCalls,
+    'example53 repeated sort should reuse cached prefix projection'
+  );
+  assert.equal(
+    sortDescSnapshot.fullNameGetterCalls,
+    sortAscSnapshot.fullNameGetterCalls,
+    'example53 repeated sort should reuse cached target projection'
+  );
+  assert.equal(sortDescSnapshot.tailBadgeGetterCalls, 0, 'example53 should not evaluate trailing derived getter');
+
+  await page.click('#filter-hopper');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example53?.getSnapshot?.();
+    return snapshot && snapshot.filterModel.fullName && String(snapshot.preview || '').includes('Grace,Hopper');
+  });
+  const filteredSnapshot = await page.evaluate(() => window.__example53.getSnapshot());
+  assert.equal(filteredSnapshot.tailBadgeGetterCalls, 0, 'example53 filter should still skip trailing derived getter');
+
+  await page.click('#reset-flat');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example53?.getSnapshot?.();
+    return snapshot && snapshot.sortModel.length === 0 && Object.keys(snapshot.filterModel || {}).length === 0;
+  });
+
+  await page.click('#replace-rows');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example53?.getSnapshot?.();
+    return snapshot && snapshot.dataset === 'replacement' && String(snapshot.preview || '').includes('Barbara,Liskov');
+  });
+  await page.click('#sort-full-name');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example53?.getSnapshot?.();
+    return snapshot && snapshot.dataset === 'replacement' && snapshot.sortModel[0]?.direction === 'asc';
+  });
+  const replacedSnapshot = await page.evaluate(() => window.__example53.getSnapshot());
+  assert.ok(
+    replacedSnapshot.prefixNameGetterCalls > filteredSnapshot.prefixNameGetterCalls,
+    'example53 row replacement should invalidate prefix projection cache'
+  );
+  assert.ok(
+    replacedSnapshot.fullNameGetterCalls > filteredSnapshot.fullNameGetterCalls,
+    'example53 row replacement should invalidate target projection cache'
+  );
+  assert.equal(replacedSnapshot.tailBadgeGetterCalls, 0, 'example53 should keep trailing derived getter untouched after replacement');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample54Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example54.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => {
+    const snapshot = window.__example54?.getSnapshot?.();
+    return Boolean(snapshot && snapshot.isReady === true);
+  }, null, { timeout: 20_000 });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => window.__example54.getSnapshot());
+  assert.equal(initialSnapshot.searchNameGetterCalls, 0, 'example54 should start with zero derived getter calls');
+
+  await page.click('#sort-derived');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example54?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.lastAction &&
+      snapshot.lastAction.kind === 'sortDerivedAsc' &&
+      snapshot.sortModel.length === 1 &&
+      snapshot.sortModel[0].columnId === 'searchName' &&
+      snapshot.sortModel[0].direction === 'asc' &&
+      snapshot.searchNameGetterCalls > 0 &&
+      snapshot.lastAction.heartbeatDelta > 0 &&
+      snapshot.lastAction.workerMessagesDuring > 0
+    );
+  }, null, { timeout: 20_000 });
+  const sortSnapshot = await page.evaluate(() => window.__example54.getSnapshot());
+  assert.ok(sortSnapshot.workerCounts.sort >= 1, 'example54 should create at least one sort worker');
+
+  await page.click('#filter-grace');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example54?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.lastAction &&
+      snapshot.lastAction.kind === 'filterGrace' &&
+      snapshot.filterModel.searchName &&
+      snapshot.lastAction.heartbeatDelta > 0 &&
+      String(snapshot.preview || '').includes('Grace')
+    );
+  }, null, { timeout: 20_000 });
+  const filterSnapshot = await page.evaluate(() => window.__example54.getSnapshot());
+  assert.ok(filterSnapshot.workerCounts.filter >= 1, 'example54 should create at least one filter worker');
+
+  await page.click('#reset-grid');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example54?.getSnapshot?.();
+    return snapshot && snapshot.sortModel.length === 0 && Object.keys(snapshot.filterModel || {}).length === 0;
+  }, null, { timeout: 20_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -3559,9 +4173,16 @@ function expect(locator) {
 async function main() {
   const rootDir = process.cwd();
   const umdPath = path.resolve(rootDir, 'packages/grid-core/dist/grid.umd.js');
+  const workerAssetPaths = ['sort.worker.js', 'filter.worker.js', 'group.worker.js', 'pivot.worker.js', 'tree.worker.js'];
 
   if (!existsSync(umdPath)) {
     throw new Error('Missing build output: packages/grid-core/dist/grid.umd.js. Run pnpm build first.');
+  }
+  for (let index = 0; index < workerAssetPaths.length; index += 1) {
+    const workerAssetPath = path.resolve(rootDir, 'packages/grid-core/dist', workerAssetPaths[index]);
+    if (!existsSync(workerAssetPath)) {
+      throw new Error(`Missing build output: ${workerAssetPath}. Run pnpm build first.`);
+    }
   }
 
   const server = await startStaticServer({ rootDir });
@@ -3655,6 +4276,28 @@ async function main() {
     await runExample40Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample41Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample44Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample45Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample46Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample47Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample48Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample49Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample50Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample51Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample52Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample53Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample54Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

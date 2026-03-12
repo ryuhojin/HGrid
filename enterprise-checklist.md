@@ -148,10 +148,10 @@
 > AG Grid SSRM, RealGrid 원격 연동 수준에 대응하는 데이터 모델이 필요하다.
 
 ## E2.1 서버사이드 row model 계약 확정
-- [ ] block cache를 넘어선 server-side row model 계약 정의
-- [ ] partial store / full store 전략 결정
-- [ ] child count / group expansion / aggregate row metadata 계약 정의
-- [ ] server query schema versioning 정의
+- [x] block cache를 넘어선 server-side row model 계약 정의
+- [x] partial store / full store 전략 결정
+- [x] child count / group expansion / aggregate row metadata 계약 정의
+- [x] server query schema versioning 정의
 
 ## E2.2 그룹/피벗/트리 원격 모델 완성
 - [ ] remote grouping row contract 정의

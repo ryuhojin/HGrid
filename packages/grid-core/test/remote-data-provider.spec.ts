@@ -6,6 +6,7 @@ import {
   type RemoteBlockResponse,
   type RemoteDataSource
 } from '../src/data/remote-data-provider';
+import type { RemoteServerSideQueryModel } from '../src/data/remote-server-side-contracts';
 
 function createRows(startIndex: number, endIndex: number): Array<Record<string, unknown>> {
   const rows: Array<Record<string, unknown>> = [];
@@ -268,6 +269,105 @@ describe('RemoteDataProvider', () => {
     expect(queryModel.pivotModel).toBeUndefined();
     expect(queryModel.pivotValues).toBeUndefined();
   });
+
+  it('forwards server-side row model contract fields and stores row metadata', async () => {
+    const requests: Array<Omit<RemoteBlockRequest, 'signal'>> = [];
+    const initialServerSideQuery: RemoteServerSideQueryModel = {
+      schemaVersion: 'v2',
+      requestKind: 'children',
+      route: [
+        { columnId: 'region', key: 'APAC' },
+        { columnId: 'country', key: 'KR' }
+      ],
+      rootStoreStrategy: 'partial',
+      childStoreStrategy: 'full'
+    };
+    const dataSource: RemoteDataSource = {
+      async fetchBlock(request) {
+        requests.push(cloneRequestWithoutSignal(request));
+        return {
+          rows: createRows(request.startIndex, request.endIndex),
+          rowMetadata: [
+            {
+              kind: 'group',
+              level: 1,
+              childCount: 12,
+              isExpandedByDefault: true,
+              groupColumnId: 'country',
+              groupKey: 'KR',
+              route: initialServerSideQuery.route,
+              aggregateValues: {
+                totalScore: 240
+              }
+            }
+          ]
+        };
+      }
+    };
+
+    const provider = new RemoteDataProvider({
+      dataSource,
+      rowCount: 64,
+      cache: {
+        blockSize: 8,
+        maxBlocks: 4,
+        prefetchBlocks: 0
+      },
+      queryModel: {
+        serverSide: initialServerSideQuery
+      }
+    });
+
+    provider.getValue(0, 'id');
+    await flushAsync();
+
+    expect(requests[0].queryModel.serverSide).toEqual(initialServerSideQuery);
+    expect(provider.getServerSideQueryModel()).toEqual(initialServerSideQuery);
+    expect(provider.getRowMetadata(0)).toEqual({
+      kind: 'group',
+      level: 1,
+      childCount: 12,
+      isExpandedByDefault: true,
+      groupColumnId: 'country',
+      groupKey: 'KR',
+      route: initialServerSideQuery.route,
+      aggregateValues: {
+        totalScore: 240
+      }
+    });
+  });
+
+  it('updates server-side query model through helper API', () => {
+    const dataSource: RemoteDataSource = {
+      async fetchBlock(_request): Promise<RemoteBlockResponse> {
+        return { rows: [] };
+      }
+    };
+
+    const provider = new RemoteDataProvider({
+      dataSource,
+      rowCount: 10
+    });
+
+    provider.setServerSideQueryModel({
+      schemaVersion: 'v3',
+      requestKind: 'children',
+      route: [{ columnId: 'region', key: 'EMEA' }],
+      rootStoreStrategy: 'full',
+      childStoreStrategy: 'partial'
+    });
+
+    expect(provider.getServerSideQueryModel()).toEqual({
+      schemaVersion: 'v3',
+      requestKind: 'children',
+      route: [{ columnId: 'region', key: 'EMEA' }],
+      rootStoreStrategy: 'full',
+      childStoreStrategy: 'partial'
+    });
+
+    provider.setServerSideQueryModel(undefined);
+    expect(provider.getServerSideQueryModel()).toBeUndefined();
+  });
 });
 
 describe('Grid + RemoteDataProvider', () => {
@@ -323,6 +423,85 @@ describe('Grid + RemoteDataProvider', () => {
     expect(updatedNameCell).not.toBeNull();
     expect(updatedNameCell?.classList.contains('hgrid__cell--loading')).toBe(false);
     expect(updatedNameCell?.textContent).toBe('Remote-1');
+
+    grid.destroy();
+  });
+
+  it('preserves server-side query contract while grid syncs remote sort and filter state', async () => {
+    const requests: Array<Omit<RemoteBlockRequest, 'signal'>> = [];
+    const container = document.createElement('div');
+    container.style.width = '760px';
+    document.body.append(container);
+
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          requests.push(cloneRequestWithoutSignal(request));
+          return {
+            rows: createRows(request.startIndex, request.endIndex),
+            totalRowCount: 500
+          };
+        }
+      },
+      rowCount: 500,
+      cache: {
+        blockSize: 50,
+        maxBlocks: 4,
+        prefetchBlocks: 0
+      },
+      queryModel: {
+        serverSide: {
+          schemaVersion: 'v2',
+          requestKind: 'root',
+          route: [],
+          rootStoreStrategy: 'partial',
+          childStoreStrategy: 'full'
+        }
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 240, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      dataProvider: provider,
+      grouping: {
+        mode: 'server',
+        groupModel: [{ columnId: 'status' }]
+      },
+      height: 300,
+      rowHeight: 28,
+      overscan: 4
+    });
+
+    await waitForFrame();
+    await grid.setSortModel([{ columnId: 'id', direction: 'desc' }]);
+    await grid.setFilterModel({
+      status: {
+        kind: 'set',
+        values: ['active']
+      }
+    });
+
+    const remoteQueryModel = provider.getQueryModel();
+    expect(remoteQueryModel.serverSide).toEqual({
+      schemaVersion: 'v2',
+      requestKind: 'root',
+      route: [],
+      rootStoreStrategy: 'partial',
+      childStoreStrategy: 'full'
+    });
+    expect(remoteQueryModel.sortModel).toEqual([{ columnId: 'id', direction: 'desc' }]);
+    expect(remoteQueryModel.filterModel).toEqual({
+      status: {
+        kind: 'set',
+        values: ['active']
+      }
+    });
+    expect(remoteQueryModel.groupModel).toEqual([{ columnId: 'status' }]);
+    expect(requests.length).toBeGreaterThan(0);
 
     grid.destroy();
   });

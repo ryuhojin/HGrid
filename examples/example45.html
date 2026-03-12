@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 45 - Worker Policy Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 1180px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 45 - Worker Policy Smoke</h1>
+    <p>
+      E1.3 정책 smoke example입니다. rowCount `180`, threshold `100` 기준으로 worker-first 경로와
+      explicit fallback 정책을 비교합니다. 기본 경로는 `lowVolumeOnly`이고, custom comparator sort도
+      rank projection을 거쳐 worker 경로로 올라갑니다. `allowAlways`는 unsupported path가 생겼을 때만 main-thread fallback을 허용합니다.
+    </p>
+
+    <div class="toolbar">
+      <button id="auto-worker" type="button">auto worker sort</button>
+      <button id="low-volume" type="button">low volume threshold 500</button>
+      <button id="comparator-error" type="button">comparator worker projection</button>
+      <button id="allow-fallback" type="button">allowAlways comparator</button>
+      <button id="explicit-main-thread" type="button">explicit main-thread</button>
+      <button id="reset" type="button">reset</button>
+    </div>
+    <div class="toolbar">
+      <button id="export-top" type="button">export top rows</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>Policy State</h2>
+        <pre id="policy-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Worker Activity</h2>
+        <pre id="worker-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Preview</h2>
+        <pre id="preview-panel">No export yet.</pre>
+      </section>
+      <section class="panel">
+        <h2>Action Log</h2>
+        <pre id="log-panel">Ready</pre>
+      </section>
+    </div>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const workerUrls = [];
+      const workerMessages = [];
+      const workerCounts = {
+        sort: 0,
+        filter: 0,
+        group: 0,
+        pivot: 0,
+        tree: 0
+      };
+      const NativeWorker = window.Worker;
+
+      if (typeof NativeWorker === 'function') {
+        function inferWorkerKind(url) {
+          if (url.indexOf('sort.worker.js') >= 0) {
+            return 'sort';
+          }
+          if (url.indexOf('filter.worker.js') >= 0) {
+            return 'filter';
+          }
+          if (url.indexOf('group.worker.js') >= 0) {
+            return 'group';
+          }
+          if (url.indexOf('pivot.worker.js') >= 0) {
+            return 'pivot';
+          }
+          if (url.indexOf('tree.worker.js') >= 0) {
+            return 'tree';
+          }
+          return 'unknown';
+        }
+
+        window.Worker = function WrappedWorker(url, options) {
+          const worker = new NativeWorker(url, options);
+          const workerUrl = String(url);
+          const kind = inferWorkerKind(workerUrl);
+          workerUrls.push(workerUrl);
+          if (workerCounts[kind] !== undefined) {
+            workerCounts[kind] += 1;
+          }
+
+          const originalPostMessage = worker.postMessage.bind(worker);
+          worker.postMessage = function wrappedPostMessage(message, transfer) {
+            workerMessages.unshift({
+              direction: 'main->worker',
+              kind,
+              type: message && typeof message === 'object' ? message.type : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+            return originalPostMessage(message, transfer);
+          };
+
+          worker.addEventListener('message', (event) => {
+            const message = event.data;
+            workerMessages.unshift({
+              direction: 'worker->main',
+              kind,
+              status: message && typeof message === 'object' ? message.status : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+          });
+
+          return worker;
+        };
+        window.Worker.prototype = NativeWorker.prototype;
+      }
+
+      const policyPanel = document.getElementById('policy-panel');
+      const workerPanel = document.getElementById('worker-panel');
+      const previewPanel = document.getElementById('preview-panel');
+      const logPanel = document.getElementById('log-panel');
+      const rowData = Array.from({ length: 180 }, (_, index) => ({
+        id: index + 1,
+        name: 'Policy-' + String(index + 1).padStart(3, '0'),
+        region: ['KR', 'US', 'JP'][index % 3],
+        status: index % 2 === 0 ? 'active' : 'hold',
+        score: (index * 37) % 1000,
+        updatedAt: new Date(Date.now() - index * 30000).toISOString()
+      }));
+
+      const workerFriendlyColumns = [
+        { id: 'id', header: 'ID', width: 110, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'region', header: 'Region', width: 120, type: 'text' },
+        { id: 'status', header: 'Status', width: 120, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const comparatorColumns = workerFriendlyColumns.map((column) =>
+        column.id === 'score'
+          ? {
+              id: column.id,
+              header: column.header,
+              width: column.width,
+              type: column.type,
+              comparator(left, right) {
+                const leftValue = Number(left);
+                const rightValue = Number(right);
+                return leftValue - rightValue;
+              }
+            }
+          : column
+      );
+
+      let currentPolicy = {
+        enabled: true,
+        largeDataThreshold: 100,
+        fallbackPolicy: 'lowVolumeOnly',
+        columnsMode: 'workerFriendly',
+        lastError: null
+      };
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: workerFriendlyColumns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        workerRuntime: {
+          largeDataThreshold: 100,
+          fallbackPolicy: 'lowVolumeOnly'
+        }
+      });
+
+      function pushLog(message) {
+        const lines = logPanel.textContent ? logPanel.textContent.split('\n') : [];
+        lines.unshift(new Date().toLocaleTimeString('ko-KR') + ' - ' + message);
+        logPanel.textContent = lines.slice(0, 14).join('\n');
+      }
+
+      function snapshotWorkerActivity() {
+        return {
+          urlCount: workerUrls.length,
+          messageCount: workerMessages.length
+        };
+      }
+
+      async function refreshPreview() {
+        const result = await grid.exportCsv({
+          includeHeaders: false
+        });
+        previewPanel.textContent = result.content.split('\n').slice(0, 8).join('\n');
+      }
+
+      function renderPanels() {
+        policyPanel.textContent = JSON.stringify(
+          {
+            currentPolicy,
+            sortModel: grid.getSortModel(),
+            visibleRowRange: grid.getVisibleRowRange(),
+            rowModelState: grid.getRowModelState()
+          },
+          null,
+          2
+        );
+
+        workerPanel.textContent = JSON.stringify(
+          {
+            workerCounts,
+            urls: workerUrls.slice(-6),
+            messages: workerMessages.slice(0, 10)
+          },
+          null,
+          2
+        );
+      }
+
+      async function applyPolicy(nextPolicy) {
+        currentPolicy = {
+          ...currentPolicy,
+          ...nextPolicy
+        };
+
+        grid.setColumns(currentPolicy.columnsMode === 'comparator' ? comparatorColumns : workerFriendlyColumns);
+        grid.setOptions({
+          workerRuntime: {
+            enabled: currentPolicy.enabled,
+            largeDataThreshold: currentPolicy.largeDataThreshold,
+            fallbackPolicy: currentPolicy.fallbackPolicy
+          }
+        });
+      }
+
+      async function runScenario(label, nextPolicy) {
+        const before = snapshotWorkerActivity();
+        currentPolicy.lastError = null;
+
+        try {
+          await grid.setSortModel([]);
+          await applyPolicy(nextPolicy);
+          await grid.setSortModel([{ columnId: 'score', direction: 'desc' }]);
+          pushLog(
+            label +
+              ' / newWorkers=' +
+              String(workerUrls.length - before.urlCount) +
+              ' / newMessages=' +
+              String(workerMessages.length - before.messageCount)
+          );
+        } catch (error) {
+          currentPolicy.lastError = error instanceof Error ? error.message : String(error);
+          pushLog(label + ' / error: ' + currentPolicy.lastError);
+        }
+
+        await refreshPreview();
+        renderPanels();
+      }
+
+      async function resetPolicy() {
+        currentPolicy = {
+          enabled: true,
+          largeDataThreshold: 100,
+          fallbackPolicy: 'lowVolumeOnly',
+          columnsMode: 'workerFriendly',
+          lastError: null
+        };
+        await applyPolicy(currentPolicy);
+        await grid.setSortModel([]);
+        previewPanel.textContent = 'No export yet.';
+        pushLog('reset policy');
+        renderPanels();
+      }
+
+      document.getElementById('auto-worker').addEventListener('click', async () => {
+        await runScenario('auto worker sort', {
+          enabled: true,
+          largeDataThreshold: 100,
+          fallbackPolicy: 'lowVolumeOnly',
+          columnsMode: 'workerFriendly'
+        });
+      });
+
+      document.getElementById('low-volume').addEventListener('click', async () => {
+        await runScenario('low volume threshold 500', {
+          enabled: true,
+          largeDataThreshold: 500,
+          fallbackPolicy: 'lowVolumeOnly',
+          columnsMode: 'workerFriendly'
+        });
+      });
+
+      document.getElementById('comparator-error').addEventListener('click', async () => {
+        await runScenario('comparator worker projection', {
+          enabled: true,
+          largeDataThreshold: 100,
+          fallbackPolicy: 'lowVolumeOnly',
+          columnsMode: 'comparator'
+        });
+      });
+
+      document.getElementById('allow-fallback').addEventListener('click', async () => {
+        await runScenario('allowAlways comparator', {
+          enabled: true,
+          largeDataThreshold: 100,
+          fallbackPolicy: 'allowAlways',
+          columnsMode: 'comparator'
+        });
+      });
+
+      document.getElementById('explicit-main-thread').addEventListener('click', async () => {
+        await runScenario('explicit main-thread', {
+          enabled: false,
+          largeDataThreshold: 100,
+          fallbackPolicy: 'lowVolumeOnly',
+          columnsMode: 'workerFriendly'
+        });
+      });
+
+      document.getElementById('reset').addEventListener('click', async () => {
+        await resetPolicy();
+      });
+
+      document.getElementById('export-top').addEventListener('click', async () => {
+        await refreshPreview();
+        pushLog('export top rows');
+        renderPanels();
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        console.log('example45 inspect', {
+          currentPolicy,
+          workerUrls,
+          workerMessages,
+          state: grid.getState(),
+          sortModel: grid.getSortModel()
+        });
+        pushLog('inspect printed to console');
+        renderPanels();
+      });
+
+      window.__example45 = {
+        grid,
+        getSnapshot() {
+          return {
+            currentPolicy: { ...currentPolicy },
+            workerUrls: workerUrls.slice(),
+            workerMessages: workerMessages.slice(),
+            workerCounts: { ...workerCounts },
+            sortModel: grid.getSortModel(),
+            visibleRowRange: grid.getVisibleRowRange()
+          };
+        },
+        workerUrls,
+        workerMessages,
+        workerCounts
+      };
+
+      renderPanels();
+    </script>
+  </body>
+</html>

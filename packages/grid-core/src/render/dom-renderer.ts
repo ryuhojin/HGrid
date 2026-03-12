@@ -409,6 +409,26 @@ export class DomRenderer implements GridRendererPort {
     this.flushRender();
   }
 
+  public refreshDataView(): void {
+    this.teardownPointerSelectionSession();
+    this.teardownColumnReorderSession();
+    this.stopEditing('reconcile');
+    this.reconcileSelection('reconcile');
+
+    const previousVirtualScrollTop = this.pendingVirtualScrollTop;
+    const previousScrollLeft = this.pendingScrollLeft;
+    const didResetRowHeightCache = this.syncRowHeightCache(false, this.centerVisibleWidth);
+    if (didResetRowHeightCache) {
+      this.updateSpacerSize();
+      this.setVirtualScrollTop(previousVirtualScrollTop);
+      this.setHorizontalScrollLeft(previousScrollLeft);
+    }
+
+    this.syncAriaGridMetrics();
+    this.markDataDirty();
+    this.flushRender();
+  }
+
   public setColumns(columns: ColumnDef[]): void {
     this.setOptions({
       ...this.options,

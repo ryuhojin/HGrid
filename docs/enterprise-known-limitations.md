@@ -20,7 +20,7 @@
   - 따라서 E1 phase 자체는 닫았지만, callback-heavy path 튜닝은 계속 필요하다.
 
 ## 2. 완성된 서버사이드 row model 아님
-- 현재 `RemoteDataProvider`는 block cache/LRU/prefetch/query model 중심이다.
+- 현재 `RemoteDataProvider`는 block cache/LRU/prefetch/query model 중심이고, E2.1에서 `serverSide` envelope와 row metadata contract까지만 고정됐다.
 - grouping/pivot/tree의 enterprise-grade server-side store 모델은 완성되지 않았다.
 - 의미:
   - 복합 서버 데이터 시나리오에서 제품 설명 범위를 신중히 제한해야 한다.

@@ -18,12 +18,14 @@ import type {
   GridOptions,
   GridState,
   GridTheme,
+  GridWorkerRuntimeOptions,
+  GridWorkerFallbackPolicy,
   RowIndicatorOptions,
   UnsafeHtmlSanitizer
 } from './grid-options';
 import { normalizeGridLocale } from './grid-locale-text';
 import { DomRenderer } from '../render/dom-renderer';
-import { ColumnModel, createColumnValueFormatContext, formatColumnValue } from '../data/column-model';
+import { ColumnModel, createColumnValueFormatContext, formatColumnValue, getColumnValue } from '../data/column-model';
 import type { ColumnValueFormatContext } from '../data/column-model';
 import type { ColumnFilterCondition, GridFilterModel } from '../data/filter-executor';
 import { CooperativeFilterExecutor, type FilterExecutor } from '../data/filter-executor';
@@ -64,6 +66,17 @@ import {
 import { GridProviderLifecycleService } from './grid-provider-lifecycle-service';
 import { GridRemoteQueryService } from './grid-remote-query-service';
 import { GridStateService } from './grid-state-service';
+import { WorkerOperationDispatcher } from '../data/worker-operation-dispatcher';
+import {
+  WORKER_TREE_LAZY_ROW_REF_FIELD,
+  createWorkerTreeLazyRowRef,
+  serializeFilterExecutionRequestAsync,
+  serializeGroupExecutionRequestAsync,
+  serializePivotExecutionRequestAsync,
+  serializeSortExecutionRequestAsync,
+  serializeTreeExecutionRequestAsync
+} from '../data/worker-operation-payloads';
+import { WorkerProjectionCache } from '../data/worker-projection-cache';
 export type {
   GridExportFormat,
   GridExportOptions,
@@ -90,6 +103,17 @@ const MIN_INDICATOR_WIDTH = 44;
 const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 108;
 const DEFAULT_LOCALE = 'en-US';
+const DEFAULT_WORKER_TIMEOUT_MS = 15_000;
+const DEFAULT_WORKER_LARGE_DATA_THRESHOLD = 100_000;
+
+type CancelableExecutor<TExecutor> = TExecutor & {
+  cancel(opId: string): void;
+  destroy(): void;
+};
+
+type WorkerBackedExecutor<TExecutor> = CancelableExecutor<TExecutor> & {
+  prewarm(): boolean;
+};
 
 function isSystemUtilityColumn(columnId: string): boolean {
   return (
@@ -193,6 +217,181 @@ function normalizeStyleNonce(styleNonce: string | undefined): string | undefined
 
   const trimmed = styleNonce.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeWorkerAssetBaseUrl(assetBaseUrl: string | undefined): string | undefined {
+  if (typeof assetBaseUrl !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = assetBaseUrl.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  return trimmed.replace(/\/+$/, '');
+}
+
+function normalizeWorkerTimeoutMs(timeoutMs: number | undefined): number | undefined {
+  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs)) {
+    return undefined;
+  }
+
+  return Math.max(250, Math.floor(timeoutMs));
+}
+
+function normalizeWorkerLargeDataThreshold(largeDataThreshold: number | undefined): number | undefined {
+  if (typeof largeDataThreshold !== 'number' || !Number.isFinite(largeDataThreshold)) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.floor(largeDataThreshold));
+}
+
+function normalizeWorkerPoolSize(poolSize: number | undefined): number | undefined {
+  if (typeof poolSize !== 'number' || !Number.isFinite(poolSize)) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.floor(poolSize));
+}
+
+function normalizeWorkerFallbackPolicy(fallbackPolicy: GridWorkerFallbackPolicy | undefined): GridWorkerFallbackPolicy | undefined {
+  return fallbackPolicy === 'allowAlways' ? 'allowAlways' : fallbackPolicy === 'lowVolumeOnly' ? 'lowVolumeOnly' : undefined;
+}
+
+function normalizeWorkerPrewarm(prewarm: boolean | undefined): boolean | undefined {
+  return prewarm === true ? true : prewarm === false ? false : undefined;
+}
+
+function cloneWorkerAssetUrls(
+  assetUrls?: GridWorkerRuntimeOptions['assetUrls']
+): GridWorkerRuntimeOptions['assetUrls'] | undefined {
+  if (!assetUrls || typeof assetUrls !== 'object') {
+    return undefined;
+  }
+
+  return {
+    sort: normalizeOptionalLocale(assetUrls.sort),
+    filter: normalizeOptionalLocale(assetUrls.filter),
+    group: normalizeOptionalLocale(assetUrls.group),
+    pivot: normalizeOptionalLocale(assetUrls.pivot),
+    tree: normalizeOptionalLocale(assetUrls.tree)
+  };
+}
+
+function cloneWorkerRuntimeOptions(workerRuntime?: GridWorkerRuntimeOptions): GridWorkerRuntimeOptions | undefined {
+  if (!workerRuntime) {
+    return undefined;
+  }
+
+  return {
+    enabled: workerRuntime.enabled !== false,
+    assetBaseUrl: normalizeWorkerAssetBaseUrl(workerRuntime.assetBaseUrl),
+    assetUrls: cloneWorkerAssetUrls(workerRuntime.assetUrls),
+    timeoutMs: normalizeWorkerTimeoutMs(workerRuntime.timeoutMs),
+    largeDataThreshold: normalizeWorkerLargeDataThreshold(workerRuntime.largeDataThreshold),
+    poolSize: normalizeWorkerPoolSize(workerRuntime.poolSize),
+    fallbackPolicy: normalizeWorkerFallbackPolicy(workerRuntime.fallbackPolicy),
+    prewarm: normalizeWorkerPrewarm(workerRuntime.prewarm)
+  };
+}
+
+function mergeWorkerRuntimeOptions(
+  currentOptions: GridWorkerRuntimeOptions | undefined,
+  nextOptions: GridConfig['workerRuntime']
+): GridWorkerRuntimeOptions | undefined {
+  if (!nextOptions) {
+    return cloneWorkerRuntimeOptions(currentOptions);
+  }
+
+  const base = cloneWorkerRuntimeOptions(currentOptions) ?? {
+    enabled: true,
+    assetBaseUrl: undefined,
+    assetUrls: undefined,
+    timeoutMs: DEFAULT_WORKER_TIMEOUT_MS,
+    largeDataThreshold: DEFAULT_WORKER_LARGE_DATA_THRESHOLD,
+    poolSize: 1,
+    fallbackPolicy: 'lowVolumeOnly' as GridWorkerFallbackPolicy,
+    prewarm: false
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'enabled')) {
+    base.enabled = nextOptions.enabled === true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'assetBaseUrl')) {
+    base.assetBaseUrl = normalizeWorkerAssetBaseUrl(nextOptions.assetBaseUrl);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'assetUrls')) {
+    base.assetUrls = cloneWorkerAssetUrls(nextOptions.assetUrls);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'timeoutMs')) {
+    base.timeoutMs = normalizeWorkerTimeoutMs(nextOptions.timeoutMs) ?? DEFAULT_WORKER_TIMEOUT_MS;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'largeDataThreshold')) {
+    base.largeDataThreshold =
+      normalizeWorkerLargeDataThreshold(nextOptions.largeDataThreshold) ?? DEFAULT_WORKER_LARGE_DATA_THRESHOLD;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'poolSize')) {
+    base.poolSize = normalizeWorkerPoolSize(nextOptions.poolSize) ?? 1;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'fallbackPolicy')) {
+    base.fallbackPolicy = normalizeWorkerFallbackPolicy(nextOptions.fallbackPolicy) ?? 'lowVolumeOnly';
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'prewarm')) {
+    base.prewarm = normalizeWorkerPrewarm(nextOptions.prewarm) ?? false;
+  }
+
+  return base;
+}
+
+function inferWorkerAssetBaseUrl(): string | undefined {
+  if (typeof document === 'undefined') {
+    return undefined;
+  }
+
+  const scripts = document.getElementsByTagName('script');
+  const bundlePattern = /\/grid\.(?:umd(?:\.min)?|esm)\.js(?:[?#].*)?$/;
+  for (let index = scripts.length - 1; index >= 0; index -= 1) {
+    const script = scripts[index];
+    const src = typeof script.src === 'string' ? script.src : '';
+    if (!src || !bundlePattern.test(src)) {
+      continue;
+    }
+
+    try {
+      const baseUrl = new URL('.', src).href;
+      return baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveWorkerAssetUrl(
+  workerRuntime: GridWorkerRuntimeOptions | undefined,
+  operationType: 'sort' | 'filter' | 'group' | 'pivot' | 'tree'
+): string | undefined {
+  const explicitUrl = workerRuntime?.assetUrls?.[operationType];
+  if (typeof explicitUrl === 'string' && explicitUrl.length > 0) {
+    return explicitUrl;
+  }
+
+  const assetBaseUrl = normalizeWorkerAssetBaseUrl(workerRuntime?.assetBaseUrl) ?? inferWorkerAssetBaseUrl();
+  if (!assetBaseUrl) {
+    return undefined;
+  }
+
+  return `${assetBaseUrl}/${operationType}.worker.js`;
 }
 
 function cloneSanitizeHtmlHook(sanitizeHtml?: UnsafeHtmlSanitizer): UnsafeHtmlSanitizer | undefined {
@@ -525,7 +724,8 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     overscanCols: config?.overscanCols,
     scrollbarPolicy: mergeScrollbarPolicy(DEFAULT_SCROLLBAR_POLICY, config?.scrollbarPolicy),
     rowIndicator,
-    stateColumn: mergeStateColumnOptions(undefined, config?.stateColumn)
+    stateColumn: mergeStateColumnOptions(undefined, config?.stateColumn),
+    workerRuntime: mergeWorkerRuntimeOptions(undefined, config?.workerRuntime)
   };
 }
 
@@ -535,6 +735,10 @@ function createIdentityMapping(rowCount: number): Int32Array {
     mapping[index] = index;
   }
   return mapping;
+}
+
+function reuseViewToDataMapping(mapping: ViewToDataMapping): Int32Array {
+  return mapping instanceof Int32Array ? mapping : Int32Array.from(mapping);
 }
 
 export class Grid {
@@ -547,11 +751,11 @@ export class Grid {
   private readonly rowModel: RowModel;
   private readonly eventBus: EventBus;
   private readonly renderer: GridRendererPort;
-  private readonly sortExecutor: SortExecutor;
-  private readonly filterExecutor: FilterExecutor;
-  private readonly groupExecutor: GroupExecutor;
-  private readonly pivotExecutor: PivotExecutor;
-  private readonly treeExecutor: TreeExecutor;
+  private readonly sortExecutor: WorkerBackedExecutor<SortExecutor>;
+  private readonly filterExecutor: WorkerBackedExecutor<FilterExecutor>;
+  private readonly groupExecutor: WorkerBackedExecutor<GroupExecutor>;
+  private readonly pivotExecutor: WorkerBackedExecutor<PivotExecutor>;
+  private readonly treeExecutor: WorkerBackedExecutor<TreeExecutor>;
   private readonly commandEventService = new GridCommandEventService();
   private readonly dataPipelineService = new GridDataPipelineService();
   private readonly exportService = new GridExportService();
@@ -579,6 +783,7 @@ export class Grid {
   private treeNodeKeys: RowKey[] = [];
   private treeNodeKeyTokens: string[] = [];
   private treeLazyChildrenByParent = new Map<string, { parentNodeKey: RowKey; rows: GridRowData[] }>();
+  private treeLazyRowsByRef = new Map<string, GridRowData>();
   private treeLoadingParents = new Set<string>();
   private treeLoadOperationToken = 0;
   private sortOperationToken = 0;
@@ -591,6 +796,7 @@ export class Grid {
   private dataProviderUnsubscribe: (() => void) | null = null;
   private commandEventUnsubscribe: (() => void) | null = null;
   private columnValueFormatContext: ColumnValueFormatContext | null = null;
+  private readonly workerProjectionCache = new WorkerProjectionCache();
 
   public constructor(container: HTMLElement, config?: GridConfig) {
     const normalizedOptions = normalizeOptions(config);
@@ -623,13 +829,88 @@ export class Grid {
       toggleTreeExpanded: (nodeKey) => this.toggleTreeExpanded(nodeKey),
       applyGroupingView: () => this.applyGroupingViewInternal(),
       applyTreeView: () => this.applyTreeViewInternal(),
+      invalidateWorkerProjectionCache: () => {
+        this.invalidateWorkerProjectionCache();
+      },
       getAuditLogHook: () => this.options.onAuditLog
     });
-    this.sortExecutor = new CooperativeSortExecutor();
-    this.filterExecutor = new CooperativeFilterExecutor();
-    this.groupExecutor = new CooperativeGroupExecutor();
-    this.pivotExecutor = new CooperativePivotExecutor();
-    this.treeExecutor = new CooperativeTreeExecutor();
+    this.sortExecutor = new WorkerOperationDispatcher({
+      operationType: 'sort',
+      fallbackExecutor: new CooperativeSortExecutor(),
+      serializeRequest: (request) =>
+        serializeSortExecutionRequestAsync(request, {
+          projectionCache: this.workerProjectionCache
+        }),
+      getRuntimeOptions: () => ({
+        enabled: this.options.workerRuntime?.enabled,
+        assetUrl: resolveWorkerAssetUrl(this.options.workerRuntime, 'sort'),
+        timeoutMs: this.options.workerRuntime?.timeoutMs,
+        largeDataThreshold: this.options.workerRuntime?.largeDataThreshold,
+        poolSize: this.options.workerRuntime?.poolSize,
+        allowMainThreadFallback: this.options.workerRuntime?.fallbackPolicy === 'allowAlways'
+      })
+    });
+    this.filterExecutor = new WorkerOperationDispatcher({
+      operationType: 'filter',
+      fallbackExecutor: new CooperativeFilterExecutor(),
+      serializeRequest: (request) =>
+        serializeFilterExecutionRequestAsync(request, {
+          projectionCache: this.workerProjectionCache
+        }),
+      getRuntimeOptions: () => ({
+        enabled: this.options.workerRuntime?.enabled,
+        assetUrl: resolveWorkerAssetUrl(this.options.workerRuntime, 'filter'),
+        timeoutMs: this.options.workerRuntime?.timeoutMs,
+        largeDataThreshold: this.options.workerRuntime?.largeDataThreshold,
+        poolSize: this.options.workerRuntime?.poolSize,
+        allowMainThreadFallback: this.options.workerRuntime?.fallbackPolicy === 'allowAlways'
+      })
+    });
+    this.groupExecutor = new WorkerOperationDispatcher({
+      operationType: 'group',
+      fallbackExecutor: new CooperativeGroupExecutor(),
+      serializeRequest: (request) =>
+        serializeGroupExecutionRequestAsync(request, {
+          projectionCache: this.workerProjectionCache
+        }),
+      getRuntimeOptions: () => ({
+        enabled: this.options.workerRuntime?.enabled,
+        assetUrl: resolveWorkerAssetUrl(this.options.workerRuntime, 'group'),
+        timeoutMs: this.options.workerRuntime?.timeoutMs,
+        largeDataThreshold: this.options.workerRuntime?.largeDataThreshold,
+        poolSize: this.options.workerRuntime?.poolSize,
+        allowMainThreadFallback: this.options.workerRuntime?.fallbackPolicy === 'allowAlways'
+      })
+    });
+    this.pivotExecutor = new WorkerOperationDispatcher({
+      operationType: 'pivot',
+      fallbackExecutor: new CooperativePivotExecutor(),
+      serializeRequest: (request) =>
+        serializePivotExecutionRequestAsync(request, {
+          projectionCache: this.workerProjectionCache
+        }),
+      getRuntimeOptions: () => ({
+        enabled: this.options.workerRuntime?.enabled,
+        assetUrl: resolveWorkerAssetUrl(this.options.workerRuntime, 'pivot'),
+        timeoutMs: this.options.workerRuntime?.timeoutMs,
+        largeDataThreshold: this.options.workerRuntime?.largeDataThreshold,
+        poolSize: this.options.workerRuntime?.poolSize,
+        allowMainThreadFallback: this.options.workerRuntime?.fallbackPolicy === 'allowAlways'
+      })
+    });
+    this.treeExecutor = new WorkerOperationDispatcher({
+      operationType: 'tree',
+      fallbackExecutor: new CooperativeTreeExecutor(),
+      serializeRequest: serializeTreeExecutionRequestAsync,
+      getRuntimeOptions: () => ({
+        enabled: this.options.workerRuntime?.enabled,
+        assetUrl: resolveWorkerAssetUrl(this.options.workerRuntime, 'tree'),
+        timeoutMs: this.options.workerRuntime?.timeoutMs,
+        largeDataThreshold: this.options.workerRuntime?.largeDataThreshold,
+        poolSize: this.options.workerRuntime?.poolSize,
+        allowMainThreadFallback: this.options.workerRuntime?.fallbackPolicy === 'allowAlways'
+      })
+    });
     this.groupModel = this.normalizeGroupModel(this.options.grouping?.groupModel ?? []);
     this.groupAggregations = this.normalizeGroupAggregations(this.options.grouping?.aggregations ?? []);
     this.groupingMode = this.options.grouping?.mode === 'server' ? 'server' : 'client';
@@ -640,6 +921,7 @@ export class Grid {
     this.treeDataOptions = this.normalizeTreeDataOptions(mergeTreeDataOptions(undefined, this.options.treeData));
     this.treeMode = this.treeDataOptions.mode === 'server' ? 'server' : 'client';
     this.renderer = new DomRenderer(container, this.getRendererOptions(), this.eventBus);
+    this.prewarmWorkerExecutors();
     this.dataProviderUnsubscribe = this.providerLifecycleService.rebindRowsChangedListener({
       dataProvider: this.sourceDataProvider,
       currentUnsubscribe: this.dataProviderUnsubscribe,
@@ -649,6 +931,7 @@ export class Grid {
   }
 
   public setColumns(columns: ColumnDef[]): void {
+    this.invalidateWorkerProjectionCache();
     const normalizedColumns = normalizeSpecialColumns(columns, this.options.rowIndicator);
     if (this.hasActiveClientPivot()) {
       this.baseColumnsBeforeClientPivot = cloneColumns(normalizedColumns);
@@ -681,6 +964,7 @@ export class Grid {
     const nextStateColumn = mergeStateColumnOptions(this.options.stateColumn, options.stateColumn);
     const nextGrouping = mergeGroupingOptions(this.options.grouping, options.grouping);
     const nextPivoting = mergePivotingOptions(this.options.pivoting, options.pivoting);
+    const nextWorkerRuntime = mergeWorkerRuntimeOptions(this.options.workerRuntime, options.workerRuntime);
     const mergedTreeData = mergeTreeDataOptions(this.treeDataOptions, options.treeData);
     const hasLocaleOption = Object.prototype.hasOwnProperty.call(options, 'locale');
     const hasLocaleTextOption = Object.prototype.hasOwnProperty.call(options, 'localeText');
@@ -708,6 +992,7 @@ export class Grid {
       : cloneDateTimeFormatOptions(this.options.dateTimeFormatOptions);
 
     if (options.columns || options.rowIndicator) {
+      this.invalidateWorkerProjectionCache();
       const sourceColumns = options.columns ?? (this.baseColumnsBeforeClientPivot ?? this.columnModel.getColumns());
       const normalizedColumns = normalizeSpecialColumns(sourceColumns, nextRowIndicator);
       if (this.hasActiveClientPivot()) {
@@ -723,6 +1008,7 @@ export class Grid {
       : this.sourceDataProvider;
 
     if (hasProviderOption) {
+      this.invalidateWorkerProjectionCache();
       const providerReplacement = this.providerLifecycleService.replaceDataProvider(
         this.sourceDataProvider,
         nextDataProvider
@@ -746,8 +1032,7 @@ export class Grid {
         this.treeExpansionState = {};
       }
       if (providerReplacement.shouldResetTreeCaches) {
-        this.treeLazyChildrenByParent.clear();
-        this.treeLoadingParents.clear();
+        this.clearTreeLazyCaches();
       }
       this.sourceDataProvider = providerReplacement.dataProvider;
       this.rowModel.setRowCount(providerReplacement.rowCount);
@@ -803,28 +1088,30 @@ export class Grid {
         values: clonePivotValues(this.pivotValues)
       },
       treeData: this.treeDataOptions,
+      workerRuntime: nextWorkerRuntime,
       dataProvider: this.sourceDataProvider,
       rowModel: this.rowModel,
       columns: this.columnModel.getColumns()
     };
     this.rebuildColumnValueFormatContext();
+    this.prewarmWorkerExecutors();
 
     void this.rebuildDerivedView();
   }
 
   public setRowOrder(viewToData: ViewToDataMapping): void {
     this.rowModel.setBaseViewToData(viewToData);
-    this.renderer.setOptions(this.getRendererOptions());
+    this.renderer.refreshDataView();
   }
 
   public setFilteredRowOrder(viewToData: ViewToDataMapping | null): void {
     this.rowModel.setFilterViewToData(viewToData);
-    this.renderer.setOptions(this.getRendererOptions());
+    this.renderer.refreshDataView();
   }
 
   public resetRowOrder(): void {
     this.rowModel.resetToIdentity(this.sourceDataProvider.getRowCount());
-    this.renderer.setOptions(this.getRendererOptions());
+    this.renderer.refreshDataView();
   }
 
   public setSparseRowOverrides(overrides: SparseRowOverride[]): void {
@@ -881,7 +1168,11 @@ export class Grid {
         await this.applyFilterModelInternal();
       } else {
         this.filterMapping = null;
-        await this.applyDerivedViewToRenderer();
+        if (this.canUseLightweightFlatRendererRefresh()) {
+          this.applyFlatViewAndRefreshRenderer();
+        } else {
+          await this.applyDerivedViewToRenderer();
+        }
       }
       return;
     }
@@ -911,12 +1202,17 @@ export class Grid {
       throw new Error(response.result.message);
     }
 
-    this.sortMapping = new Int32Array(response.result.mapping);
+    this.sortMapping = reuseViewToDataMapping(response.result.mapping);
     if (this.hasActiveFilterModel()) {
       await this.applyFilterModelInternal();
     } else {
       this.filterMapping = null;
-      await this.applyDerivedViewToRenderer();
+      await this.yieldAfterLargeWorkerResult(rowCount);
+      if (this.canUseLightweightFlatRendererRefresh()) {
+        this.applyFlatViewAndRefreshRenderer();
+      } else {
+        await this.applyDerivedViewToRenderer();
+      }
     }
   }
 
@@ -1161,8 +1457,7 @@ export class Grid {
     this.treeDataOptions = this.normalizeTreeDataOptions(mergeTreeDataOptions(this.treeDataOptions, treeData));
     this.treeMode = this.treeDataOptions.mode === 'server' ? 'server' : 'client';
     this.treeExpansionState = {};
-    this.treeLazyChildrenByParent.clear();
-    this.treeLoadingParents.clear();
+    this.clearTreeLazyCaches();
     this.treeDataProvider = null;
     this.options = {
       ...this.options,
@@ -1363,7 +1658,62 @@ export class Grid {
     this.dataProviderUnsubscribe = this.providerLifecycleService.disconnectRowsChangedListener(this.dataProviderUnsubscribe);
     this.commandEventUnsubscribe?.();
     this.commandEventUnsubscribe = null;
+    this.invalidateWorkerProjectionCache();
+    this.sortExecutor.destroy();
+    this.filterExecutor.destroy();
+    this.groupExecutor.destroy();
+    this.pivotExecutor.destroy();
+    this.treeExecutor.destroy();
     this.renderer.destroy();
+  }
+
+  private prewarmWorkerExecutors(): void {
+    if (this.options.workerRuntime?.prewarm !== true) {
+      return;
+    }
+
+    this.sortExecutor.prewarm();
+    this.filterExecutor.prewarm();
+    this.groupExecutor.prewarm();
+    this.pivotExecutor.prewarm();
+    this.treeExecutor.prewarm();
+  }
+
+  private canUseLightweightFlatRendererRefresh(): boolean {
+    return !this.hasActiveTreeData() && !this.hasActiveClientPivot() && !this.hasActiveClientGrouping();
+  }
+
+  private applyFlatViewAndRefreshRenderer(): void {
+    this.restoreColumnsAfterClientPivot();
+    this.pivotColumns = [];
+    this.commitDataPipelineResult(
+      this.dataPipelineService.applyFlatView({
+        sourceDataProvider: this.sourceDataProvider,
+        rowModel: this.rowModel,
+        sortMapping: this.sortMapping,
+        filterMapping: this.filterMapping
+      })
+    );
+    this.renderer.refreshDataView();
+  }
+
+  private getWorkerLargeDataThreshold(): number {
+    const largeDataThreshold = this.options.workerRuntime?.largeDataThreshold;
+    if (typeof largeDataThreshold !== 'number' || !Number.isFinite(largeDataThreshold)) {
+      return DEFAULT_WORKER_LARGE_DATA_THRESHOLD;
+    }
+
+    return Math.max(1, Math.floor(largeDataThreshold));
+  }
+
+  private async yieldAfterLargeWorkerResult(rowCount: number): Promise<void> {
+    if (rowCount < this.getWorkerLargeDataThreshold()) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
   }
 
   private requireRemoteDataProvider(): RemoteDataProviderContract {
@@ -1377,6 +1727,10 @@ export class Grid {
   private clearDerivedViewArtifacts(): void {
     this.applyDataPipelineState(this.dataPipelineService.clearState());
     this.pivotColumns = [];
+  }
+
+  private invalidateWorkerProjectionCache(): void {
+    this.workerProjectionCache.clear();
   }
 
   private syncRemoteProviderQueryState(): void {
@@ -1431,6 +1785,7 @@ export class Grid {
   }
 
   private syncColumnsToRenderer(): void {
+    this.invalidateWorkerProjectionCache();
     this.options = {
       ...this.options,
       columns: this.columnModel.getColumns()
@@ -1530,6 +1885,7 @@ export class Grid {
   }
 
   private handleDataProviderRowsChanged = (): void => {
+    this.invalidateWorkerProjectionCache();
     const rowsChangedResolution = this.providerLifecycleService.resolveRowsChanged({
       dataProvider: this.sourceDataProvider,
       currentRowCount: this.rowModel.getState().rowCount,
@@ -1879,7 +2235,11 @@ export class Grid {
 
     if (!this.hasActiveFilterModel() || rowCount <= 0) {
       this.filterMapping = null;
-      await this.applyDerivedViewToRenderer();
+      if (this.canUseLightweightFlatRendererRefresh()) {
+        this.applyFlatViewAndRefreshRenderer();
+      } else {
+        await this.applyDerivedViewToRenderer();
+      }
       return;
     }
 
@@ -1890,7 +2250,7 @@ export class Grid {
         filterModel: this.filterModel,
         columns: this.getSchemaColumnsForModelNormalization(),
         dataProvider: this.sourceDataProvider,
-        sourceOrder: this.sortMapping ?? createIdentityMapping(rowCount)
+        sourceOrder: this.sortMapping ?? undefined
       },
       {
         isCanceled: () => operationToken !== this.filterOperationToken
@@ -1909,8 +2269,13 @@ export class Grid {
       throw new Error(response.result.message);
     }
 
-    this.filterMapping = new Int32Array(response.result.mapping);
-    await this.applyDerivedViewToRenderer();
+    this.filterMapping = reuseViewToDataMapping(response.result.mapping);
+    await this.yieldAfterLargeWorkerResult(rowCount);
+    if (this.canUseLightweightFlatRendererRefresh()) {
+      this.applyFlatViewAndRefreshRenderer();
+    } else {
+      await this.applyDerivedViewToRenderer();
+    }
   }
 
   private async rebuildDerivedView(): Promise<void> {
@@ -1954,7 +2319,7 @@ export class Grid {
       }
 
       if (response.status === 'ok') {
-        this.sortMapping = new Int32Array(response.result.mapping);
+        this.sortMapping = reuseViewToDataMapping(response.result.mapping);
       } else {
         this.sortMapping = null;
       }
@@ -1987,7 +2352,7 @@ export class Grid {
       }
 
       if (response.status === 'ok') {
-        this.filterMapping = new Int32Array(response.result.mapping);
+        this.filterMapping = reuseViewToDataMapping(response.result.mapping);
       } else {
         this.filterMapping = null;
       }
@@ -1995,6 +2360,9 @@ export class Grid {
       this.filterMapping = null;
     }
 
+    if ((this.sortMapping || this.filterMapping) && sourceRowCount >= this.getWorkerLargeDataThreshold()) {
+      await this.yieldAfterLargeWorkerResult(sourceRowCount);
+    }
     await this.applyDerivedViewToRenderer();
   }
 
@@ -2066,7 +2434,7 @@ export class Grid {
       throw new Error(response.result.message);
     }
 
-    this.applyPivotResult(response.result);
+    this.applyPivotResult(this.hydrateCustomPivotValues(response.result));
     this.renderer.setOptions(this.getRendererOptions());
   }
 
@@ -2078,6 +2446,95 @@ export class Grid {
         result
       })
     );
+  }
+
+  private buildPivotAggregationRow(columns: ColumnDef[], dataIndex: number): GridRowData {
+    const row: GridRowData = {};
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      const column = columns[columnIndex];
+      row[column.id] = this.sourceDataProvider.getValue(dataIndex, column.id);
+    }
+    return row;
+  }
+
+  private getPivotAggregationValue(column: ColumnDef, columns: ColumnDef[], dataIndex: number): unknown {
+    if (!column.valueGetter) {
+      return this.sourceDataProvider.getValue(dataIndex, column.id);
+    }
+
+    const row = this.sourceDataProvider.getRow
+      ? this.sourceDataProvider.getRow(dataIndex) ?? this.buildPivotAggregationRow(columns, dataIndex)
+      : this.buildPivotAggregationRow(columns, dataIndex);
+
+    return getColumnValue(column, row);
+  }
+
+  private hydrateCustomPivotValues(result: PivotExecutionResult): PivotExecutionResult {
+    const customPivotValues = this.pivotValues.filter((item) => typeof item.reducer === 'function');
+    if (customPivotValues.length === 0 || !Array.isArray(result.customValueDataIndexesByCell) || result.customValueDataIndexesByCell.length === 0) {
+      return result;
+    }
+
+    const columns = this.getSchemaColumnsForModelNormalization();
+    const columnById = new Map<string, ColumnDef>();
+    for (let index = 0; index < columns.length; index += 1) {
+      columnById.set(columns[index].id, columns[index]);
+    }
+
+    const customPivotValueByColumnId = new Map<string, PivotValueDef>();
+    for (let index = 0; index < customPivotValues.length; index += 1) {
+      customPivotValueByColumnId.set(customPivotValues[index].columnId, customPivotValues[index]);
+    }
+
+    const rowIndexByKey = new Map<string, number>();
+    for (let rowIndex = 0; rowIndex < result.rows.length; rowIndex += 1) {
+      const rowKey = result.rows[rowIndex]?.__pivot_row_key;
+      if (typeof rowKey === 'string' && rowKey.length > 0) {
+        rowIndexByKey.set(rowKey, rowIndex);
+      }
+    }
+
+    let changed = false;
+    const rows = result.rows.map((row) => ({ ...row }));
+    for (let index = 0; index < result.customValueDataIndexesByCell.length; index += 1) {
+      const cell = result.customValueDataIndexesByCell[index];
+      const rowIndex = rowIndexByKey.get(cell.rowKey);
+      const pivotValue = customPivotValueByColumnId.get(cell.valueColumnId);
+      const column = columnById.get(cell.valueColumnId);
+      const reducer = pivotValue?.reducer;
+      if (rowIndex === undefined || !column || typeof reducer !== 'function') {
+        continue;
+      }
+
+      const reducerValues = new Array<unknown>(cell.dataIndexes.length);
+      for (let dataIndexPosition = 0; dataIndexPosition < cell.dataIndexes.length; dataIndexPosition += 1) {
+        reducerValues[dataIndexPosition] = this.getPivotAggregationValue(column, columns, cell.dataIndexes[dataIndexPosition]);
+      }
+
+      rows[rowIndex][cell.columnId] = reducer(reducerValues, {
+        groupKey: cell.rowKey,
+        level: 0,
+        columnId: cell.valueColumnId,
+        groupValue: cell.pivotLabel,
+        rowCount: cell.dataIndexes.length
+      });
+      changed = true;
+    }
+
+    if (!changed) {
+      return result;
+    }
+
+    return {
+      opId: result.opId,
+      columns: result.columns,
+      rows,
+      rowGroupColumnIds: result.rowGroupColumnIds,
+      pivotColumnCount: result.pivotColumnCount,
+      pivotKeyCount: result.pivotKeyCount,
+      sourceRowCount: result.sourceRowCount,
+      customValueDataIndexesByCell: result.customValueDataIndexesByCell
+    };
   }
 
   private async applyGroupingViewInternal(): Promise<void> {
@@ -2118,7 +2575,7 @@ export class Grid {
       throw new Error(response.result.message);
     }
 
-    this.applyGroupingResult(response.result);
+    this.applyGroupingResult(this.hydrateCustomGroupingValues(response.result));
     this.renderer.setOptions(this.getRendererOptions());
   }
 
@@ -2132,6 +2589,106 @@ export class Grid {
         result
       })
     );
+  }
+
+  private buildGroupingAggregationRow(columns: ColumnDef[], dataIndex: number): GridRowData {
+    const row: GridRowData = {};
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      const column = columns[columnIndex];
+      row[column.id] = this.sourceDataProvider.getValue(dataIndex, column.id);
+    }
+    return row;
+  }
+
+  private getGroupingAggregationValue(column: ColumnDef, columns: ColumnDef[], dataIndex: number): unknown {
+    if (!column.valueGetter) {
+      return this.sourceDataProvider.getValue(dataIndex, column.id);
+    }
+
+    const row = this.sourceDataProvider.getRow
+      ? this.sourceDataProvider.getRow(dataIndex) ?? this.buildGroupingAggregationRow(columns, dataIndex)
+      : this.buildGroupingAggregationRow(columns, dataIndex);
+
+    return getColumnValue(column, row);
+  }
+
+  private hydrateCustomGroupingValues(result: GroupExecutionResult): GroupExecutionResult {
+    const customAggregations = this.groupAggregations.filter((aggregation) => typeof aggregation.reducer === 'function');
+    if (customAggregations.length === 0 || !result.groupLeafDataIndexesByKey) {
+      return result;
+    }
+
+    const columns = this.getSchemaColumnsForModelNormalization();
+    const columnById = new Map<string, ColumnDef>();
+    for (let index = 0; index < columns.length; index += 1) {
+      columnById.set(columns[index].id, columns[index]);
+    }
+
+    let changed = false;
+    const rows = result.rows.map((row) => {
+      if (row.kind !== 'group') {
+        return row;
+      }
+
+      const dataIndexes = result.groupLeafDataIndexesByKey?.[row.groupKey];
+      if (!Array.isArray(dataIndexes) || dataIndexes.length === 0) {
+        return row;
+      }
+
+      let rowChanged = false;
+      const values = { ...row.values };
+      for (let index = 0; index < customAggregations.length; index += 1) {
+        const aggregation = customAggregations[index];
+        const reducer = aggregation.reducer;
+        const column = columnById.get(aggregation.columnId);
+        if (
+          typeof reducer !== 'function' ||
+          !column ||
+          Object.prototype.hasOwnProperty.call(values, aggregation.columnId)
+        ) {
+          continue;
+        }
+
+        const reducerValues = new Array<unknown>(dataIndexes.length);
+        for (let dataIndexPosition = 0; dataIndexPosition < dataIndexes.length; dataIndexPosition += 1) {
+          reducerValues[dataIndexPosition] = this.getGroupingAggregationValue(
+            column,
+            columns,
+            dataIndexes[dataIndexPosition]
+          );
+        }
+
+        values[aggregation.columnId] = reducer(reducerValues, {
+          groupKey: row.groupKey,
+          level: row.level,
+          columnId: row.columnId,
+          groupValue: row.value,
+          rowCount: row.leafCount
+        });
+        rowChanged = true;
+      }
+
+      if (!rowChanged) {
+        return row;
+      }
+
+      changed = true;
+      return {
+        ...row,
+        values
+      };
+    });
+
+    if (!changed) {
+      return result;
+    }
+
+    return {
+      opId: result.opId,
+      rows,
+      groupKeys: result.groupKeys,
+      groupLeafDataIndexesByKey: result.groupLeafDataIndexesByKey
+    };
   }
 
   private async applyTreeViewInternal(expandNodeKey?: RowKey, nextExpanded?: boolean): Promise<void> {
@@ -2174,7 +2731,7 @@ export class Grid {
       throw new Error(response.result.message);
     }
 
-    this.applyTreeResult(response.result);
+    this.applyTreeResult(this.hydrateTreeLazyRows(response.result));
     this.renderer.setOptions(this.getRendererOptions());
   }
 
@@ -2189,6 +2746,62 @@ export class Grid {
         treeColumnId: this.treeDataOptions.treeColumnId ?? ''
       })
     );
+  }
+
+  private hydrateTreeLazyRows(result: TreeExecutionResult): TreeExecutionResult {
+    if (result.rows.length === 0 || this.treeLazyRowsByRef.size === 0) {
+      return result;
+    }
+
+    let changed = false;
+    const hydratedRows = new Array<TreeExecutionResult['rows'][number]>(result.rows.length);
+    for (let index = 0; index < result.rows.length; index += 1) {
+      const row = result.rows[index];
+      if (row.sourceDataIndex !== null || !row.localRow) {
+        hydratedRows[index] = row;
+        continue;
+      }
+
+      const lazyRowRef = row.localRow[WORKER_TREE_LAZY_ROW_REF_FIELD];
+      if (typeof lazyRowRef !== 'string' || lazyRowRef.length === 0) {
+        hydratedRows[index] = row;
+        continue;
+      }
+
+      changed = true;
+      const lazyRow = this.treeLazyRowsByRef.get(lazyRowRef);
+      if (lazyRow) {
+        hydratedRows[index] = {
+          ...row,
+          localRow: lazyRow
+        };
+        continue;
+      }
+
+      const nextLocalRow = { ...row.localRow };
+      delete nextLocalRow[WORKER_TREE_LAZY_ROW_REF_FIELD];
+      hydratedRows[index] = {
+        ...row,
+        localRow: nextLocalRow
+      };
+    }
+
+    if (!changed) {
+      return result;
+    }
+
+    return {
+      opId: result.opId,
+      rows: hydratedRows,
+      nodeKeys: result.nodeKeys,
+      nodeKeyTokens: result.nodeKeyTokens
+    };
+  }
+
+  private clearTreeLazyCaches(): void {
+    this.treeLazyChildrenByParent.clear();
+    this.treeLazyRowsByRef.clear();
+    this.treeLoadingParents.clear();
   }
 
   private async ensureTreeLazyChildrenLoaded(nodeKey: RowKey): Promise<void> {
@@ -2238,10 +2851,14 @@ export class Grid {
         return;
       }
 
+      const nextRows = loadedRows.map((row) => ({ ...row }));
       this.treeLazyChildrenByParent.set(parentToken, {
         parentNodeKey: nodeKey,
-        rows: loadedRows.map((row) => ({ ...row }))
+        rows: nextRows
       });
+      for (let rowIndex = 0; rowIndex < nextRows.length; rowIndex += 1) {
+        this.treeLazyRowsByRef.set(createWorkerTreeLazyRowRef(nodeKey, rowIndex), nextRows[rowIndex]);
+      }
     } finally {
       this.treeLoadingParents.delete(parentToken);
     }

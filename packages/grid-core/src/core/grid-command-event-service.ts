@@ -4,10 +4,15 @@ import type { ColumnReorderEvent, ColumnResizeEvent, EventBus, GridEventMap } fr
 import type {
   GridAuditLogPort,
   GridColumnMutationPort,
-  GridDerivedViewControllerPort
+  GridDerivedViewControllerPort,
+  GridWorkerProjectionCachePort
 } from './grid-internal-contracts';
 
-export interface GridCommandEventServiceParams extends GridColumnMutationPort, GridDerivedViewControllerPort, GridAuditLogPort {
+export interface GridCommandEventServiceParams
+  extends GridColumnMutationPort,
+    GridDerivedViewControllerPort,
+    GridWorkerProjectionCachePort,
+    GridAuditLogPort {
   eventBus: EventBus;
 }
 
@@ -104,6 +109,8 @@ export class GridCommandEventService {
   }
 
   public handleEditCommit(params: GridCommandEventServiceParams, event: GridEventMap['editCommit']): void {
+    params.invalidateWorkerProjectionCache();
+
     if (params.isTreeDataActive()) {
       void params.applyTreeView();
     } else if (params.isClientGroupingActive()) {

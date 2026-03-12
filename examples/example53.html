@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 53 - Worker Projection Prefix Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 980px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 53 - Worker Projection Prefix Smoke</h1>
+    <p>
+      worker projection이 hidden derived column `fullName`만 필요할 때, 그보다 뒤에 있는 unrelated trailing derived column `tailBadge`를
+      계산하지 않는지 확인하는 smoke example입니다. `prefixName -> fullName`은 계산되지만 `tailBadge` counter는 0이어야 합니다.
+    </p>
+
+    <div class="toolbar">
+      <button id="sort-full-name" type="button">sort fullName asc</button>
+      <button id="sort-full-name-desc" type="button">sort fullName desc</button>
+      <button id="filter-hopper" type="button">filter Hopper</button>
+      <button id="reset-flat" type="button">reset flat</button>
+      <button id="replace-rows" type="button">replace rows</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>Grid State</h2>
+        <pre id="state-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Getter Counters</h2>
+        <pre id="counter-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Worker Runtime</h2>
+        <pre id="worker-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>CSV Preview</h2>
+        <pre id="preview-panel">No export yet.</pre>
+      </section>
+      <section class="panel">
+        <h2>Action Log</h2>
+        <pre id="log-panel">Ready</pre>
+      </section>
+    </div>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const workerUrls = [];
+      const workerMessages = [];
+      const workerCounts = {
+        sort: 0,
+        filter: 0,
+        group: 0,
+        pivot: 0,
+        tree: 0
+      };
+      let prefixNameGetterCalls = 0;
+      let fullNameGetterCalls = 0;
+      let tailBadgeGetterCalls = 0;
+      let activeDataset = 'seed';
+      let isReady = false;
+      const NativeWorker = window.Worker;
+
+      if (typeof NativeWorker === 'function') {
+        function inferWorkerKind(url) {
+          if (String(url).indexOf('sort.worker.js') >= 0) {
+            return 'sort';
+          }
+          if (String(url).indexOf('filter.worker.js') >= 0) {
+            return 'filter';
+          }
+          if (String(url).indexOf('group.worker.js') >= 0) {
+            return 'group';
+          }
+          if (String(url).indexOf('pivot.worker.js') >= 0) {
+            return 'pivot';
+          }
+          if (String(url).indexOf('tree.worker.js') >= 0) {
+            return 'tree';
+          }
+          return 'unknown';
+        }
+
+        window.Worker = function WrappedWorker(url, options) {
+          const worker = new NativeWorker(url, options);
+          const kind = inferWorkerKind(url);
+          workerUrls.push(String(url));
+          if (workerCounts[kind] !== undefined) {
+            workerCounts[kind] += 1;
+          }
+
+          const originalPostMessage = worker.postMessage.bind(worker);
+          worker.postMessage = function wrappedPostMessage(message, transfer) {
+            workerMessages.unshift({
+              direction: 'main->worker',
+              kind,
+              type: message && typeof message === 'object' ? message.type : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+            return originalPostMessage(message, transfer);
+          };
+
+          worker.addEventListener('message', (event) => {
+            const message = event.data;
+            workerMessages.unshift({
+              direction: 'worker->main',
+              kind,
+              status: message && typeof message === 'object' ? message.status : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+          });
+
+          return worker;
+        };
+        window.Worker.prototype = NativeWorker.prototype;
+      }
+
+      const statePanel = document.getElementById('state-panel');
+      const counterPanel = document.getElementById('counter-panel');
+      const workerPanel = document.getElementById('worker-panel');
+      const previewPanel = document.getElementById('preview-panel');
+      const logPanel = document.getElementById('log-panel');
+
+      function pushLog(message) {
+        const lines = logPanel.textContent ? logPanel.textContent.split('\n') : [];
+        lines.unshift(new Date().toLocaleTimeString('ko-KR') + ' - ' + message);
+        logPanel.textContent = lines.slice(0, 14).join('\n');
+      }
+
+      const seedRows = [
+        ['Ada', 'Lovelace', 'mathematician'],
+        ['Grace', 'Hopper', 'compiler'],
+        ['Alan', 'Turing', 'logic'],
+        ['Katherine', 'Johnson', 'nasa'],
+        ['Dorothy', 'Vaughan', 'nasa'],
+        ['Margaret', 'Hamilton', 'apollo']
+      ];
+      const replacementRows = [
+        ['Barbara', 'Liskov', 'systems'],
+        ['Donald', 'Knuth', 'algorithms'],
+        ['Edsger', 'Dijkstra', 'logic'],
+        ['Frances', 'Allen', 'compiler'],
+        ['Leslie', 'Lamport', 'distributed'],
+        ['John', 'Backus', 'fortran']
+      ];
+
+      function buildRows(seed) {
+        return Array.from({ length: 120 }, (_, index) => {
+          const current = seed[index % seed.length];
+          return {
+            id: index + 1,
+            firstName: current[0],
+            lastName: current[1],
+            team: current[2],
+            score: 120 - index
+          };
+        });
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'firstName', header: 'First Name', width: 160, type: 'text' },
+        { id: 'lastName', header: 'Last Name', width: 160, type: 'text' },
+        { id: 'team', header: 'Team', width: 180, type: 'text' },
+        {
+          id: 'prefixName',
+          header: 'Prefix Name',
+          width: 220,
+          type: 'text',
+          visible: false,
+          valueGetter(row) {
+            prefixNameGetterCalls += 1;
+            return String(row.firstName) + '-' + String(row.lastName);
+          }
+        },
+        {
+          id: 'fullName',
+          header: 'Full Name',
+          width: 240,
+          type: 'text',
+          visible: false,
+          valueGetter(row) {
+            fullNameGetterCalls += 1;
+            return String(row.prefixName) + ' / ' + String(row.team);
+          }
+        },
+        {
+          id: 'tailBadge',
+          header: 'Tail Badge',
+          width: 240,
+          type: 'text',
+          visible: false,
+          valueGetter(row) {
+            tailBadgeGetterCalls += 1;
+            return '[' + String(row.fullName).toUpperCase() + ']';
+          }
+        },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: buildRows(seedRows),
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        workerRuntime: {
+          enabled: true,
+          assetBaseUrl: '../packages/grid-core/dist',
+          timeoutMs: 4000,
+          largeDataThreshold: 50
+        }
+      });
+
+      async function updatePreview() {
+        const result = await grid.exportCsv({
+          includeHeaders: false,
+          scope: 'viewport'
+        });
+        previewPanel.textContent = result.content;
+      }
+
+      function resetGetterCounters() {
+        prefixNameGetterCalls = 0;
+        fullNameGetterCalls = 0;
+        tailBadgeGetterCalls = 0;
+      }
+
+      function renderPanels() {
+        statePanel.textContent = JSON.stringify(
+          {
+            dataset: activeDataset,
+            sortModel: grid.getSortModel(),
+            filterModel: grid.getFilterModel(),
+            visibleColumns: grid.getVisibleColumns().map((column) => column.header)
+          },
+          null,
+          2
+        );
+
+        counterPanel.textContent = JSON.stringify(
+          {
+            prefixNameGetterCalls,
+            fullNameGetterCalls,
+            tailBadgeGetterCalls
+          },
+          null,
+          2
+        );
+
+        workerPanel.textContent = JSON.stringify(
+          {
+            workerCounts,
+            urls: workerUrls.slice(-6),
+            messages: workerMessages.slice(0, 12)
+          },
+          null,
+          2
+        );
+      }
+
+      async function sortFullNameAsc() {
+        pushLog('sort fullName asc');
+        await grid.setSortModel([{ columnId: 'fullName', direction: 'asc' }]);
+        await updatePreview();
+        renderPanels();
+      }
+
+      async function sortFullNameDesc() {
+        pushLog('sort fullName desc');
+        await grid.setSortModel([{ columnId: 'fullName', direction: 'desc' }]);
+        await updatePreview();
+        renderPanels();
+      }
+
+      async function filterHopper() {
+        pushLog('filter Hopper');
+        await grid.setFilterModel({
+          fullName: {
+            kind: 'text',
+            operator: 'contains',
+            value: 'Hopper'
+          }
+        });
+        await updatePreview();
+        renderPanels();
+      }
+
+      async function resetFlat() {
+        pushLog('reset flat');
+        await grid.setFilterModel({});
+        await grid.setSortModel([]);
+        await updatePreview();
+        renderPanels();
+      }
+
+      async function replaceRows() {
+        activeDataset = 'replacement';
+        pushLog('replace rows');
+        grid.setOptions({
+          rowData: buildRows(replacementRows)
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await updatePreview();
+        renderPanels();
+      }
+
+      function getSnapshot() {
+        return {
+          isReady,
+          dataset: activeDataset,
+          sortModel: grid.getSortModel(),
+          filterModel: grid.getFilterModel(),
+          workerCounts: {
+            sort: workerCounts.sort,
+            filter: workerCounts.filter,
+            group: workerCounts.group,
+            pivot: workerCounts.pivot,
+            tree: workerCounts.tree
+          },
+          prefixNameGetterCalls,
+          fullNameGetterCalls,
+          tailBadgeGetterCalls,
+          preview: previewPanel.textContent
+        };
+      }
+
+      document.getElementById('sort-full-name').addEventListener('click', () => {
+        void sortFullNameAsc();
+      });
+      document.getElementById('sort-full-name-desc').addEventListener('click', () => {
+        void sortFullNameDesc();
+      });
+      document.getElementById('filter-hopper').addEventListener('click', () => {
+        void filterHopper();
+      });
+      document.getElementById('reset-flat').addEventListener('click', () => {
+        void resetFlat();
+      });
+      document.getElementById('replace-rows').addEventListener('click', () => {
+        void replaceRows();
+      });
+      document.getElementById('inspect').addEventListener('click', async () => {
+        await updatePreview();
+        renderPanels();
+        pushLog('inspect');
+        console.log('[example53]', getSnapshot());
+      });
+
+      void (async () => {
+        await updatePreview();
+        resetGetterCounters();
+        isReady = true;
+        renderPanels();
+      })();
+      renderPanels();
+
+      window.__example53 = {
+        sortFullNameAsc,
+        sortFullNameDesc,
+        filterHopper,
+        resetFlat,
+        replaceRows,
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

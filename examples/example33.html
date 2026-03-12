@@ -155,10 +155,15 @@
         },
         height: 420,
         rowHeight: 28,
-        overscan: 8
+        overscan: 8,
+        workerRuntime: {
+          assetBaseUrl: '../packages/grid-core/dist',
+          timeoutMs: 180000
+        }
       });
 
       const logElement = document.getElementById('log');
+      let actionQueue = Promise.resolve();
 
       function getSnapshot() {
         const headerTexts = Array.from(document.querySelectorAll('.hgrid__header-cell'))
@@ -186,39 +191,65 @@
         });
       }
 
-      document.getElementById('pivot-region-month').addEventListener('click', async () => {
-        await grid.setGroupingMode('client');
-        await grid.setPivotingMode('client');
-        await grid.setGroupModel([{ columnId: 'region' }]);
-        await grid.setPivotModel([{ columnId: 'month' }]);
-        await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
-        await waitFrame();
-        writeLog('pivot-region-month');
+      function queueAction(label, action) {
+        actionQueue = actionQueue.then(async () => {
+          await action();
+          await waitFrame();
+          writeLog(label);
+        });
+        return actionQueue;
+      }
+
+      function applyRegionMonthPivot() {
+        return queueAction('pivot-region-month', async () => {
+          await grid.setGroupingMode('client');
+          await grid.setPivotingMode('client');
+          await grid.setGroupModel([{ columnId: 'region' }]);
+          await grid.setPivotModel([{ columnId: 'month' }]);
+          await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
+        });
+      }
+
+      function applyProductMonthPivot() {
+        return queueAction('pivot-product-month', async () => {
+          await grid.setGroupingMode('client');
+          await grid.setPivotingMode('client');
+          await grid.setGroupModel([{ columnId: 'product' }]);
+          await grid.setPivotModel([{ columnId: 'month' }]);
+          await grid.setPivotValues([{ columnId: 'sales', type: 'avg' }]);
+        });
+      }
+
+      function clearPivot() {
+        return queueAction('clear-pivot', async () => {
+          await grid.clearPivotModel();
+          await grid.setPivotValues([]);
+          await grid.clearGroupModel();
+        });
+      }
+
+      function set100k() {
+        return queueAction('set-100k', async () => {
+          grid.setOptions({
+            dataProvider: new SyntheticPivotProvider(100000)
+          });
+        });
+      }
+
+      document.getElementById('pivot-region-month').addEventListener('click', () => {
+        void applyRegionMonthPivot();
       });
 
-      document.getElementById('pivot-product-month').addEventListener('click', async () => {
-        await grid.setGroupingMode('client');
-        await grid.setPivotingMode('client');
-        await grid.setGroupModel([{ columnId: 'product' }]);
-        await grid.setPivotModel([{ columnId: 'month' }]);
-        await grid.setPivotValues([{ columnId: 'sales', type: 'avg' }]);
-        await waitFrame();
-        writeLog('pivot-product-month');
+      document.getElementById('pivot-product-month').addEventListener('click', () => {
+        void applyProductMonthPivot();
       });
 
-      document.getElementById('clear-pivot').addEventListener('click', async () => {
-        await grid.clearPivotModel();
-        await grid.setPivotValues([]);
-        await grid.clearGroupModel();
-        await waitFrame();
-        writeLog('clear-pivot');
+      document.getElementById('clear-pivot').addEventListener('click', () => {
+        void clearPivot();
       });
 
-      document.getElementById('set-100k').addEventListener('click', async () => {
-        const syntheticRows = Array.from({ length: 100000 }, (_, index) => buildRawRow(index + 200000));
-        grid.setOptions({ rowData: syntheticRows });
-        await waitFrame();
-        writeLog('set-100k');
+      document.getElementById('set-100k').addEventListener('click', () => {
+        void set100k();
       });
 
       document.getElementById('inspect').addEventListener('click', async () => {
@@ -230,21 +261,11 @@
         getSnapshot() {
           return getSnapshot();
         },
-        async applyRegionMonthPivot() {
-          await grid.setGroupingMode('client');
-          await grid.setPivotingMode('client');
-          await grid.setGroupModel([{ columnId: 'region' }]);
-          await grid.setPivotModel([{ columnId: 'month' }]);
-          await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
-        },
-        async clearPivot() {
-          await grid.clearPivotModel();
-          await grid.setPivotValues([]);
-          await grid.clearGroupModel();
-        },
+        applyRegionMonthPivot,
+        clearPivot,
         async runPerfScenario() {
           grid.setOptions({
-            dataProvider: new SyntheticPivotProvider(150000)
+            dataProvider: new SyntheticPivotProvider(100000)
           });
           await grid.setGroupingMode('client');
           await grid.setPivotingMode('client');

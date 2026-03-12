@@ -84,6 +84,7 @@ export interface GroupExecutionRequest {
   sourceOrder?: Int32Array | number[];
   groupExpansionState?: Record<string, boolean>;
   defaultExpanded?: boolean;
+  includeLeafDataIndexes?: boolean;
 }
 
 export interface GroupExecutionContext {
@@ -95,6 +96,7 @@ export interface GroupExecutionResult {
   opId: string;
   rows: GroupViewRow[];
   groupKeys: string[];
+  groupLeafDataIndexesByKey?: Record<string, number[]>;
 }
 
 export interface GroupExecutor {
@@ -531,6 +533,7 @@ async function appendNodeRows(
   definitions: NormalizedAggregationDef[],
   rows: GroupViewRow[],
   groupKeys: string[],
+  groupLeafDataIndexesByKey: Record<string, number[]> | undefined,
   groupExpansionState: Record<string, boolean> | undefined,
   defaultExpanded: boolean,
   context: GroupExecutionContext | undefined,
@@ -539,6 +542,9 @@ async function appendNodeRows(
 ): Promise<boolean> {
   const isExpanded = resolveGroupExpandedState(node.key, groupExpansionState, defaultExpanded);
   groupKeys.push(node.key);
+  if (groupLeafDataIndexesByKey) {
+    groupLeafDataIndexesByKey[node.key] = node.dataIndexes.slice();
+  }
 
   const values: Record<string, unknown> = {};
   values[node.columnId] = buildGroupLabel(node.column, node.value, node.leafCount);
@@ -591,6 +597,7 @@ async function appendNodeRows(
         definitions,
         rows,
         groupKeys,
+        groupLeafDataIndexesByKey,
         groupExpansionState,
         defaultExpanded,
         context,
@@ -646,6 +653,7 @@ export class CooperativeGroupExecutor implements GroupExecutor {
       }
 
       const normalizedAggregations = normalizeAggregations(request.aggregations, request.columns);
+      const includeLeafDataIndexes = request.includeLeafDataIndexes === true;
       const rootNode = createRootNode();
       const yieldInterval = normalizeYieldInterval(context?.yieldInterval);
       const processedCounter = { value: 0 };
@@ -700,7 +708,7 @@ export class CooperativeGroupExecutor implements GroupExecutor {
 
           node.leafCount += 1;
           applyAggregationsToNode(node, normalizedAggregations, aggregationRowValues);
-          if (level === normalizedGroupModel.length - 1) {
+          if (includeLeafDataIndexes || level === normalizedGroupModel.length - 1) {
             node.dataIndexes.push(dataIndex);
           }
 
@@ -717,6 +725,7 @@ export class CooperativeGroupExecutor implements GroupExecutor {
 
       const rows: GroupViewRow[] = [];
       const groupKeys: string[] = [];
+      const groupLeafDataIndexesByKey = includeLeafDataIndexes ? {} : undefined;
       const defaultExpanded = request.defaultExpanded !== false;
       for (let rootIndex = 0; rootIndex < rootNode.childOrder.length; rootIndex += 1) {
         const rootToken = rootNode.childOrder[rootIndex];
@@ -730,6 +739,7 @@ export class CooperativeGroupExecutor implements GroupExecutor {
           normalizedAggregations,
           rows,
           groupKeys,
+          groupLeafDataIndexesByKey,
           request.groupExpansionState,
           defaultExpanded,
           context,
@@ -748,7 +758,8 @@ export class CooperativeGroupExecutor implements GroupExecutor {
       return createWorkerOkResponse(request.opId, {
         opId: request.opId,
         rows,
-        groupKeys
+        groupKeys,
+        groupLeafDataIndexesByKey
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to execute grouping';

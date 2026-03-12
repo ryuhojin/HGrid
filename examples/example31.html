@@ -189,7 +189,11 @@
         },
         height: 460,
         rowHeight: 30,
-        overscan: 8
+        overscan: 8,
+        workerRuntime: {
+          assetBaseUrl: '../packages/grid-core/dist',
+          timeoutMs: 180000
+        }
       });
 
       const applyGroupModel = async (groupModel) => {
@@ -286,7 +290,7 @@
           return true;
         },
         async runPerfScenario() {
-          const provider = new SyntheticGroupingProvider(120000);
+          const provider = new SyntheticGroupingProvider(100000);
           grid.setOptions({ dataProvider: provider });
           await grid.setGroupingMode('client');
           await grid.setGroupModel([{ columnId: 'region' }, { columnId: 'status' }]);

@@ -46,3 +46,7 @@
 - example/e2e:
   - `examples/example32.html`
   - `scripts/run-e2e.mjs` Example32
+
+## 성능 스모크
+- `scripts/run-e2e.mjs`는 `__example32.runPerfScenario` 동안 heartbeat(`setInterval(16ms)`) `maxGap`을 측정한다.
+- 현재 smoke 기준은 `maxGap < 420ms`다.

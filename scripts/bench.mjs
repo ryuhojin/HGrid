@@ -52,6 +52,14 @@ function validateResult(result) {
   ensureFinite(result.mapping100m.roundTripDriftRows, 'mapping100m.roundTripDriftRows');
   ensureFinite(result.sort1m.maxGapMs, 'sort1m.maxGapMs');
   ensureFinite(result.filter1m.maxGapMs, 'filter1m.maxGapMs');
+  ensureFinite(result.workerComparison1m.sort.workerOn.maxGapMs, 'workerComparison1m.sort.workerOn.maxGapMs');
+  ensureFinite(result.workerComparison1m.sort.workerOff.maxGapMs, 'workerComparison1m.sort.workerOff.maxGapMs');
+  ensureFinite(result.workerComparison1m.filter.workerOn.maxGapMs, 'workerComparison1m.filter.workerOn.maxGapMs');
+  ensureFinite(result.workerComparison1m.filter.workerOff.maxGapMs, 'workerComparison1m.filter.workerOff.maxGapMs');
+  ensureFinite(result.workerComparison1m.sort.workerOn.workerCreatedCount, 'workerComparison1m.sort.workerOn.workerCreatedCount');
+  ensureFinite(result.workerComparison1m.sort.workerOff.workerCreatedCount, 'workerComparison1m.sort.workerOff.workerCreatedCount');
+  ensureFinite(result.workerComparison1m.filter.workerOn.workerCreatedCount, 'workerComparison1m.filter.workerOn.workerCreatedCount');
+  ensureFinite(result.workerComparison1m.filter.workerOff.workerCreatedCount, 'workerComparison1m.filter.workerOff.workerCreatedCount');
   ensureFinite(result.createDestroy200.durationMs, 'createDestroy200.durationMs');
   ensureFinite(result.scrollRegression.headerBodyMismatchCount, 'scrollRegression.headerBodyMismatchCount');
   ensureFinite(result.scrollRegression.pinnedWheelSourceMismatchCount, 'scrollRegression.pinnedWheelSourceMismatchCount');
@@ -96,6 +104,44 @@ function validateResult(result) {
   assert.ok(
     result.filter1m.maxGapMs <= MAX_FILTER_UI_GAP_MS,
     `filter 1m UI gap regression: ${result.filter1m.maxGapMs}ms`
+  );
+  assert.equal(
+    result.workerComparison1m.sort.workerOn.workerRuntimeEnabled,
+    true,
+    'workerComparison1m.sort.workerOn must run with worker runtime enabled'
+  );
+  assert.equal(
+    result.workerComparison1m.sort.workerOff.workerRuntimeEnabled,
+    false,
+    'workerComparison1m.sort.workerOff must run with worker runtime disabled'
+  );
+  assert.equal(
+    result.workerComparison1m.filter.workerOn.workerRuntimeEnabled,
+    true,
+    'workerComparison1m.filter.workerOn must run with worker runtime enabled'
+  );
+  assert.equal(
+    result.workerComparison1m.filter.workerOff.workerRuntimeEnabled,
+    false,
+    'workerComparison1m.filter.workerOff must run with worker runtime disabled'
+  );
+  assert.ok(
+    result.workerComparison1m.sort.workerOn.workerCreatedCount >= 1,
+    `workerComparison1m.sort.workerOn should create at least one worker, got ${result.workerComparison1m.sort.workerOn.workerCreatedCount}`
+  );
+  assert.equal(
+    result.workerComparison1m.sort.workerOff.workerCreatedCount,
+    0,
+    `workerComparison1m.sort.workerOff should not create workers, got ${result.workerComparison1m.sort.workerOff.workerCreatedCount}`
+  );
+  assert.ok(
+    result.workerComparison1m.filter.workerOn.workerCreatedCount >= 1,
+    `workerComparison1m.filter.workerOn should create at least one worker, got ${result.workerComparison1m.filter.workerOn.workerCreatedCount}`
+  );
+  assert.equal(
+    result.workerComparison1m.filter.workerOff.workerCreatedCount,
+    0,
+    `workerComparison1m.filter.workerOff should not create workers, got ${result.workerComparison1m.filter.workerOff.workerCreatedCount}`
   );
   assert.ok(
     result.createDestroy200.durationMs < MAX_CREATE_DESTROY_DURATION_MS,

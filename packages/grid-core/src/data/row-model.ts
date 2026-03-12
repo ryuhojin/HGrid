@@ -273,6 +273,22 @@ export class RowModel {
     this.rebuildDataToViewIndex();
   }
 
+  public setBaseViewToDataTrusted(mapping: Int32Array | null): void {
+    if (mapping === null) {
+      this.setBaseIdentityMapping();
+      return;
+    }
+
+    if (mapping.length !== this.rowCount) {
+      throw new Error(`Base row order length must equal rowCount (${this.rowCount})`);
+    }
+
+    this.baseViewToData = mapping;
+    this.sparseOverrides = null;
+    this.baseMappingMode = 'materialized';
+    this.rebuildDataToViewIndex();
+  }
+
   public setBaseIdentityMapping(): void {
     this.baseViewToData = null;
     this.sparseOverrides = null;
@@ -310,6 +326,21 @@ export class RowModel {
 
     validateMapping(mapping, this.rowCount);
     this.filterViewToData = normalizeMapping(mapping);
+    this.rebuildDataToViewIndex();
+  }
+
+  public setFilterViewToDataTrusted(mapping: Int32Array | null): void {
+    if (mapping === null) {
+      this.filterViewToData = null;
+      this.rebuildDataToViewIndex();
+      return;
+    }
+
+    if (mapping.length > this.rowCount) {
+      throw new Error(`Filter row order length must be <= rowCount (${this.rowCount})`);
+    }
+
+    this.filterViewToData = mapping;
     this.rebuildDataToViewIndex();
   }
 

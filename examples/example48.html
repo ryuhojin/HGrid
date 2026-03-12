@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 48 - Worker Custom Pivot Reducer Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 1040px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 48 - Worker Custom Pivot Reducer Smoke</h1>
+    <p>
+      custom pivot reducer를 worker-first 경로에서 확인하는 smoke example입니다. worker는 pivot columns와 cell bucket 구조를 만들고,
+      reducer는 main thread에서 최종 셀 값만 hydrate합니다. `sales sum * 2`를 사용하므로 일반 sum과 다른 숫자가 보여야 합니다.
+    </p>
+
+    <div class="toolbar">
+      <button id="run-custom-pivot" type="button">run custom pivot</button>
+      <button id="reset-flat" type="button">reset flat</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>Pivot State</h2>
+        <pre id="state-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Worker Activity</h2>
+        <pre id="worker-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Preview</h2>
+        <pre id="preview-panel">No pivot yet.</pre>
+      </section>
+      <section class="panel">
+        <h2>Action Log</h2>
+        <pre id="log-panel">Ready</pre>
+      </section>
+    </div>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const workerUrls = [];
+      const workerMessages = [];
+      const workerCounts = {
+        sort: 0,
+        filter: 0,
+        group: 0,
+        pivot: 0,
+        tree: 0
+      };
+      const NativeWorker = window.Worker;
+
+      if (typeof NativeWorker === 'function') {
+        function inferWorkerKind(url) {
+          if (url.indexOf('sort.worker.js') >= 0) {
+            return 'sort';
+          }
+          if (url.indexOf('filter.worker.js') >= 0) {
+            return 'filter';
+          }
+          if (url.indexOf('group.worker.js') >= 0) {
+            return 'group';
+          }
+          if (url.indexOf('pivot.worker.js') >= 0) {
+            return 'pivot';
+          }
+          if (url.indexOf('tree.worker.js') >= 0) {
+            return 'tree';
+          }
+          return 'unknown';
+        }
+
+        window.Worker = function WrappedWorker(url, options) {
+          const worker = new NativeWorker(url, options);
+          const workerUrl = String(url);
+          const kind = inferWorkerKind(workerUrl);
+          workerUrls.push(workerUrl);
+          if (workerCounts[kind] !== undefined) {
+            workerCounts[kind] += 1;
+          }
+
+          const originalPostMessage = worker.postMessage.bind(worker);
+          worker.postMessage = function wrappedPostMessage(message, transfer) {
+            workerMessages.unshift({
+              direction: 'main->worker',
+              kind,
+              type: message && typeof message === 'object' ? message.type : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+            return originalPostMessage(message, transfer);
+          };
+
+          worker.addEventListener('message', (event) => {
+            const message = event.data;
+            workerMessages.unshift({
+              direction: 'worker->main',
+              kind,
+              status: message && typeof message === 'object' ? message.status : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+          });
+
+          return worker;
+        };
+        window.Worker.prototype = NativeWorker.prototype;
+      }
+
+      const statePanel = document.getElementById('state-panel');
+      const workerPanel = document.getElementById('worker-panel');
+      const previewPanel = document.getElementById('preview-panel');
+      const logPanel = document.getElementById('log-panel');
+      const rowData = Array.from({ length: 120 }, (_, index) => ({
+        id: index + 1,
+        region: index < 60 ? 'KR' : 'US',
+        month: index % 2 === 0 ? 'Jan' : 'Feb',
+        sales: index < 60 ? 1 : 2
+      }));
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'month', header: 'Month', width: 140, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        workerRuntime: {
+          enabled: true,
+          assetBaseUrl: '../packages/grid-core/dist',
+          timeoutMs: 4000,
+          largeDataThreshold: 50
+        }
+      });
+
+      function pushLog(message) {
+        const lines = logPanel.textContent ? logPanel.textContent.split('\n') : [];
+        lines.unshift(new Date().toLocaleTimeString('ko-KR') + ' - ' + message);
+        logPanel.textContent = lines.slice(0, 14).join('\n');
+      }
+
+      function renderPanels() {
+        statePanel.textContent = JSON.stringify(
+          {
+            pivotModel: grid.getPivotModel(),
+            pivotValues: grid.getPivotValues().map((item) => ({ columnId: item.columnId, type: item.type })),
+            visibleColumns: grid.getVisibleColumns().map((column) => column.header)
+          },
+          null,
+          2
+        );
+
+        workerPanel.textContent = JSON.stringify(
+          {
+            workerCounts,
+            urls: workerUrls.slice(-6),
+            messages: workerMessages.slice(0, 12)
+          },
+          null,
+          2
+        );
+      }
+
+      async function renderPreview() {
+        const result = await grid.exportCsv({ includeHeaders: false });
+        previewPanel.textContent = result.content.split('\n').slice(0, 6).join('\n');
+      }
+
+      async function runCustomPivot() {
+        await grid.setGroupModel([{ columnId: 'region' }]);
+        await grid.setPivotingMode('client');
+        await grid.setPivotModel([{ columnId: 'month' }]);
+        await grid.setPivotValues([
+          {
+            columnId: 'sales',
+            reducer(values) {
+              return values.reduce((sum, value) => sum + Number(value ?? 0), 0) * 2;
+            }
+          }
+        ]);
+        renderPanels();
+        await renderPreview();
+        pushLog('custom pivot reducer applied / pivotWorkers=' + String(workerCounts.pivot));
+      }
+
+      async function resetFlat() {
+        await grid.clearPivotModel();
+        await grid.setPivotValues([]);
+        await grid.setGroupModel([]);
+        renderPanels();
+        previewPanel.textContent = 'No pivot yet.';
+        pushLog('reset flat');
+      }
+
+      function getSnapshot() {
+        return {
+          workerCounts: {
+            sort: workerCounts.sort,
+            filter: workerCounts.filter,
+            group: workerCounts.group,
+            pivot: workerCounts.pivot,
+            tree: workerCounts.tree
+          },
+          visibleColumns: grid.getVisibleColumns().map((column) => column.header),
+          preview: previewPanel.textContent
+        };
+      }
+
+      document.getElementById('run-custom-pivot').addEventListener('click', () => {
+        void runCustomPivot();
+      });
+      document.getElementById('reset-flat').addEventListener('click', () => {
+        void resetFlat();
+      });
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderPanels();
+        void renderPreview();
+        pushLog('inspect');
+      });
+
+      window.__example48 = {
+        runCustomPivot,
+        resetFlat,
+        getSnapshot
+      };
+
+      renderPanels();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 54 - Async Worker Serialization Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #eef2ff;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 1080px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 54 - Async Worker Serialization Smoke</h1>
+    <p>
+      120k+ row hidden derived column `searchName`을 worker sort/filter에 태워 first-hit payload serialization이 길어질 때도
+      heartbeat와 worker message flow가 유지되는지 보는 smoke example입니다.
+    </p>
+
+    <div class="toolbar">
+      <button id="sort-derived" type="button">sort searchName asc</button>
+      <button id="filter-grace" type="button">filter Grace</button>
+      <button id="reset-grid" type="button">reset</button>
+      <button id="replace-rows" type="button">replace rows</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>Grid State</h2>
+        <pre id="state-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Heartbeat</h2>
+        <pre id="heartbeat-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Worker Runtime</h2>
+        <pre id="worker-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Preview</h2>
+        <pre id="preview-panel">No preview yet.</pre>
+      </section>
+      <section class="panel">
+        <h2>Action Log</h2>
+        <pre id="log-panel">Ready</pre>
+      </section>
+    </div>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const ROW_COUNT = 120000;
+      const workerUrls = [];
+      const workerMessages = [];
+      const workerCounts = {
+        sort: 0,
+        filter: 0,
+        group: 0,
+        pivot: 0,
+        tree: 0
+      };
+      const heartbeat = {
+        tick: 0,
+        lastTimestamp: performance.now(),
+        maxGapMs: 0
+      };
+      const heartbeatMeasurement = {
+        active: null
+      };
+      let searchNameGetterCalls = 0;
+      let activeDataset = 'seed';
+      let lastAction = null;
+      let isReady = false;
+      const NativeWorker = window.Worker;
+
+      if (typeof NativeWorker === 'function') {
+        function inferWorkerKind(url) {
+          if (String(url).indexOf('sort.worker.js') >= 0) {
+            return 'sort';
+          }
+          if (String(url).indexOf('filter.worker.js') >= 0) {
+            return 'filter';
+          }
+          if (String(url).indexOf('group.worker.js') >= 0) {
+            return 'group';
+          }
+          if (String(url).indexOf('pivot.worker.js') >= 0) {
+            return 'pivot';
+          }
+          if (String(url).indexOf('tree.worker.js') >= 0) {
+            return 'tree';
+          }
+          return 'unknown';
+        }
+
+        window.Worker = function WrappedWorker(url, options) {
+          const worker = new NativeWorker(url, options);
+          const kind = inferWorkerKind(url);
+          workerUrls.push(String(url));
+          if (workerCounts[kind] !== undefined) {
+            workerCounts[kind] += 1;
+          }
+
+          const originalPostMessage = worker.postMessage.bind(worker);
+          worker.postMessage = function wrappedPostMessage(message, transfer) {
+            workerMessages.unshift({
+              direction: 'main->worker',
+              kind,
+              type: message && typeof message === 'object' ? message.type : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+            return originalPostMessage(message, transfer);
+          };
+
+          worker.addEventListener('message', (event) => {
+            const message = event.data;
+            workerMessages.unshift({
+              direction: 'worker->main',
+              kind,
+              status: message && typeof message === 'object' ? message.status : 'unknown',
+              opId: message && typeof message === 'object' ? message.opId : null
+            });
+            renderPanels();
+          });
+
+          return worker;
+        };
+        window.Worker.prototype = NativeWorker.prototype;
+      }
+
+      const statePanel = document.getElementById('state-panel');
+      const heartbeatPanel = document.getElementById('heartbeat-panel');
+      const workerPanel = document.getElementById('worker-panel');
+      const previewPanel = document.getElementById('preview-panel');
+      const logPanel = document.getElementById('log-panel');
+
+      function pushLog(message) {
+        const lines = logPanel.textContent ? logPanel.textContent.split('\n') : [];
+        lines.unshift(new Date().toLocaleTimeString('ko-KR') + ' - ' + message);
+        logPanel.textContent = lines.slice(0, 14).join('\n');
+      }
+
+      function round(value) {
+        return Math.round(Number(value || 0) * 10) / 10;
+      }
+
+      function startHeartbeatLoop(timestamp) {
+        const gap = timestamp - heartbeat.lastTimestamp;
+        heartbeat.lastTimestamp = timestamp;
+        heartbeat.tick += 1;
+        heartbeat.maxGapMs = Math.max(heartbeat.maxGapMs, gap);
+
+        if (heartbeatMeasurement.active) {
+          heartbeatMeasurement.active.frameCount += 1;
+          heartbeatMeasurement.active.maxGapMs = Math.max(heartbeatMeasurement.active.maxGapMs, gap);
+        }
+
+        requestAnimationFrame(startHeartbeatLoop);
+      }
+
+      requestAnimationFrame(startHeartbeatLoop);
+
+      const seedRows = [
+        ['Ada', 'Lovelace', 'analytics'],
+        ['Grace', 'Hopper', 'compiler'],
+        ['Alan', 'Turing', 'logic'],
+        ['Katherine', 'Johnson', 'nasa'],
+        ['Dorothy', 'Vaughan', 'nasa'],
+        ['Margaret', 'Hamilton', 'apollo']
+      ];
+      const replacementRows = [
+        ['Barbara', 'Liskov', 'systems'],
+        ['Donald', 'Knuth', 'algorithms'],
+        ['Edsger', 'Dijkstra', 'logic'],
+        ['Frances', 'Allen', 'compiler'],
+        ['Leslie', 'Lamport', 'distributed'],
+        ['John', 'Backus', 'fortran']
+      ];
+
+      function buildRows(seed) {
+        return Array.from({ length: ROW_COUNT }, (_, index) => {
+          const current = seed[index % seed.length];
+          return {
+            id: index + 1,
+            firstName: current[0],
+            lastName: current[1],
+            team: current[2],
+            score: ROW_COUNT - index
+          };
+        });
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 110, type: 'number' },
+        { id: 'firstName', header: 'First Name', width: 160, type: 'text' },
+        { id: 'lastName', header: 'Last Name', width: 160, type: 'text' },
+        { id: 'team', header: 'Team', width: 180, type: 'text' },
+        {
+          id: 'searchName',
+          header: 'Search Name',
+          width: 260,
+          type: 'text',
+          visible: false,
+          valueGetter(row) {
+            searchNameGetterCalls += 1;
+            let value = String(row.firstName) + ' ' + String(row.lastName);
+            for (let index = 0; index < 3; index += 1) {
+              value = value + ' / ' + String(row.team);
+            }
+            return value;
+          }
+        },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: buildRows(seedRows),
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        workerRuntime: {
+          enabled: true,
+          prewarm: true,
+          assetBaseUrl: '../packages/grid-core/dist',
+          timeoutMs: 6000,
+          largeDataThreshold: 100000
+        }
+      });
+
+      function waitFrame() {
+        return new Promise((resolve) => {
+          requestAnimationFrame(() => resolve());
+        });
+      }
+
+      async function updatePreview() {
+        const result = await grid.exportCsv({
+          includeHeaders: false,
+          scope: 'viewport'
+        });
+        previewPanel.textContent = result.content;
+      }
+
+      function resetGetterCounter() {
+        searchNameGetterCalls = 0;
+      }
+
+      function renderPanels() {
+        statePanel.textContent = JSON.stringify(
+          {
+            dataset: activeDataset,
+            rowCount: ROW_COUNT,
+            sortModel: grid.getSortModel(),
+            filterModel: grid.getFilterModel(),
+            visibleColumns: grid.getVisibleColumns().map((column) => column.header)
+          },
+          null,
+          2
+        );
+
+        heartbeatPanel.textContent = JSON.stringify(
+          {
+            heartbeatTick: heartbeat.tick,
+            maxGapMs: round(heartbeat.maxGapMs),
+            searchNameGetterCalls,
+            lastAction
+          },
+          null,
+          2
+        );
+
+        workerPanel.textContent = JSON.stringify(
+          {
+            workerCounts,
+            urls: workerUrls.slice(-10),
+            messages: workerMessages.slice(0, 12)
+          },
+          null,
+          2
+        );
+      }
+
+      async function measureAction(kind, run) {
+        const measurement = {
+          kind,
+          startTime: performance.now(),
+          startHeartbeatTick: heartbeat.tick,
+          startWorkerMessageCount: workerMessages.length,
+          frameCount: 0,
+          maxGapMs: 0
+        };
+        heartbeatMeasurement.active = measurement;
+        pushLog(kind + ' start');
+        await run();
+        await waitFrame();
+        await waitFrame();
+        await updatePreview();
+        heartbeatMeasurement.active = null;
+        lastAction = {
+          kind,
+          durationMs: round(performance.now() - measurement.startTime),
+          heartbeatDelta: heartbeat.tick - measurement.startHeartbeatTick,
+          frameCount: measurement.frameCount,
+          maxGapMs: round(measurement.maxGapMs),
+          workerMessagesDuring: workerMessages.length - measurement.startWorkerMessageCount
+        };
+        pushLog(kind + ' done (' + String(lastAction.durationMs) + 'ms, heartbeat +' + String(lastAction.heartbeatDelta) + ')');
+        renderPanels();
+        return lastAction;
+      }
+
+      async function sortDerivedAsc() {
+        return measureAction('sortDerivedAsc', async () => {
+          await grid.setSortModel([{ columnId: 'searchName', direction: 'asc' }]);
+        });
+      }
+
+      async function filterGrace() {
+        return measureAction('filterGrace', async () => {
+          await grid.setFilterModel({
+            searchName: {
+              kind: 'text',
+              operator: 'contains',
+              value: 'Grace'
+            }
+          });
+        });
+      }
+
+      async function resetGrid() {
+        return measureAction('resetGrid', async () => {
+          await grid.setFilterModel({});
+          await grid.setSortModel([]);
+        });
+      }
+
+      async function replaceRows() {
+        activeDataset = 'replacement';
+        return measureAction('replaceRows', async () => {
+          grid.setOptions({
+            rowData: buildRows(replacementRows)
+          });
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          resetGetterCounter();
+        });
+      }
+
+      function getSnapshot() {
+        return {
+          isReady,
+          dataset: activeDataset,
+          sortModel: grid.getSortModel(),
+          filterModel: grid.getFilterModel(),
+          workerCounts: {
+            sort: workerCounts.sort,
+            filter: workerCounts.filter,
+            group: workerCounts.group,
+            pivot: workerCounts.pivot,
+            tree: workerCounts.tree
+          },
+          searchNameGetterCalls,
+          heartbeatTick: heartbeat.tick,
+          lastAction,
+          preview: previewPanel.textContent
+        };
+      }
+
+      document.getElementById('sort-derived').addEventListener('click', () => {
+        void sortDerivedAsc();
+      });
+      document.getElementById('filter-grace').addEventListener('click', () => {
+        void filterGrace();
+      });
+      document.getElementById('reset-grid').addEventListener('click', () => {
+        void resetGrid();
+      });
+      document.getElementById('replace-rows').addEventListener('click', () => {
+        void replaceRows();
+      });
+      document.getElementById('inspect').addEventListener('click', async () => {
+        await updatePreview();
+        renderPanels();
+        pushLog('inspect');
+        console.log('[example54]', getSnapshot());
+      });
+
+      void (async () => {
+        await updatePreview();
+        resetGetterCounter();
+        isReady = true;
+        renderPanels();
+      })();
+      renderPanels();
+
+      window.__example54 = {
+        sortDerivedAsc,
+        filterGrace,
+        resetGrid,
+        replaceRows,
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

@@ -4,6 +4,7 @@
 - 전체 데이터를 브라우저 메모리에 올리지 않고, 서버 블록 fetch로 무한 스크롤을 지원한다.
 - block cache/LRU/prefetch/queryModel(sort/filter)를 코어 계약으로 고정한다.
 - 로딩 중 셀은 skeleton UI(`.hgrid__cell--loading`)로 표시한다.
+- 이후 E2 server-side row model 계약이 올라갈 수 있는 remote provider 기반을 만든다.
 
 ## 구현 범위
 - `packages/grid-core/src/data/remote-data-provider.ts`
@@ -15,6 +16,10 @@
   - query model:
     - `sortModel`, `filterModel`, `groupModel?` 계약
     - query 변경 시 in-flight cancel + cache invalidate
+  - forward-compatible server-side contract:
+    - `queryModel.serverSide?`
+    - `rowMetadata?`
+    - `getRowMetadata(dataIndex)`
   - data 변경 이벤트:
     - `onRowsChanged(listener) => unsubscribe`
   - loading policy:
@@ -48,3 +53,4 @@
 ## 리스크 메모
 - `groupModel`은 프로토콜 필드만 선반영했고 실제 그룹 연산은 Phase 9에서 구현한다.
 - 로딩 skeleton은 DOM class 토글 기반이며, 스크롤 중 DOM 생성/삭제 없이 기존 pool 재사용을 유지한다.
+- block cache provider 자체는 Phase 8 범위지만, SSRM envelope는 [server-side-row-model-phase-e2.md](./server-side-row-model-phase-e2.md)에서 추가로 고정한다.

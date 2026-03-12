@@ -59,9 +59,18 @@
   - `new RemoteDataProvider({ dataSource, rowCount?, cache?, queryModel?, loadingRowPolicy? })`
   - `setQueryModel(partialQuery)`
   - `getQueryModel()`
+  - `setServerSideQueryModel(partialServerSideQuery | undefined)`
+  - `getServerSideQueryModel()`
+  - `getRowMetadata(dataIndex)`
   - `invalidateCache()`
   - `cancelOperation(operationId)`
   - `getCacheConfig()`
+  - `queryModel.serverSide?` / `rowMetadata?` (Phase E2.1):
+    - `schemaVersion: string`
+    - `requestKind: "root" | "children" | "pivot" | "tree"`
+    - `route: Array<{ columnId, key }>`
+    - `rootStoreStrategy: "partial" | "full"`
+    - `childStoreStrategy: "partial" | "full"`
 - `RowModelOptions`: row-model runtime options (`enableDataToViewIndex` can be toggled at runtime).
 - `GridConfig` runtime virtualization options:
   - `overscan`: vertical row overscan count

@@ -126,10 +126,18 @@ describe('CooperativeGroupExecutor', () => {
         }
       ],
       columns,
-      dataProvider: provider
+      dataProvider: provider,
+      includeLeafDataIndexes: true
     });
 
     expect(customResponse.status).toBe('ok');
+    if (customResponse.status === 'ok') {
+      expect(customResponse.result.groupLeafDataIndexesByKey).toMatchObject({
+        'region=string:KR': expect.any(Array),
+        'region=string:US': expect.any(Array)
+      });
+      expect(customResponse.result.groupLeafDataIndexesByKey?.['region=string:KR']?.length).toBe(rowCount / 2);
+    }
 
     let canceled = false;
     setTimeout(() => {

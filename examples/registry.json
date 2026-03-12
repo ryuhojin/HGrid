@@ -527,6 +527,170 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 44,
+      "file": "example44.html",
+      "title": "Example 44 - Worker Dispatcher Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "dispatcher",
+        "sort",
+        "filter",
+        "group",
+        "pivot",
+        "tree",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 45,
+      "file": "example45.html",
+      "title": "Example 45 - Worker Policy Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "worker-policy",
+        "threshold",
+        "fallback",
+        "sort",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 46,
+      "file": "example46.html",
+      "title": "Example 46 - Worker Prewarm Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "prewarm",
+        "startup-latency",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 47,
+      "file": "example47.html",
+      "title": "Example 47 - Worker Custom Group Reducer Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "grouping",
+        "custom-reducer",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 48,
+      "file": "example48.html",
+      "title": "Example 48 - Worker Custom Pivot Reducer Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "pivot",
+        "custom-reducer",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 49,
+      "file": "example49.html",
+      "title": "Example 49 - Worker ValueGetter Projection Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "value-getter",
+        "sort",
+        "filter",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 50,
+      "file": "example50.html",
+      "title": "Example 50 - Worker Comparator Projection Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "sort",
+        "custom-comparator",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 51,
+      "file": "example51.html",
+      "title": "Example 51 - Worker Pool Prewarm Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "prewarm",
+        "pool",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 52,
+      "file": "example52.html",
+      "title": "Example 52 - Worker Projection Cache Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "projection-cache",
+        "value-getter",
+        "custom-comparator",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 53,
+      "file": "example53.html",
+      "title": "Example 53 - Worker Projection Prefix Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "projection-prefix",
+        "value-getter",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 54,
+      "file": "example54.html",
+      "title": "Example 54 - Async Worker Serialization Smoke",
+      "tags": [
+        "enterprise",
+        "worker-runtime",
+        "async-serialization",
+        "value-getter",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 55,
+      "file": "example55.html",
+      "title": "Example 55 - Server-Side Row Model Contract Smoke",
+      "tags": [
+        "enterprise",
+        "server-side-row-model",
+        "remote-data-provider",
+        "query-contract",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

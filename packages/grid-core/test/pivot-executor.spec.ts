@@ -94,4 +94,79 @@ describe('CooperativePivotExecutor', () => {
 
     expect(response.status).toBe('canceled');
   });
+
+  it('keeps direct custom reducer execution and can expose worker hydration metadata', async () => {
+    const rows = [
+      { id: 1, region: 'KR', month: 'Jan', sales: 100 },
+      { id: 2, region: 'KR', month: 'Jan', sales: 40 },
+      { id: 3, region: 'US', month: 'Feb', sales: 30 }
+    ];
+
+    const columns = [
+      { id: 'id', header: 'ID', width: 90, type: 'number' as const },
+      { id: 'region', header: 'Region', width: 120, type: 'text' as const },
+      { id: 'month', header: 'Month', width: 120, type: 'text' as const },
+      { id: 'sales', header: 'Sales', width: 120, type: 'number' as const }
+    ];
+
+    const provider = new LocalDataProvider(rows);
+    const executor = new CooperativePivotExecutor();
+
+    const directResponse = await executor.execute({
+      opId: 'pivot-custom-direct',
+      rowCount: rows.length,
+      columns,
+      dataProvider: provider,
+      rowGroupModel: [{ columnId: 'region' }],
+      pivotModel: [{ columnId: 'month' }],
+      pivotValues: [
+        {
+          columnId: 'sales',
+          reducer: (values) => values.reduce<number>((sum, value) => sum + Number(value ?? 0), 0) * 2
+        }
+      ]
+    });
+
+    expect(directResponse.status).toBe('ok');
+    if (directResponse.status !== 'ok') {
+      return;
+    }
+
+    const directKrRow = directResponse.result.rows.find((row) => row.region === 'KR');
+    const directJanColumnId = directResponse.result.columns[1].id;
+    expect(directKrRow?.[directJanColumnId]).toBe(280);
+
+    const workerModeResponse = await executor.execute({
+      opId: 'pivot-custom-worker-mode',
+      rowCount: rows.length,
+      columns,
+      dataProvider: provider,
+      rowGroupModel: [{ columnId: 'region' }],
+      pivotModel: [{ columnId: 'month' }],
+      pivotValues: [{ columnId: 'sales' }],
+      customValueColumnIds: ['sales']
+    });
+
+    expect(workerModeResponse.status).toBe('ok');
+    if (workerModeResponse.status !== 'ok') {
+      return;
+    }
+
+    expect(workerModeResponse.result.customValueDataIndexesByCell).toEqual([
+      {
+        rowKey: 'region=string:KR',
+        columnId: workerModeResponse.result.columns[1].id,
+        valueColumnId: 'sales',
+        pivotLabel: 'Jan',
+        dataIndexes: [0, 1]
+      },
+      {
+        rowKey: 'region=string:US',
+        columnId: workerModeResponse.result.columns[2].id,
+        valueColumnId: 'sales',
+        pivotLabel: 'Feb',
+        dataIndexes: [2]
+      }
+    ]);
+  });
 });

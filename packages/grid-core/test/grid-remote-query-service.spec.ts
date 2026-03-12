@@ -5,6 +5,7 @@ import { GridRemoteQueryService } from '../src/core/grid-remote-query-service';
 
 interface RemoteProviderMock {
   setQueryModel: ReturnType<typeof vi.fn>;
+  getServerSideQueryModel: ReturnType<typeof vi.fn>;
   getRowCount: () => number;
 }
 
@@ -55,6 +56,7 @@ describe('GridRemoteQueryService', () => {
 
     const dataProvider: RemoteProviderMock = {
       setQueryModel: vi.fn(),
+      getServerSideQueryModel: vi.fn(() => undefined),
       getRowCount: () => 5
     };
 
@@ -75,7 +77,8 @@ describe('GridRemoteQueryService', () => {
       filterModel: {},
       groupModel: undefined,
       pivotModel: undefined,
-      pivotValues: undefined
+      pivotValues: undefined,
+      serverSide: undefined
     });
     expect(rowModel.getState().rowCount).toBe(5);
     expect(rowModel.getDataIndex(0)).toBe(0);

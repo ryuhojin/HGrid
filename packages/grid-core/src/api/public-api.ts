@@ -51,6 +51,10 @@ export type {
   StateColumnRenderResult,
   GridState,
   GridTheme,
+  GridWorkerFallbackPolicy,
+  GridWorkerAssetUrls,
+  GridWorkerOperationType,
+  GridWorkerRuntimeOptions,
   ScrollbarPolicy,
   ScrollbarVisibility,
   UnsafeHtmlSanitizeContext,
@@ -111,6 +115,14 @@ export type {
   SortDirection,
   SortModelItem
 } from '../data/remote-data-provider';
+export type {
+  RemoteServerSideQueryModel,
+  RemoteServerSideRequestKind,
+  RemoteServerSideRouteItem,
+  RemoteServerSideRowKind,
+  RemoteServerSideRowMetadata,
+  RemoteServerSideStoreStrategy
+} from '../data/remote-server-side-contracts';
 export { CooperativeSortExecutor } from '../data/sort-executor';
 export type { SortExecutionContext, SortExecutionRequest, SortExecutionResult, SortExecutor } from '../data/sort-executor';
 export { CooperativeGroupExecutor } from '../data/group-executor';

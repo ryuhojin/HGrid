@@ -13,6 +13,74 @@
   var ACTIVE_STATUSES = ['active', 'idle', 'pending', 'blocked'];
   var REGIONS = ['KR', 'US', 'JP', 'DE', 'FR', 'GB'];
   var activeGrid = null;
+  var NativeWorker = window.Worker;
+  var workerCreateCounts = createWorkerCounterRecord();
+
+  function createWorkerCounterRecord() {
+    return {
+      sort: 0,
+      filter: 0,
+      group: 0,
+      pivot: 0,
+      tree: 0,
+      unknown: 0
+    };
+  }
+
+  function cloneWorkerCounterRecord(source) {
+    return {
+      sort: source.sort,
+      filter: source.filter,
+      group: source.group,
+      pivot: source.pivot,
+      tree: source.tree,
+      unknown: source.unknown
+    };
+  }
+
+  function inferWorkerKind(url) {
+    var workerUrl = String(url || '');
+    if (workerUrl.indexOf('sort.worker.js') >= 0) {
+      return 'sort';
+    }
+    if (workerUrl.indexOf('filter.worker.js') >= 0) {
+      return 'filter';
+    }
+    if (workerUrl.indexOf('group.worker.js') >= 0) {
+      return 'group';
+    }
+    if (workerUrl.indexOf('pivot.worker.js') >= 0) {
+      return 'pivot';
+    }
+    if (workerUrl.indexOf('tree.worker.js') >= 0) {
+      return 'tree';
+    }
+    return 'unknown';
+  }
+
+  function snapshotWorkerActivity() {
+    return {
+      created: cloneWorkerCounterRecord(workerCreateCounts)
+    };
+  }
+
+  function resolveCreatedWorkerDelta(before, after, kind) {
+    return Math.max(0, (after.created[kind] || 0) - (before.created[kind] || 0));
+  }
+
+  if (typeof NativeWorker === 'function') {
+    window.Worker = function BenchWorker(url, options) {
+      var worker = new NativeWorker(url, options);
+      var kind = inferWorkerKind(url);
+      if (workerCreateCounts[kind] === undefined) {
+        workerCreateCounts.unknown += 1;
+      } else {
+        workerCreateCounts[kind] += 1;
+      }
+      return worker;
+    };
+    window.Worker.prototype = NativeWorker.prototype;
+  }
 
   function roundNumber(value) {
     return Number(value.toFixed(3));
@@ -120,6 +188,19 @@
       { id: 'region', header: 'Region', width: 160, type: 'text' },
       { id: 'updatedAt', header: 'Updated At', width: 240, type: 'date' }
     ];
+  }
+
+  function createWorkerRuntimeOptions(overrides) {
+    return Object.assign(
+      {
+        enabled: true,
+        assetBaseUrl: '/packages/grid-core/dist',
+        timeoutMs: 180000,
+        largeDataThreshold: 100000,
+        fallbackPolicy: 'lowVolumeOnly'
+      },
+      overrides || {}
+    );
   }
 
   function createScrollRegressionColumns() {
@@ -458,8 +539,9 @@
     };
   }
 
-  async function runSort1M() {
+  async function runSort1MCase(label, workerRuntime) {
     destroyActiveGrid();
+    var beforeWorkerActivity = snapshotWorkerActivity();
 
     activeGrid = new window.HGrid.Grid(mountElement, {
       columns: createBaseColumns(),
@@ -467,7 +549,8 @@
       height: 420,
       rowHeight: 24,
       overscan: 10,
-      overscanCols: 2
+      overscanCols: 2,
+      workerRuntime: workerRuntime
     });
     await waitFrames(2);
 
@@ -480,22 +563,31 @@
 
     var firstVisibleId = getFirstVisibleId();
     var viewRowCount = activeGrid.getViewRowCount();
+    var afterWorkerActivity = snapshotWorkerActivity();
 
     destroyActiveGrid();
     await waitFrames(1);
 
     return {
+      label: label,
       rowCount: 1000000,
       firstVisibleId: firstVisibleId,
       viewRowCount: viewRowCount,
       durationMs: lagMetrics.durationMs,
       maxGapMs: lagMetrics.maxGapMs,
-      tickCount: lagMetrics.tickCount
+      tickCount: lagMetrics.tickCount,
+      workerRuntimeEnabled: workerRuntime.enabled !== false,
+      workerCreatedCount: resolveCreatedWorkerDelta(beforeWorkerActivity, afterWorkerActivity, 'sort')
     };
   }
 
-  async function runFilter1M() {
+  async function runSort1M() {
+    return runSort1MCase('cooperative-baseline', createWorkerRuntimeOptions({ enabled: false }));
+  }
+
+  async function runFilter1MCase(label, workerRuntime) {
     destroyActiveGrid();
+    var beforeWorkerActivity = snapshotWorkerActivity();
 
     activeGrid = new window.HGrid.Grid(mountElement, {
       columns: createBaseColumns(),
@@ -503,7 +595,8 @@
       height: 420,
       rowHeight: 24,
       overscan: 10,
-      overscanCols: 2
+      overscanCols: 2,
+      workerRuntime: workerRuntime
     });
     await waitFrames(2);
 
@@ -515,17 +608,43 @@
 
     var firstVisibleId = getFirstVisibleId();
     var viewRowCount = activeGrid.getViewRowCount();
+    var afterWorkerActivity = snapshotWorkerActivity();
 
     destroyActiveGrid();
     await waitFrames(1);
 
     return {
+      label: label,
       rowCount: 1000000,
       firstVisibleId: firstVisibleId,
       viewRowCount: viewRowCount,
       durationMs: lagMetrics.durationMs,
       maxGapMs: lagMetrics.maxGapMs,
-      tickCount: lagMetrics.tickCount
+      tickCount: lagMetrics.tickCount,
+      workerRuntimeEnabled: workerRuntime.enabled !== false,
+      workerCreatedCount: resolveCreatedWorkerDelta(beforeWorkerActivity, afterWorkerActivity, 'filter')
+    };
+  }
+
+  async function runFilter1M() {
+    return runFilter1MCase('cooperative-baseline', createWorkerRuntimeOptions({ enabled: false }));
+  }
+
+  async function runWorkerComparison1M(sortWorkerOff, filterWorkerOff) {
+    var sortWorkerOn = await runSort1MCase('worker-on', createWorkerRuntimeOptions());
+    var filterWorkerOn = await runFilter1MCase('worker-on', createWorkerRuntimeOptions());
+
+    return {
+      sort: {
+        workerOn: sortWorkerOn,
+        workerOff: sortWorkerOff,
+        maxGapDeltaMs: roundNumber(sortWorkerOn.maxGapMs - sortWorkerOff.maxGapMs)
+      },
+      filter: {
+        workerOn: filterWorkerOn,
+        workerOff: filterWorkerOff,
+        maxGapDeltaMs: roundNumber(filterWorkerOn.maxGapMs - filterWorkerOff.maxGapMs)
+      }
     };
   }
 
@@ -763,6 +882,7 @@
     var mapping100m = await run100MMapping();
     var sort1m = await runSort1M();
     var filter1m = await runFilter1M();
+    var workerComparison1m = await runWorkerComparison1M(sort1m, filter1m);
     var createDestroy200 = await runCreateDestroy200();
     var scrollRegression = await runScrollRegression();
 
@@ -777,6 +897,7 @@
       mapping100m: mapping100m,
       sort1m: sort1m,
       filter1m: filter1m,
+      workerComparison1m: workerComparison1m,
       createDestroy200: createDestroy200,
       scrollRegression: scrollRegression
     };
@@ -788,6 +909,7 @@
     run100MMapping: run100MMapping,
     runSort1M: runSort1M,
     runFilter1M: runFilter1M,
+    runWorkerComparison1M: runWorkerComparison1M,
     runCreateDestroy200: runCreateDestroy200,
     runScrollRegression: runScrollRegression,
     runAll: runAll

@@ -13,6 +13,7 @@ export type GroupingMode = 'client' | 'server';
 export type GroupAggregationType = 'sum' | 'avg' | 'min' | 'max' | 'count';
 export type TreeDataMode = 'client' | 'server';
 export type PivotingMode = 'client' | 'server';
+export type GridWorkerOperationType = 'sort' | 'filter' | 'group' | 'pivot' | 'tree';
 
 export type ColumnFormatter = (value: unknown, row: GridRowData) => string;
 export type ColumnComparator = (a: unknown, b: unknown) => number;
@@ -191,6 +192,27 @@ export interface ScrollbarPolicy {
   horizontal?: ScrollbarVisibility;
 }
 
+export interface GridWorkerAssetUrls {
+  sort?: string;
+  filter?: string;
+  group?: string;
+  pivot?: string;
+  tree?: string;
+}
+
+export type GridWorkerFallbackPolicy = 'lowVolumeOnly' | 'allowAlways';
+
+export interface GridWorkerRuntimeOptions {
+  enabled?: boolean;
+  assetBaseUrl?: string;
+  assetUrls?: GridWorkerAssetUrls;
+  timeoutMs?: number;
+  largeDataThreshold?: number;
+  poolSize?: number;
+  fallbackPolicy?: GridWorkerFallbackPolicy;
+  prewarm?: boolean;
+}
+
 export interface GridOptions {
   columns: ColumnDef[];
   columnGroups?: ColumnGroupDef[];
@@ -218,6 +240,7 @@ export interface GridOptions {
   scrollbarPolicy?: ScrollbarPolicy;
   rowIndicator?: RowIndicatorOptions;
   stateColumn?: StateColumnOptions;
+  workerRuntime?: GridWorkerRuntimeOptions;
 }
 
 export interface GridConfig extends Partial<Omit<GridOptions, 'dataProvider' | 'rowModel'>> {

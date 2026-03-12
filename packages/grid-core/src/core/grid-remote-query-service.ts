@@ -1,6 +1,7 @@
 import type { DataProvider } from '../data/data-provider';
 import type { GridFilterModel } from '../data/filter-executor';
 import type { RemoteDataProvider as RemoteDataProviderContract, RemoteQueryModel, SortModelItem } from '../data/remote-data-provider';
+import type { RemoteServerSideQueryModel } from '../data/remote-server-side-contracts';
 import type { GroupModelItem, PivotModelItem, PivotValueDef } from './grid-options';
 import type { GridDerivedViewRowModelPort } from './grid-internal-contracts';
 import { cloneGroupModel, clonePivotModel, clonePivotValues } from './grid-model-utils';
@@ -48,6 +49,7 @@ export interface CreateRemoteQueryModelParams {
   pivotValues: PivotValueDef[];
   useServerGrouping: boolean;
   useServerPivot: boolean;
+  serverSide?: RemoteServerSideQueryModel;
 }
 
 export interface SyncRemoteProviderStateParams extends CreateRemoteQueryModelParams {
@@ -60,18 +62,32 @@ export class GridRemoteQueryService {
     return typeof (dataProvider as RemoteDataProviderContract).setQueryModel === 'function';
   }
 
+  private getServerSideQueryModel(dataProvider: RemoteDataProviderContract): RemoteServerSideQueryModel | undefined {
+    if (typeof dataProvider.getServerSideQueryModel !== 'function') {
+      return undefined;
+    }
+
+    return dataProvider.getServerSideQueryModel();
+  }
+
   public createQueryModel(params: CreateRemoteQueryModelParams): RemoteQueryModel {
     return {
       sortModel: cloneSortModel(params.sortModel),
       filterModel: cloneFilterModel(params.filterModel),
       groupModel: params.useServerGrouping ? cloneGroupModel(params.groupModel) : undefined,
       pivotModel: params.useServerPivot ? clonePivotModel(params.pivotModel) : undefined,
-      pivotValues: params.useServerPivot ? clonePivotValues(params.pivotValues) : undefined
+      pivotValues: params.useServerPivot ? clonePivotValues(params.pivotValues) : undefined,
+      serverSide: params.serverSide
     };
   }
 
   public syncProviderState(params: SyncRemoteProviderStateParams): void {
-    params.dataProvider.setQueryModel(this.createQueryModel(params));
+    params.dataProvider.setQueryModel(
+      this.createQueryModel({
+        ...params,
+        serverSide: this.getServerSideQueryModel(params.dataProvider)
+      })
+    );
     this.syncRowModel(params.rowModel, params.dataProvider);
   }
 

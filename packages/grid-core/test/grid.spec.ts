@@ -3,6 +3,7 @@ import { Grid } from '../src';
 import { LocalDataProvider } from '../src/data/local-data-provider';
 import type { DataProvider, DataTransaction, GridRowData } from '../src/data/data-provider';
 import type { RemoteQueryModel } from '../src/data/remote-data-provider';
+import { WORKER_TREE_LAZY_ROW_REF_FIELD } from '../src/data/worker-operation-payloads';
 import type { EditCommitAuditPayload, GridEventMap } from '../src';
 
 function getVerticalScrollElement(container: HTMLElement): HTMLDivElement {
@@ -3434,6 +3435,18 @@ describe('Grid DOM pooling', () => {
     expect(loadCount).toBe(1);
     expect(expandedRows.length).toBe(3);
     expect(expandedRows[1].parentNodeKey).toBe(100);
+    expect(expandedRows[1].localRow).toMatchObject({
+      id: 101,
+      parentId: 100,
+      name: 'Child-100-1',
+      hasChildren: false
+    });
+    expect(expandedRows[1].localRow).not.toHaveProperty(WORKER_TREE_LAZY_ROW_REF_FIELD);
+
+    const firstChildNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(firstChildNameCell.textContent).toContain('Child-100-1');
 
     await grid.setTreeExpanded(100, false);
     await waitForFrame();

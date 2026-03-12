@@ -43,6 +43,21 @@ describe('RowModel', () => {
     expect(rowModel.getState().hasFilterMapping).toBe(false);
   });
 
+  it('can adopt trusted Int32Array mappings without cloning them', () => {
+    const rowModel = new RowModel(6);
+    const baseMapping = Int32Array.from([2, 3, 4, 5, 0, 1]);
+    const filterMapping = Int32Array.from([4, 0, 1]);
+
+    rowModel.setBaseViewToDataTrusted(baseMapping);
+    rowModel.setFilterViewToDataTrusted(filterMapping);
+
+    expect(rowModel.getActiveViewToData()).toBe(filterMapping);
+    rowModel.setFilterViewToDataTrusted(null);
+    expect(rowModel.getActiveViewToData()).toBe(baseMapping);
+    expect(rowModel.getDataIndex(0)).toBe(2);
+    expect(rowModel.getDataIndex(5)).toBe(1);
+  });
+
   it('can toggle dataToView index on and off', () => {
     const rowModel = new RowModel(8);
     rowModel.setBaseViewToData([7, 6, 5, 4, 3, 2, 1, 0]);

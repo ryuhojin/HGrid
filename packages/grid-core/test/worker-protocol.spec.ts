@@ -88,6 +88,31 @@ describe('Worker protocol', () => {
     expect(transferables[0]).toBe(baseBuffer);
   });
 
+  it('does not traverse typed array element indexes while collecting transferables', () => {
+    const baseBuffer = new ArrayBuffer(16);
+    const values = new Int32Array(baseBuffer);
+    const originalObjectKeys = Object.keys;
+    let typedArrayKeyReadCount = 0;
+
+    Object.keys = ((target: object) => {
+      if (target === values) {
+        typedArrayKeyReadCount += 1;
+      }
+      return originalObjectKeys(target);
+    }) as typeof Object.keys;
+
+    try {
+      const transferables = collectTransferables({
+        values
+      });
+
+      expect(transferables).toEqual([baseBuffer]);
+      expect(typedArrayKeyReadCount).toBe(0);
+    } finally {
+      Object.keys = originalObjectKeys;
+    }
+  });
+
   it('resolves transferables and posts messages with auto-detect/explicit options', () => {
     const payloadBuffer = new ArrayBuffer(12);
     const extraBuffer = new ArrayBuffer(8);

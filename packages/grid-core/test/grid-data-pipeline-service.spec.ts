@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GridDataPipelineService, type GridDataPipelineState } from '../src/core/grid-data-pipeline-service';
+import type { GridDerivedViewRowModelPort } from '../src/core/grid-internal-contracts';
 import { GroupedDataProvider } from '../src/data/grouped-data-provider';
 import { LocalDataProvider } from '../src/data/local-data-provider';
 import { RowModel } from '../src/data/row-model';
@@ -29,6 +30,60 @@ describe('GridDataPipelineService', () => {
     expect(rowModel.getViewRowCount()).toBe(2);
     expect(rowModel.getDataIndex(0)).toBe(3);
     expect(rowModel.getDataIndex(1)).toBe(1);
+  });
+
+  it('uses trusted row-model mapping hooks for Int32Array flat mappings', () => {
+    const service = new GridDataPipelineService();
+    const sourceDataProvider = new LocalDataProvider([{ id: 1 }, { id: 2 }, { id: 3 }]);
+    const calls: string[] = [];
+    const rowModel: GridDerivedViewRowModelPort = {
+      getState: () => ({
+        rowCount: 3,
+        viewRowCount: 3,
+        hasFilterMapping: false,
+        hasDataToViewIndex: false,
+        isBaseIdentityMapping: true,
+        isDataToViewIdentity: true,
+        isDataToViewSparse: false,
+        baseMappingMode: 'identity',
+        sparseOverrideCount: 0,
+        materializedBaseBytes: 0,
+        materializedFilterBytes: 0,
+        materializedDataToViewBytes: 0,
+        sparseBytes: 0,
+        estimatedMappingBytes: 0
+      }),
+      setRowCount: () => {
+        calls.push('setRowCount');
+      },
+      setBaseViewToData: () => {
+        calls.push('setBaseViewToData');
+      },
+      setBaseViewToDataTrusted: () => {
+        calls.push('setBaseViewToDataTrusted');
+      },
+      setBaseIdentityMapping: () => {
+        calls.push('setBaseIdentityMapping');
+      },
+      setFilterViewToData: () => {
+        calls.push('setFilterViewToData');
+      },
+      setFilterViewToDataTrusted: () => {
+        calls.push('setFilterViewToDataTrusted');
+      }
+    };
+
+    service.applyFlatView({
+      sourceDataProvider,
+      rowModel,
+      sortMapping: Int32Array.from([2, 1, 0]),
+      filterMapping: Int32Array.from([2, 0])
+    });
+
+    expect(calls).toContain('setBaseViewToDataTrusted');
+    expect(calls).toContain('setFilterViewToDataTrusted');
+    expect(calls).not.toContain('setBaseViewToData');
+    expect(calls).not.toContain('setFilterViewToData');
   });
 
   it('applies grouping result and reuses grouped provider instances', () => {

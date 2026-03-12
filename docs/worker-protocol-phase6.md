@@ -26,7 +26,7 @@
   - Worker 응답은 반드시 요청과 동일한 `opId`를 반환한다.
 - `type`
   - `"cancel"`은 제어 메시지다.
-  - 그 외 문자열은 operation 종류(`sort`, `filter`, 추후 확장)를 나타낸다.
+  - 그 외 문자열은 operation 종류(`sort`, `filter`, `group`, `pivot`, `tree`)를 나타낸다.
 - `status`
   - `ok`: 정상 완료, `result`는 연산 결과
   - `canceled`: 취소 완료, `result`는 `null`
@@ -64,11 +64,30 @@
   - `resolveWorkerTransferables`
   - `postWorkerMessage`
 
+## Entrypoint Layer (`data/worker-entry.ts`, `data/*.worker.ts`)
+- 공통 worker entry helper
+  - `createWorkerEntrypointListener`
+  - `registerWorkerEntrypoint`
+- 실제 worker files
+  - `sort.worker.ts`
+  - `filter.worker.ts`
+  - `group.worker.ts`
+  - `pivot.worker.ts`
+  - `tree.worker.ts`
+- payload adapter
+  - `worker-operation-payloads.ts`
+  - serializable snapshot rows를 `LocalDataProvider` 기반 executor request로 변환
+
 ## Validation
 - unit: `packages/grid-core/test/worker-protocol.spec.ts`
   - request/cancel/response envelope validation
   - type guard validation
   - nested typed-array transferable 수집 + dedupe
   - auto-detect + explicit transfer merge/post 동작
+- unit: `packages/grid-core/test/worker-entry.spec.ts`
+  - unsupported operation error
+  - cancel 이후 stale `ok`를 `canceled`로 치환하는 guard
+- unit: `packages/grid-core/test/worker-entrypoints.spec.ts`
+  - sort/filter/group/pivot/tree worker wiring 검증
 - example: `examples/example20.html`
   - protocol envelope + cancel + transferables 시각화

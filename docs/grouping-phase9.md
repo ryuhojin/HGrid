@@ -63,3 +63,7 @@
 ## 리스크 메모
 - local grouping은 grouped rows 배열을 생성하므로 그룹 수/row 수가 매우 큰 경우 메모리 사용량이 증가할 수 있다.
 - cooperative 실행은 작업을 분할하지만 진짜 Worker offload가 아니므로, 100k+ 고비용 grouping은 Worker 런타임 연결을 후속 단계에서 권장한다.
+
+## 성능 스모크
+- `scripts/run-e2e.mjs`는 `__example31.runPerfScenario` 동안 heartbeat(`setInterval(16ms)`) `maxGap`을 측정한다.
+- 현재 smoke 기준은 `maxGap < 420ms`다.

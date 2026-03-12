@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 51 - Worker Pool Prewarm Smoke</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        max-width: 1080px;
+        color: #334155;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        padding: 10px 12px;
+      }
+
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #grid {
+        width: 920px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 51 - Worker Pool Prewarm Smoke</h1>
+    <p>
+      `workerRuntime.poolSize: 2`와 `prewarm: true`를 같이 켠 smoke example입니다.
+      grid 생성 직후 prewarm wiring을 확인하고, 이어서 병렬 sort를 던져 추가 sort worker slot이 실제로 잡히는지 확인합니다.
+    </p>
+
+    <div class="toolbar">
+      <button id="run-parallel-sorts" type="button">run parallel sorts</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>Worker Pool</h2>
+        <pre id="worker-panel">Preparing...</pre>
+      </section>
+      <section class="panel">
+        <h2>Grid State</h2>
+        <pre id="state-panel">Preparing...</pre>
+      </section>
+    </div>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const workerUrls = [];
+      const workerCounts = {
+        sort: 0,
+        filter: 0,
+        group: 0,
+        pivot: 0,
+        tree: 0
+      };
+      const NativeWorker = window.Worker;
+
+      if (typeof NativeWorker === 'function') {
+        function inferWorkerKind(url) {
+          if (String(url).indexOf('sort.worker.js') >= 0) {
+            return 'sort';
+          }
+          if (String(url).indexOf('filter.worker.js') >= 0) {
+            return 'filter';
+          }
+          if (String(url).indexOf('group.worker.js') >= 0) {
+            return 'group';
+          }
+          if (String(url).indexOf('pivot.worker.js') >= 0) {
+            return 'pivot';
+          }
+          if (String(url).indexOf('tree.worker.js') >= 0) {
+            return 'tree';
+          }
+          return 'unknown';
+        }
+
+        window.Worker = function WrappedWorker(url, options) {
+          const worker = new NativeWorker(url, options);
+          const kind = inferWorkerKind(url);
+          workerUrls.push(String(url));
+          if (workerCounts[kind] !== undefined) {
+            workerCounts[kind] += 1;
+          }
+          renderPanels();
+          return worker;
+        };
+        window.Worker.prototype = NativeWorker.prototype;
+      }
+
+      const workerPanel = document.getElementById('worker-panel');
+      const statePanel = document.getElementById('state-panel');
+      const workerRuntimeOptions = {
+        enabled: true,
+        assetBaseUrl: '../packages/grid-core/dist',
+        largeDataThreshold: 50,
+        prewarm: true,
+        poolSize: 2
+      };
+      const rowData = Array.from({ length: 120 }, (_, index) => ({
+        id: index + 1,
+        name: 'Pool-' + String(index + 1).padStart(3, '0'),
+        region: ['KR', 'US', 'JP'][index % 3],
+        month: ['Jan', 'Feb', 'Mar'][index % 3],
+        score: (index * 17) % 1000
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: [
+          { id: 'id', header: 'ID', width: 100, type: 'number' },
+          { id: 'name', header: 'Name', width: 220, type: 'text' },
+          { id: 'region', header: 'Region', width: 140, type: 'text' },
+          { id: 'month', header: 'Month', width: 140, type: 'text' },
+          { id: 'score', header: 'Score', width: 120, type: 'number' }
+        ],
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        workerRuntime: workerRuntimeOptions
+      });
+
+      function renderPanels() {
+        workerPanel.textContent = JSON.stringify(
+          {
+            workerCounts,
+            urls: workerUrls.slice()
+          },
+          null,
+          2
+        );
+        statePanel.textContent = JSON.stringify(
+          {
+            workerRuntime: workerRuntimeOptions,
+            visibleColumns: grid.getVisibleColumns().map((column) => column.header)
+          },
+          null,
+          2
+        );
+      }
+
+      async function runParallelSorts() {
+        const first = grid.setSortModel([{ columnId: 'score', direction: 'asc' }]);
+        const second = grid.setSortModel([{ columnId: 'score', direction: 'desc' }]);
+        await Promise.allSettled([first, second]);
+        renderPanels();
+      }
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        console.log('example51 snapshot', window.__example51.getSnapshot());
+      });
+      document.getElementById('run-parallel-sorts').addEventListener('click', () => {
+        void runParallelSorts();
+      });
+
+      window.__example51 = {
+        runParallelSorts,
+        getSnapshot() {
+          return {
+            workerCounts: { ...workerCounts },
+            urls: workerUrls.slice(),
+            workerRuntime: workerRuntimeOptions,
+            sortModel: grid.getSortModel()
+          };
+        }
+      };
+
+      setTimeout(renderPanels, 0);
+      renderPanels();
+    </script>
+  </body>
+</html>

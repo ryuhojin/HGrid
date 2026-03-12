@@ -202,7 +202,7 @@ function normalizeLazyBatches(lazyChildrenBatches: TreeLazyChildrenBatch[] | und
 
     normalized.push({
       parentNodeKey,
-      rows: batch.rows.map((row) => ({ ...row }))
+      rows: batch.rows.slice()
     });
   }
 
@@ -287,15 +287,15 @@ export class CooperativeTreeExecutor implements TreeExecutor {
           const hasChildrenHint = row[hasChildrenField] === true;
 
           nodeByToken.set(nodeKeyToken, {
-            nodeKey,
-            nodeKeyToken,
-            parentNodeKey: rowParentNodeKey,
-            parentNodeKeyToken: rowParentNodeKeyToken,
-            sourceDataIndex: null,
-            localRow: { ...row },
-            hasChildrenHint,
-            childNodeKeyTokens: []
-          });
+          nodeKey,
+          nodeKeyToken,
+          parentNodeKey: rowParentNodeKey,
+          parentNodeKeyToken: rowParentNodeKeyToken,
+          sourceDataIndex: null,
+          localRow: row,
+          hasChildrenHint,
+          childNodeKeyTokens: []
+        });
           insertionOrderTokens.push(nodeKeyToken);
 
           processedCounter.value += 1;

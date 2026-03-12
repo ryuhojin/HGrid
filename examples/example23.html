@@ -157,7 +157,11 @@
         height: 420,
         rowHeight: 28,
         overscan: 6,
-        overscanCols: 2
+        overscanCols: 2,
+        workerRuntime: {
+          assetBaseUrl: '../packages/grid-core/dist',
+          timeoutMs: 180000
+        }
       });
 
       let isSynthetic = false;

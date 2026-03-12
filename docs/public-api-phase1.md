@@ -131,6 +131,21 @@
 - `columnGroups` (Phase 7.6):
   - multi-level header group schema
   - group row layout is recalculated after pin/hide/reorder
+- `columnMenu` / `contextMenu` (Phase E3.1):
+  - `columnMenu.enabled?`
+  - `columnMenu.trigger?: "button" | "contextmenu" | "both"`
+  - `columnMenu.getItems?(context) => GridMenuItem[]`
+  - `contextMenu.enabled?`
+  - `contextMenu.getItems?(context) => GridMenuItem[]`
+  - `GridColumnMenuContext`: `{ column, visibleColumns, source }`
+  - `GridMenuItem`: `{ id, label, disabled?, checked?, danger?, separator?, onSelect? }`
+  - built-in action ids:
+    - `sortAsc`, `sortDesc`, `clearSort`
+    - `pinLeft`, `pinRight`, `unpin`
+    - `autoSizeColumn`, `resetColumnWidth`, `hideColumn`
+  - current scope:
+    - header trigger click / header contextmenu / keyboard(`Shift+F10`, `ContextMenu`)
+    - body cell context menu는 아직 범위 밖
 
 ## Wrapper Contract
 `@hgrid/grid-react` and `@hgrid/grid-vue` expose thin adapters with the same control API:

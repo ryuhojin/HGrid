@@ -14,6 +14,18 @@ export type GroupAggregationType = 'sum' | 'avg' | 'min' | 'max' | 'count';
 export type TreeDataMode = 'client' | 'server';
 export type PivotingMode = 'client' | 'server';
 export type GridWorkerOperationType = 'sort' | 'filter' | 'group' | 'pivot' | 'tree';
+export type GridColumnMenuTrigger = 'button' | 'contextmenu' | 'both';
+export type GridMenuOpenSource = 'button' | 'contextmenu' | 'keyboard';
+export type GridBuiltInColumnMenuActionId =
+  | 'sortAsc'
+  | 'sortDesc'
+  | 'clearSort'
+  | 'pinLeft'
+  | 'pinRight'
+  | 'unpin'
+  | 'autoSizeColumn'
+  | 'resetColumnWidth'
+  | 'hideColumn';
 
 export type ColumnFormatter = (value: unknown, row: GridRowData) => string;
 export type ColumnComparator = (a: unknown, b: unknown) => number;
@@ -31,6 +43,15 @@ export interface GridLocaleText {
   rowStatusWithValue: string;
   rowNumber: string;
   validationFailed: string;
+  columnMenuSortAsc: string;
+  columnMenuSortDesc: string;
+  columnMenuClearSort: string;
+  columnMenuPinLeft: string;
+  columnMenuPinRight: string;
+  columnMenuUnpin: string;
+  columnMenuAutoSizeColumn: string;
+  columnMenuResetColumnWidth: string;
+  columnMenuHideColumn: string;
   scopeAll: string;
   scopeFiltered: string;
   scopeViewport: string;
@@ -178,6 +199,33 @@ export interface ColumnDef {
   sanitizeHtml?: UnsafeHtmlSanitizer;
 }
 
+export interface GridColumnMenuContext {
+  column: ColumnDef;
+  visibleColumns: ColumnDef[];
+  source: GridMenuOpenSource;
+}
+
+export interface GridMenuItem {
+  id: string;
+  label: string;
+  disabled?: boolean;
+  checked?: boolean;
+  danger?: boolean;
+  separator?: boolean;
+  onSelect?: (context: GridColumnMenuContext) => void;
+}
+
+export interface GridColumnMenuOptions {
+  enabled?: boolean;
+  trigger?: GridColumnMenuTrigger;
+  getItems?: (context: GridColumnMenuContext) => GridMenuItem[];
+}
+
+export interface GridContextMenuOptions {
+  enabled?: boolean;
+  getItems?: (context: GridColumnMenuContext) => GridMenuItem[];
+}
+
 export interface UnsafeHtmlSanitizeContext {
   rowIndex: number;
   dataIndex: number;
@@ -216,6 +264,8 @@ export interface GridWorkerRuntimeOptions {
 export interface GridOptions {
   columns: ColumnDef[];
   columnGroups?: ColumnGroupDef[];
+  columnMenu?: GridColumnMenuOptions;
+  contextMenu?: GridContextMenuOptions;
   grouping?: GroupingOptions;
   pivoting?: PivotingOptions;
   treeData?: TreeDataOptions;

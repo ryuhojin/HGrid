@@ -62,6 +62,8 @@ export interface GridColumnMutationPort {
   hasColumn(columnId: string): boolean;
   setColumnWidth(columnId: string, width: number): void;
   setColumnOrder(columnOrder: string[]): void;
+  setColumnVisibility(columnId: string, isVisible: boolean): void;
+  setColumnPin(columnId: string, pinned?: ColumnPinPosition): void;
   syncColumnsToRenderer(): void;
 }
 
@@ -84,4 +86,9 @@ export interface GridWorkerProjectionCachePort {
 
 export interface GridAuditLogPort {
   getAuditLogHook(): EditCommitAuditLogger | undefined;
+}
+
+export interface GridSortMutationPort {
+  setSortModel(sortModel: Array<{ columnId: string; direction: 'asc' | 'desc' }>): Promise<void> | void;
+  clearSortModel(): Promise<void> | void;
 }

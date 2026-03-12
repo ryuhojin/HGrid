@@ -45,8 +45,7 @@
   - 다단 헤더는 렌더되지만 enterprise column group UX 완성이라고 보기 어렵다.
 
 ## 6. 제품형 UI surface 부족
-- 현재 저장소에는 다음이 없다:
-  - column menu
+- 현재 저장소에는 다음이 아직 부족하다:
   - filter builder/panel UI
   - sidebar/tool panels
   - status bar
@@ -54,8 +53,10 @@
   - integrated charts
   - formula editing
   - master-detail
+- 현재 들어간 범위:
+  - header-scoped column menu / context menu
 - 의미:
-  - 엔터프라이즈 업무 사용자가 UI만으로 기능을 탐색/설정하는 수준이 아니다.
+  - 첫 제품형 menu surface는 생겼지만, 사용자가 UI만으로 전체 feature를 탐색/조작하는 수준까지는 아니다.
 
 ## 7. 보안 정책이 secure-by-default로 닫히지 않음
 - `unsafeHtml` 컬럼에서 sanitizer가 없으면 raw HTML이 렌더된다.

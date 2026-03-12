@@ -1121,6 +1121,120 @@ describe('Grid DOM pooling', () => {
     grid.destroy();
   });
 
+  it('opens a header context menu and applies built-in column actions', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', status: 'active' },
+        { id: 2, name: 'Beta', status: 'idle' }
+      ],
+      columnMenu: {
+        enabled: true,
+        trigger: 'both'
+      },
+      height: 160,
+      rowHeight: 28
+    });
+
+    const statusHeaderCell = container.querySelector('.hgrid__header-cell[data-column-id="status"]') as HTMLDivElement;
+    expect(statusHeaderCell).toBeTruthy();
+
+    statusHeaderCell.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 160,
+        clientY: 20
+      })
+    );
+    await waitForFrame();
+
+    const menuElement = container.querySelector('.hgrid__column-menu') as HTMLDivElement;
+    expect(menuElement.classList.contains('hgrid__column-menu--open')).toBe(true);
+
+    const hideColumnItem = Array.from(container.querySelectorAll('.hgrid__column-menu-item')).find(
+      (element) => element.textContent?.trim() === 'Hide column'
+    ) as HTMLButtonElement | undefined;
+    expect(hideColumnItem).toBeTruthy();
+    hideColumnItem?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(grid.getVisibleColumns().map((column) => column.id)).toEqual(['id', 'name']);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('appends custom context menu items for header actions', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const selectedColumnIds: string[] = [];
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'score', header: 'Score', width: 140, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', score: 10 },
+        { id: 2, name: 'Beta', score: 20 }
+      ],
+      columnMenu: {
+        enabled: true,
+        trigger: 'contextmenu'
+      },
+      contextMenu: {
+        enabled: true,
+        getItems: (context) => [
+          { separator: true, id: 'sep', label: 'sep' },
+          {
+            id: 'inspect-column',
+            label: `Inspect ${context.column.id}`,
+            onSelect: (menuContext) => {
+              selectedColumnIds.push(menuContext.column.id);
+            }
+          }
+        ]
+      },
+      height: 160,
+      rowHeight: 28
+    });
+
+    const nameHeaderCell = container.querySelector('.hgrid__header-cell[data-column-id="name"]') as HTMLDivElement;
+    expect(nameHeaderCell).toBeTruthy();
+
+    nameHeaderCell.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 120,
+        clientY: 20
+      })
+    );
+    await waitForFrame();
+
+    const customItem = Array.from(container.querySelectorAll('.hgrid__column-menu-item')).find(
+      (element) => element.textContent?.trim() === 'Inspect name'
+    ) as HTMLButtonElement | undefined;
+    expect(customItem).toBeTruthy();
+    customItem?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(selectedColumnIds).toEqual(['name']);
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('restores column order through getState/setState', () => {
     const container = document.createElement('div');
     document.body.append(container);

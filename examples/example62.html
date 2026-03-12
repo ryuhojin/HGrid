@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 62 - Column Menu And Context Menu</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 28%),
+          linear-gradient(180deg, #f3f7f6 0%, #e6eceb 100%);
+        color: #18312d;
+      }
+
+      .page {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 28px 48px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+        gap: 24px;
+        align-items: start;
+        margin-bottom: 20px;
+      }
+
+      .card {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(24, 49, 45, 0.08);
+        border-radius: 18px;
+        box-shadow: 0 20px 60px rgba(24, 49, 45, 0.08);
+        backdrop-filter: blur(10px);
+      }
+
+      .hero-copy {
+        padding: 24px 26px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(15, 118, 110, 0.11);
+        color: #0f766e;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+        line-height: 1.08;
+      }
+
+      .hero-copy p,
+      .side-panel p {
+        margin: 0;
+        color: #47615d;
+        line-height: 1.6;
+      }
+
+      .bullet-list {
+        margin: 16px 0 0;
+        padding-left: 18px;
+        color: #274542;
+      }
+
+      .bullet-list li + li {
+        margin-top: 8px;
+      }
+
+      .side-panel {
+        padding: 22px 22px 18px;
+      }
+
+      .side-panel h2,
+      .workspace h2 {
+        margin: 0 0 10px;
+        font-size: 15px;
+        letter-spacing: 0.02em;
+      }
+
+      .side-panel code {
+        display: block;
+        margin-top: 14px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: #102321;
+        color: #d6f5ef;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow: auto;
+      }
+
+      .workspace {
+        padding: 20px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: #11443e;
+        color: #fff;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #dbe8e5;
+        color: #1d3a36;
+      }
+
+      .workspace-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 16px;
+      }
+
+      #grid {
+        min-width: 0;
+      }
+
+      .log-panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 540px;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .stats div {
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: #eff5f4;
+      }
+
+      .stats strong {
+        display: block;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #5b7671;
+      }
+
+      .stats span {
+        display: block;
+        margin-top: 6px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      #eventLog {
+        flex: 1;
+        margin: 0;
+        padding: 14px;
+        border-radius: 14px;
+        background: #0f1f1d;
+        color: #d9f0ec;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      @media (max-width: 960px) {
+        .hero,
+        .workspace-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <article class="card hero-copy">
+          <div class="eyebrow">Phase E3.1</div>
+          <h1>Column Menu / Context Menu</h1>
+          <p>
+            헤더 오른쪽 점 영역을 클릭하거나 헤더에서 우클릭하면 메뉴가 열립니다. built-in action과 custom
+            item hook이 같은 overlay에서 동작합니다.
+          </p>
+          <ul class="bullet-list">
+            <li>right-edge trigger: sort / pin / hide / auto-size / reset</li>
+            <li>header context menu: custom item hook + built-in actions 동시 노출</li>
+            <li>keyboard: body 셀을 선택한 뒤 <code>Shift + F10</code> 또는 Context Menu 키</li>
+          </ul>
+        </article>
+
+        <aside class="card side-panel">
+          <h2>테스트 포인트</h2>
+          <p>
+            <code>status</code> 열을 숨긴 뒤 <strong>Show All Columns</strong>로 복구하고, <strong>Reset
+            Layout</strong>로 width/pin/order를 초기화해 보세요.
+          </p>
+          <code>
+columnMenu: { enabled: true, trigger: 'both' }<br />
+contextMenu: { enabled: true, getItems(context) { ... } }
+          </code>
+        </aside>
+      </section>
+
+      <section class="card workspace">
+        <div class="toolbar">
+          <button id="showAllColumns">Show All Columns</button>
+          <button id="resetLayout" class="secondary">Reset Layout</button>
+          <button id="clearSort" class="secondary">Clear Sort</button>
+        </div>
+
+        <div class="workspace-grid">
+          <div id="grid"></div>
+
+          <section class="log-panel">
+            <div class="stats">
+              <div>
+                <strong>Visible</strong>
+                <span id="visibleCount">0</span>
+              </div>
+              <div>
+                <strong>Pinned Left</strong>
+                <span id="pinnedLeftCount">0</span>
+              </div>
+              <div>
+                <strong>Sort</strong>
+                <span id="sortState">none</span>
+              </div>
+            </div>
+            <pre id="eventLog"></pre>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const BASE_COLUMNS = [
+        { id: 'id', header: 'ID', width: 92, type: 'number' },
+        { id: 'name', header: 'Name', width: 210, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'status', header: 'Status', width: 150, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const rowData = Array.from({ length: 240 }, (_, index) => {
+        const regionPool = ['APAC', 'EMEA', 'AMER'];
+        const statusPool = ['active', 'idle', 'review', 'blocked'];
+        return {
+          id: index + 1,
+          name: 'Customer-' + String(index + 1).padStart(3, '0'),
+          region: regionPool[index % regionPool.length],
+          status: statusPool[index % statusPool.length],
+          score: 100 + ((index * 17) % 700),
+          updatedAt: new Date(Date.now() - index * 1000 * 60 * 33).toISOString()
+        };
+      });
+
+      const eventLogElement = document.getElementById('eventLog');
+      const visibleCountElement = document.getElementById('visibleCount');
+      const pinnedLeftCountElement = document.getElementById('pinnedLeftCount');
+      const sortStateElement = document.getElementById('sortState');
+
+      function appendLog(message, payload) {
+        const time = new Date().toLocaleTimeString('ko-KR', { hour12: false });
+        const nextLine =
+          '[' +
+          time +
+          '] ' +
+          message +
+          (payload ? '\n' + JSON.stringify(payload, null, 2) : '');
+        eventLogElement.textContent = nextLine + '\n\n' + eventLogElement.textContent.trim();
+      }
+
+      function syncSummary(grid) {
+        const visibleColumns = grid.getVisibleColumns();
+        visibleCountElement.textContent = String(visibleColumns.length);
+        pinnedLeftCountElement.textContent = String(
+          visibleColumns.filter((column) => column.pinned === 'left').length
+        );
+        const sortModel = grid.getSortModel();
+        sortStateElement.textContent =
+          sortModel.length === 0 ? 'none' : sortModel.map((item) => item.columnId + ':' + item.direction).join(', ');
+      }
+
+      let grid;
+      grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: BASE_COLUMNS.map((column) => ({ ...column })),
+        rowData,
+        height: 540,
+        rowHeight: 30,
+        overscan: 8,
+        locale: 'en-US',
+        columnMenu: {
+          enabled: true,
+          trigger: 'both',
+          getItems(context) {
+            return [
+              { separator: true, id: 'divider-column', label: 'divider' },
+              {
+                id: 'log-column-id',
+                label: 'Log column id',
+                onSelect() {
+                  appendLog('columnMenu custom item', {
+                    columnId: context.column.id,
+                    source: context.source
+                  });
+                }
+              }
+            ];
+          }
+        },
+        contextMenu: {
+          enabled: true,
+          getItems(context) {
+            return [
+              { separator: true, id: 'divider-context', label: 'divider' },
+              {
+                id: 'set-width-220',
+                label: 'Set width 220px',
+                onSelect() {
+                  grid.setColumnWidth(context.column.id, 220);
+                  appendLog('contextMenu custom item', {
+                    action: 'set-width-220',
+                    columnId: context.column.id
+                  });
+                  syncSummary(grid);
+                }
+              }
+            ];
+          }
+        }
+      });
+
+      grid.on('columnResize', (event) => {
+        appendLog('columnResize', event);
+        syncSummary(grid);
+      });
+
+      grid.on('columnReorder', (event) => {
+        appendLog('columnReorder', event);
+        syncSummary(grid);
+      });
+
+      document.getElementById('showAllColumns').addEventListener('click', () => {
+        BASE_COLUMNS.forEach((column) => {
+          grid.setColumnVisibility(column.id, true);
+        });
+        appendLog('Show all columns');
+        syncSummary(grid);
+      });
+
+      document.getElementById('resetLayout').addEventListener('click', () => {
+        grid.setColumns(BASE_COLUMNS.map((column) => ({ ...column, visible: true, pinned: undefined })));
+        appendLog('Reset layout');
+        syncSummary(grid);
+      });
+
+      document.getElementById('clearSort').addEventListener('click', async () => {
+        await grid.clearSortModel();
+        appendLog('Clear sort');
+        syncSummary(grid);
+      });
+
+      syncSummary(grid);
+      appendLog('Ready', {
+        instructions: ['click header edge', 'right-click header', 'use Shift+F10 after selecting a body cell']
+      });
+
+      window.__example62 = {
+        grid,
+        syncSummary,
+        showAllColumns() {
+          document.getElementById('showAllColumns').click();
+        },
+        resetLayout() {
+          document.getElementById('resetLayout').click();
+        }
+      };
+    </script>
+  </body>
+</html>

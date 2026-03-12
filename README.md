@@ -27,6 +27,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Worker e2e smoke + cancel/crash recovery test + worker on/off bench comparison + async payload serialization + custom group/pivot reducer hydration + valueGetter/comparator projection + repeated projection cache + selective projection prefix evaluation
 - Cooperative sorting/filtering executor + Grid API 연동
 - Column feature pack (resize/reorder/pin/hide) + selection indicator columns
+- Header column menu / context menu (sort/pin/hide/auto-size/reset + custom menu hooks)
 - Multi-level column group header
 - Grouping pipeline (client grouping + key 기반 expand/collapse + sum/avg/min/max/count/custom aggregation)
 - Tree data pipeline (client tree model + key expansion state + lazy children load)
@@ -49,7 +50,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 아직 엔터프라이즈 상용 제품으로 완료되지 않은 범위:
 
 - mature server-side row model (store hierarchy, save orchestration, conflict UI는 아직 부족)
-- enterprise UI surface (column menu, filter UI, side bar/tool panel, status bar 등)
+- enterprise UI surface (filter UI, side bar/tool panel, status bar 등)
 - React/Vue product package 및 plugin SDK
 - release/commercial readiness (`Phase 15`)
 

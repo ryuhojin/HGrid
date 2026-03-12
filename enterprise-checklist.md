@@ -197,10 +197,10 @@
 > 지금 HGrid는 엔진 중심이다. 이제 실제 사용자가 만지는 제품 surface를 만든다.
 
 ## E3.1 Column Menu / Context Menu
-- [ ] column header menu 추가
-- [ ] sort / pin / hide / auto-size / reset 메뉴 추가
-- [ ] context menu hook 추가
-- [ ] custom menu item 확장 포인트 설계
+- [x] column header menu 추가
+- [x] sort / pin / hide / auto-size / reset 메뉴 추가
+- [x] context menu hook 추가
+- [x] custom menu item 확장 포인트 설계
 
 ## E3.2 Filter UI
 - [ ] text/number/date/set filter panel UI 추가

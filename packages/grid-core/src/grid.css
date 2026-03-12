@@ -255,6 +255,36 @@
   background: var(--hgrid-header-resize-handle);
 }
 
+.hgrid__header-cell--menuable {
+  padding-right: calc(var(--hgrid-header-cell-padding-x) + 18px);
+}
+
+.hgrid--rtl .hgrid__header-cell--menuable {
+  padding-right: var(--hgrid-header-cell-padding-x);
+  padding-left: calc(var(--hgrid-header-cell-padding-x) + 18px);
+}
+
+.hgrid__header-cell--menuable::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  color: var(--hgrid-header-group-text);
+  opacity: 0.56;
+  pointer-events: none;
+  transform: translateY(-50%);
+  box-shadow: 0 -5px 0 currentColor, 0 5px 0 currentColor;
+}
+
+.hgrid--rtl .hgrid__header-cell--menuable::before {
+  right: auto;
+  left: 10px;
+}
+
 .hgrid__header-cell--center {
   position: absolute;
   top: 0;
@@ -644,6 +674,73 @@
 
 .hgrid__editor-host--invalid .hgrid__editor-message {
   display: block;
+}
+
+.hgrid__column-menu {
+  position: absolute;
+  display: none;
+  min-width: 168px;
+  max-width: calc(100% - 8px);
+  padding: 6px;
+  box-sizing: border-box;
+  border: var(--hgrid-editor-border-width) solid var(--hgrid-border-color);
+  border-radius: var(--hgrid-editor-radius);
+  background: var(--hgrid-editor-bg);
+  box-shadow: var(--hgrid-editor-shadow);
+  z-index: 13;
+  pointer-events: auto;
+}
+
+.hgrid__column-menu--open {
+  display: block;
+}
+
+.hgrid__column-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hgrid__column-menu-item {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.hgrid--rtl .hgrid__column-menu-item {
+  text-align: right;
+}
+
+.hgrid__column-menu-item:hover:not(:disabled),
+.hgrid__column-menu-item:focus-visible {
+  background: var(--hgrid-selection-bg);
+  outline: 0;
+}
+
+.hgrid__column-menu-item--checked {
+  font-weight: 600;
+  background: var(--hgrid-selection-bg);
+}
+
+.hgrid__column-menu-item--danger {
+  color: #a4252c;
+}
+
+.hgrid__column-menu-item:disabled {
+  opacity: 0.44;
+  cursor: default;
+}
+
+.hgrid__column-menu-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--hgrid-border-color);
 }
 
 .hgrid--row-height-measured .hgrid__row .hgrid__cell {

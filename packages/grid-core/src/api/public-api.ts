@@ -11,6 +11,13 @@ export type {
 export type {
   ColumnComparator,
   ColumnDef,
+  GridBuiltInColumnMenuActionId,
+  GridColumnMenuContext,
+  GridColumnMenuOptions,
+  GridColumnMenuTrigger,
+  GridContextMenuOptions,
+  GridMenuItem,
+  GridMenuOpenSource,
   ColumnGroupDef,
   ColumnFormatter,
   GroupAggregationContext,

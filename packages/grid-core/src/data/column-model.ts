@@ -5,6 +5,7 @@ const DEFAULT_MIN_WIDTH = 40;
 const DEFAULT_MAX_WIDTH = 1200;
 
 export interface ResolvedColumnDef extends ColumnDef {
+  initialWidth: number;
   minWidth: number;
   maxWidth: number;
   visible: boolean;
@@ -40,13 +41,14 @@ function clampColumnWidth(width: number, minWidth: number, maxWidth: number): nu
 function normalizeColumn(column: ColumnDef): ResolvedColumnDef {
   const { minWidth, maxWidth } = normalizeWidthBounds(column);
   const rawWidth = Number(column.width);
-  const width = Number.isFinite(rawWidth) ? rawWidth : minWidth;
+  const initialWidth = Number.isFinite(rawWidth) ? rawWidth : minWidth;
 
   return {
     ...column,
+    initialWidth,
     minWidth,
     maxWidth,
-    width: clampColumnWidth(width, minWidth, maxWidth),
+    width: clampColumnWidth(initialWidth, minWidth, maxWidth),
     visible: column.visible !== false
   };
 }

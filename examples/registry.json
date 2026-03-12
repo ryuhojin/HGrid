@@ -772,6 +772,19 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 62,
+      "file": "example62.html",
+      "title": "Example 62 - Column Menu And Context Menu",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "column-menu",
+        "context-menu",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

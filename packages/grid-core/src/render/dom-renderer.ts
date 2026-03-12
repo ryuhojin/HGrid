@@ -3,7 +3,11 @@ import type { GridRendererPort } from '../core/grid-internal-contracts';
 import type {
   ColumnGroupDef,
   ColumnDef,
+  GridBuiltInColumnMenuActionId,
+  GridColumnMenuContext,
   GridLocaleText,
+  GridMenuItem,
+  GridMenuOpenSource,
   GridOptions,
   GridState,
   RowHeightMode,
@@ -18,6 +22,7 @@ import {
   formatColumnValue,
   getColumnValue,
   createColumnValueFormatContext,
+  type ResolvedColumnDef,
   type ColumnValueFormatContext
 } from '../data/column-model';
 import {
@@ -134,6 +139,30 @@ import {
 
 type ColumnZoneName = 'left' | 'center' | 'right';
 
+const BUILT_IN_COLUMN_MENU_ACTION_IDS: ReadonlySet<GridBuiltInColumnMenuActionId> = new Set<GridBuiltInColumnMenuActionId>([
+  'sortAsc',
+  'sortDesc',
+  'clearSort',
+  'pinLeft',
+  'pinRight',
+  'unpin',
+  'autoSizeColumn',
+  'resetColumnWidth',
+  'hideColumn'
+]);
+
+function isBuiltInColumnMenuActionId(value: string): value is GridBuiltInColumnMenuActionId {
+  return BUILT_IN_COLUMN_MENU_ACTION_IDS.has(value as GridBuiltInColumnMenuActionId);
+}
+
+function escapeAttributeSelectorValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function estimateTextPixelWidth(text: string): number {
+  return Math.max(0, Math.ceil(text.length * 8.2));
+}
+
 interface ColumnsByZone {
   left: ColumnDef[];
   center: ColumnDef[];
@@ -189,6 +218,24 @@ interface PointerSelectionSession {
   lastCell: SelectionCellPosition;
 }
 
+interface ResolvedColumnMenuItem {
+  id: string;
+  label: string;
+  disabled: boolean;
+  checked: boolean;
+  danger: boolean;
+  isSeparator: boolean;
+  builtInActionId: GridBuiltInColumnMenuActionId | null;
+  onSelect: ((context: GridColumnMenuContext) => void) | null;
+}
+
+interface OpenColumnMenuState {
+  columnId: string;
+  source: GridMenuOpenSource;
+  items: ResolvedColumnMenuItem[];
+  context: GridColumnMenuContext;
+}
+
 interface ClipboardCellUpdate {
   rowIndex: number;
   dataIndex: number;
@@ -218,6 +265,7 @@ const MIN_INDICATOR_WIDTH = 44;
 const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 104;
 const DEFAULT_HEADER_ROW_HEIGHT = 32;
+const HEADER_MENU_TRIGGER_WIDTH_PX = 22;
 const MAX_GROUP_HEADER_DEPTH = 8;
 const MAX_GROUP_ROW_LEVEL = 12;
 const MAX_TREE_ROW_LEVEL = 16;
@@ -269,6 +317,8 @@ export class DomRenderer implements GridRendererPort {
   private editorHostElement: HTMLDivElement;
   private editorInputElement: HTMLInputElement;
   private editorMessageElement: HTMLDivElement;
+  private columnMenuElement: HTMLDivElement;
+  private columnMenuListElement: HTMLDivElement;
 
   private options: GridOptions;
   private columnsByZone: ColumnsByZone;
@@ -332,6 +382,7 @@ export class DomRenderer implements GridRendererPort {
   private columnReorderSession: ColumnReorderSession | null = null;
   private columnReorderFrameId: number | null = null;
   private headerReorderDraggingCell: HTMLDivElement | null = null;
+  private openColumnMenuState: OpenColumnMenuState | null = null;
   private indicatorHeaderCheckAllElement: HTMLInputElement | null = null;
   private rowCheckboxAnchorRowIndex: number | null = null;
   private readonly ariaGridId: string;
@@ -384,6 +435,8 @@ export class DomRenderer implements GridRendererPort {
     this.editorHostElement = document.createElement('div');
     this.editorInputElement = document.createElement('input');
     this.editorMessageElement = document.createElement('div');
+    this.columnMenuElement = document.createElement('div');
+    this.columnMenuListElement = document.createElement('div');
 
     this.columnsByZone = this.splitColumns(this.options.columns);
     this.scrollbarSize = this.measureScrollbarSize();
@@ -400,6 +453,7 @@ export class DomRenderer implements GridRendererPort {
   public setOptions(nextOptions: GridOptions): void {
     this.teardownPointerSelectionSession();
     this.teardownColumnReorderSession();
+    this.closeColumnMenu();
     this.stopEditing('reconcile');
     this.options = nextOptions;
     this.columnsByZone = this.splitColumns(this.options.columns);
@@ -412,6 +466,7 @@ export class DomRenderer implements GridRendererPort {
   public refreshDataView(): void {
     this.teardownPointerSelectionSession();
     this.teardownColumnReorderSession();
+    this.closeColumnMenu();
     this.stopEditing('reconcile');
     this.reconcileSelection('reconcile');
 
@@ -437,6 +492,7 @@ export class DomRenderer implements GridRendererPort {
   }
 
   public setState(state: GridState): void {
+    this.closeColumnMenu();
     const nextVirtualScrollTop = Math.max(0, state.scrollTop);
     this.setVirtualScrollTop(nextVirtualScrollTop);
     this.markScrollDirty();
@@ -524,6 +580,7 @@ export class DomRenderer implements GridRendererPort {
     this.rootElement.removeEventListener('pointerdown', this.handleRootPointerDown);
     this.rootElement.removeEventListener('click', this.handleRootClick);
     this.rootElement.removeEventListener('dblclick', this.handleRootDoubleClick);
+    this.rootElement.removeEventListener('contextmenu', this.handleRootContextMenu);
     this.editorInputElement.removeEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorInputElement.removeEventListener('blur', this.handleEditorInputBlur);
     this.editorInputElement.removeEventListener('input', this.handleEditorInput);
@@ -638,8 +695,13 @@ export class DomRenderer implements GridRendererPort {
     this.editorInputElement.type = 'text';
     this.editorInputElement.spellcheck = false;
     this.editorMessageElement.className = 'hgrid__editor-message';
+    this.columnMenuElement.className = 'hgrid__column-menu';
+    this.columnMenuElement.setAttribute('role', 'presentation');
+    this.columnMenuListElement.className = 'hgrid__column-menu-list';
+    this.columnMenuListElement.setAttribute('role', 'menu');
     this.editorHostElement.append(this.editorInputElement, this.editorMessageElement);
-    this.overlayElement.append(this.editorHostElement);
+    this.columnMenuElement.append(this.columnMenuListElement);
+    this.overlayElement.append(this.editorHostElement, this.columnMenuElement);
 
     this.rootElement.append(this.headerElement, this.bodyElement, this.overlayElement);
 
@@ -660,6 +722,7 @@ export class DomRenderer implements GridRendererPort {
     this.rootElement.addEventListener('pointerdown', this.handleRootPointerDown);
     this.rootElement.addEventListener('click', this.handleRootClick);
     this.rootElement.addEventListener('dblclick', this.handleRootDoubleClick);
+    this.rootElement.addEventListener('contextmenu', this.handleRootContextMenu);
     this.editorInputElement.addEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorInputElement.addEventListener('blur', this.handleEditorInputBlur);
     this.editorInputElement.addEventListener('input', this.handleEditorInput);
@@ -693,6 +756,586 @@ export class DomRenderer implements GridRendererPort {
 
   private localizeText(template: string, values: Record<string, string | number>): string {
     return formatGridLocaleText(template, values);
+  }
+
+  private isSystemUtilityColumnId(columnId: string): boolean {
+    return (
+      columnId === LEGACY_INDICATOR_COLUMN_ID ||
+      columnId === INDICATOR_ROW_NUMBER_COLUMN_ID ||
+      columnId === INDICATOR_CHECKBOX_COLUMN_ID ||
+      columnId === INDICATOR_STATUS_COLUMN_ID ||
+      columnId === STATE_COLUMN_ID
+    );
+  }
+
+  private isColumnMenuEnabled(): boolean {
+    return Boolean(this.options.columnMenu && this.options.columnMenu.enabled !== false);
+  }
+
+  private isContextMenuEnabled(): boolean {
+    return Boolean(this.options.contextMenu && this.options.contextMenu.enabled !== false);
+  }
+
+  private getColumnMenuTriggerMode(): 'button' | 'contextmenu' | 'both' | null {
+    if (!this.isColumnMenuEnabled()) {
+      return null;
+    }
+
+    return this.options.columnMenu?.trigger ?? 'both';
+  }
+
+  private supportsColumnMenuOpenSource(source: GridMenuOpenSource): boolean {
+    const triggerMode = this.getColumnMenuTriggerMode();
+    if (source === 'button') {
+      return triggerMode === 'button' || triggerMode === 'both';
+    }
+
+    if (source === 'contextmenu') {
+      return triggerMode === 'contextmenu' || triggerMode === 'both' || this.isContextMenuEnabled();
+    }
+
+    return this.isColumnMenuEnabled();
+  }
+
+  private isColumnMenuEligibleColumn(column: ColumnDef): boolean {
+    return !this.isSystemUtilityColumnId(column.id);
+  }
+
+  private getMenuEligibleVisibleColumnCount(): number {
+    let count = 0;
+    for (let index = 0; index < this.options.columns.length; index += 1) {
+      if (this.isColumnMenuEligibleColumn(this.options.columns[index])) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  private isHeaderMenuTriggerHit(clientX: number, headerCell: HTMLDivElement): boolean {
+    const triggerMode = this.getColumnMenuTriggerMode();
+    if (triggerMode !== 'button' && triggerMode !== 'both') {
+      return false;
+    }
+
+    const columnId = headerCell.dataset.columnId;
+    if (!columnId) {
+      return false;
+    }
+
+    const column = findVisibleColumnById(this.options.columns, columnId);
+    if (!column || !this.isColumnMenuEligibleColumn(column)) {
+      return false;
+    }
+
+    const cellRect = headerCell.getBoundingClientRect();
+    if (cellRect.width <= HEADER_RESIZE_HIT_SLOP_PX * 2) {
+      return false;
+    }
+
+    if (this.options.rtl === true) {
+      const triggerLimit = Math.min(cellRect.right, cellRect.left + HEADER_MENU_TRIGGER_WIDTH_PX);
+      const resizeLimit = cellRect.left + HEADER_RESIZE_HIT_SLOP_PX;
+      return clientX >= resizeLimit && clientX <= triggerLimit;
+    }
+
+    const triggerStart = Math.max(cellRect.left, cellRect.right - HEADER_MENU_TRIGGER_WIDTH_PX);
+    const resizeBoundary = cellRect.right - HEADER_RESIZE_HIT_SLOP_PX;
+    return clientX >= triggerStart && clientX < resizeBoundary;
+  }
+
+  private findVisibleHeaderCellByColumnId(columnId: string): HTMLDivElement | null {
+    const selector = `.hgrid__header-cell--leaf[data-column-id="${escapeAttributeSelectorValue(columnId)}"]`;
+    const headerCells = this.headerElement.querySelectorAll(selector);
+    for (let index = 0; index < headerCells.length; index += 1) {
+      const headerCell = headerCells[index] as HTMLDivElement;
+      if (headerCell.style.display !== 'none') {
+        return headerCell;
+      }
+    }
+
+    return null;
+  }
+
+  private isTargetInsideColumnMenu(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && Boolean(target.closest('.hgrid__column-menu'));
+  }
+
+  private resolveColumnMenuContext(columnId: string, source: GridMenuOpenSource): GridColumnMenuContext | null {
+    const column = findVisibleColumnById(this.options.columns, columnId);
+    if (!column || !this.isColumnMenuEligibleColumn(column)) {
+      return null;
+    }
+
+    return {
+      column: { ...column },
+      visibleColumns: this.options.columns.map((visibleColumn) => ({ ...visibleColumn })),
+      source
+    };
+  }
+
+  private createBuiltInColumnMenuItems(context: GridColumnMenuContext): ResolvedColumnMenuItem[] {
+    if (!this.isColumnMenuEnabled()) {
+      return [];
+    }
+
+    const column = context.column as ResolvedColumnDef;
+    const resolvedItems: ResolvedColumnMenuItem[] = [
+      {
+        id: 'sortAsc',
+        label: this.localeText.columnMenuSortAsc,
+        disabled: false,
+        checked: false,
+        danger: false,
+        isSeparator: false,
+        builtInActionId: 'sortAsc',
+        onSelect: null
+      },
+      {
+        id: 'sortDesc',
+        label: this.localeText.columnMenuSortDesc,
+        disabled: false,
+        checked: false,
+        danger: false,
+        isSeparator: false,
+        builtInActionId: 'sortDesc',
+        onSelect: null
+      },
+      {
+        id: 'clearSort',
+        label: this.localeText.columnMenuClearSort,
+        disabled: false,
+        checked: false,
+        danger: false,
+        isSeparator: false,
+        builtInActionId: 'clearSort',
+        onSelect: null
+      },
+      {
+        id: '__separator-sort-layout__',
+        label: '',
+        disabled: true,
+        checked: false,
+        danger: false,
+        isSeparator: true,
+        builtInActionId: null,
+        onSelect: null
+      },
+      {
+        id: 'pinLeft',
+        label: this.localeText.columnMenuPinLeft,
+        disabled: column.pinned === 'left',
+        checked: column.pinned === 'left',
+        danger: false,
+        isSeparator: false,
+        builtInActionId: 'pinLeft',
+        onSelect: null
+      },
+      {
+        id: 'pinRight',
+        label: this.localeText.columnMenuPinRight,
+        disabled: column.pinned === 'right',
+        checked: column.pinned === 'right',
+        danger: false,
+        isSeparator: false,
+        builtInActionId: 'pinRight',
+        onSelect: null
+      },
+      {
+        id: 'unpin',
+        label: this.localeText.columnMenuUnpin,
+        disabled: column.pinned !== 'left' && column.pinned !== 'right',
+        checked: column.pinned !== 'left' && column.pinned !== 'right',
+        danger: false,
+        isSeparator: false,
+        builtInActionId: 'unpin',
+        onSelect: null
+      },
+      {
+        id: '__separator-layout-width__',
+        label: '',
+        disabled: true,
+        checked: false,
+        danger: false,
+        isSeparator: true,
+        builtInActionId: null,
+        onSelect: null
+      },
+      {
+        id: 'autoSizeColumn',
+        label: this.localeText.columnMenuAutoSizeColumn,
+        disabled: false,
+        checked: false,
+        danger: false,
+        isSeparator: false,
+        builtInActionId: 'autoSizeColumn',
+        onSelect: null
+      },
+      {
+        id: 'resetColumnWidth',
+        label: this.localeText.columnMenuResetColumnWidth,
+        disabled: Math.abs(column.width - (column.initialWidth ?? column.width)) < 1,
+        checked: false,
+        danger: false,
+        isSeparator: false,
+        builtInActionId: 'resetColumnWidth',
+        onSelect: null
+      },
+      {
+        id: '__separator-width-visibility__',
+        label: '',
+        disabled: true,
+        checked: false,
+        danger: false,
+        isSeparator: true,
+        builtInActionId: null,
+        onSelect: null
+      },
+      {
+        id: 'hideColumn',
+        label: this.localeText.columnMenuHideColumn,
+        disabled: this.getMenuEligibleVisibleColumnCount() <= 1,
+        checked: false,
+        danger: true,
+        isSeparator: false,
+        builtInActionId: 'hideColumn',
+        onSelect: null
+      }
+    ];
+
+    return resolvedItems;
+  }
+
+  private normalizeCustomColumnMenuItems(
+    items: GridMenuItem[] | undefined,
+    context: GridColumnMenuContext
+  ): ResolvedColumnMenuItem[] {
+    if (!Array.isArray(items) || items.length === 0) {
+      return [];
+    }
+
+    const resolvedItems: ResolvedColumnMenuItem[] = [];
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+
+      if (item.separator === true) {
+        resolvedItems.push({
+          id: `__separator-custom-${index}__`,
+          label: '',
+          disabled: true,
+          checked: false,
+          danger: false,
+          isSeparator: true,
+          builtInActionId: null,
+          onSelect: null
+        });
+        continue;
+      }
+
+      if (typeof item.id !== 'string' || item.id.trim().length === 0) {
+        continue;
+      }
+
+      if (typeof item.label !== 'string' || item.label.trim().length === 0) {
+        continue;
+      }
+
+      resolvedItems.push({
+        id: item.id,
+        label: item.label,
+        disabled: item.disabled === true,
+        checked: item.checked === true,
+        danger: item.danger === true,
+        isSeparator: false,
+        builtInActionId: null,
+        onSelect: typeof item.onSelect === 'function' ? () => item.onSelect?.(context) : null
+      });
+    }
+
+    return resolvedItems;
+  }
+
+  private finalizeResolvedColumnMenuItems(items: ResolvedColumnMenuItem[]): ResolvedColumnMenuItem[] {
+    const finalized: ResolvedColumnMenuItem[] = [];
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      if (item.isSeparator) {
+        if (finalized.length === 0 || finalized[finalized.length - 1]?.isSeparator) {
+          continue;
+        }
+      }
+      finalized.push(item);
+    }
+
+    while (finalized.length > 0 && finalized[finalized.length - 1]?.isSeparator) {
+      finalized.pop();
+    }
+
+    return finalized;
+  }
+
+  private buildColumnMenuItems(context: GridColumnMenuContext): ResolvedColumnMenuItem[] {
+    const resolvedItems = this.createBuiltInColumnMenuItems(context);
+    const appendItems = (items: ResolvedColumnMenuItem[]): void => {
+      if (items.length === 0) {
+        return;
+      }
+
+      if (
+        resolvedItems.length > 0 &&
+        !resolvedItems[resolvedItems.length - 1]?.isSeparator &&
+        !items[0]?.isSeparator
+      ) {
+        resolvedItems.push({
+          id: `__separator-bridge-${resolvedItems.length}__`,
+          label: '',
+          disabled: true,
+          checked: false,
+          danger: false,
+          isSeparator: true,
+          builtInActionId: null,
+          onSelect: null
+        });
+      }
+
+      for (let index = 0; index < items.length; index += 1) {
+        resolvedItems.push(items[index]);
+      }
+    };
+
+    if (this.isColumnMenuEnabled() && typeof this.options.columnMenu?.getItems === 'function') {
+      appendItems(this.normalizeCustomColumnMenuItems(this.options.columnMenu.getItems(context), context));
+    }
+
+    if (context.source === 'contextmenu' && this.isContextMenuEnabled() && typeof this.options.contextMenu?.getItems === 'function') {
+      appendItems(this.normalizeCustomColumnMenuItems(this.options.contextMenu.getItems(context), context));
+    }
+
+    return this.finalizeResolvedColumnMenuItems(resolvedItems);
+  }
+
+  private renderColumnMenu(items: ResolvedColumnMenuItem[]): void {
+    const children: HTMLElement[] = [];
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      if (item.isSeparator) {
+        const separatorElement = document.createElement('div');
+        separatorElement.className = 'hgrid__column-menu-separator';
+        separatorElement.setAttribute('role', 'separator');
+        children.push(separatorElement);
+        continue;
+      }
+
+      const itemElement = document.createElement('button');
+      itemElement.type = 'button';
+      itemElement.className = 'hgrid__column-menu-item';
+      itemElement.setAttribute('data-menu-item-index', String(index));
+      itemElement.setAttribute('role', item.checked ? 'menuitemcheckbox' : 'menuitem');
+      if (item.checked) {
+        itemElement.classList.add('hgrid__column-menu-item--checked');
+        itemElement.setAttribute('aria-checked', 'true');
+      }
+      if (item.danger) {
+        itemElement.classList.add('hgrid__column-menu-item--danger');
+      }
+      if (item.disabled) {
+        itemElement.disabled = true;
+      }
+
+      itemElement.textContent = item.label;
+      children.push(itemElement);
+    }
+
+    this.columnMenuListElement.replaceChildren(...children);
+  }
+
+  private focusFirstColumnMenuItem(): void {
+    const firstEnabledItem = this.columnMenuListElement.querySelector(
+      '.hgrid__column-menu-item:not(:disabled)'
+    ) as HTMLButtonElement | null;
+    firstEnabledItem?.focus();
+  }
+
+  private openColumnMenuForHeaderCell(
+    headerCell: HTMLDivElement,
+    source: GridMenuOpenSource,
+    clientX?: number,
+    clientY?: number
+  ): void {
+    const columnId = headerCell.dataset.columnId;
+    if (!columnId || !this.supportsColumnMenuOpenSource(source)) {
+      return;
+    }
+
+    const context = this.resolveColumnMenuContext(columnId, source);
+    if (!context) {
+      return;
+    }
+
+    const items = this.buildColumnMenuItems(context);
+    if (items.length === 0) {
+      this.closeColumnMenu();
+      return;
+    }
+
+    this.openColumnMenuState = {
+      columnId,
+      source,
+      items,
+      context
+    };
+
+    this.renderColumnMenu(items);
+    this.columnMenuElement.classList.add('hgrid__column-menu--open');
+    this.columnMenuElement.style.display = 'block';
+
+    const rootRect = this.rootElement.getBoundingClientRect();
+    const headerRect = headerCell.getBoundingClientRect();
+    const menuRect = this.columnMenuElement.getBoundingClientRect();
+    const rootWidth = Math.max(this.rootElement.clientWidth, Math.round(rootRect.width));
+    const rootHeight = Math.max(this.rootElement.clientHeight, Math.round(rootRect.height));
+    const hasClientX = typeof clientX === 'number' && Number.isFinite(clientX);
+    const hasClientY = typeof clientY === 'number' && Number.isFinite(clientY);
+    const anchorX = hasClientX ? clientX - rootRect.left : headerRect.right - rootRect.left;
+    const anchorY = hasClientY ? clientY - rootRect.top : headerRect.bottom - rootRect.top;
+    const menuWidth = Math.max(menuRect.width, Math.min(240, Math.max(168, headerRect.width)));
+    const menuHeight = menuRect.height;
+    const fallbackX = this.options.rtl === true ? headerRect.left - rootRect.left : headerRect.right - rootRect.left - menuWidth;
+    const rawLeft = source === 'contextmenu' ? anchorX : fallbackX;
+    const left = Math.max(4, Math.min(Math.max(4, rootWidth - menuWidth - 4), rawLeft));
+    const belowTop = Math.max(4, anchorY + 4);
+    const aboveTop = Math.max(4, (hasClientY ? anchorY : headerRect.top - rootRect.top) - menuHeight - 4);
+    const top = belowTop + menuHeight <= rootHeight - 4 ? belowTop : aboveTop;
+
+    this.columnMenuElement.style.left = `${left}px`;
+    this.columnMenuElement.style.top = `${Math.max(4, top)}px`;
+    this.columnMenuElement.style.minWidth = `${Math.min(Math.max(168, headerRect.width), Math.max(168, rootWidth - 8))}px`;
+    this.focusFirstColumnMenuItem();
+  }
+
+  private closeColumnMenu(restoreFocus = false): void {
+    this.openColumnMenuState = null;
+    this.columnMenuElement.classList.remove('hgrid__column-menu--open');
+    this.columnMenuElement.style.display = 'none';
+    this.columnMenuElement.style.left = '';
+    this.columnMenuElement.style.top = '';
+    this.columnMenuElement.style.minWidth = '';
+    this.columnMenuListElement.replaceChildren();
+    if (restoreFocus) {
+      this.rootElement.focus();
+    }
+  }
+
+  private measureAutoSizedColumnWidth(column: ColumnDef): number {
+    const selector = `[data-column-id="${escapeAttributeSelectorValue(column.id)}"]`;
+    const elements = this.rootElement.querySelectorAll(`.hgrid__header-cell${selector}, .hgrid__cell${selector}`);
+    let maxContentWidth = estimateTextPixelWidth(column.header);
+
+    for (let index = 0; index < elements.length; index += 1) {
+      const element = elements[index] as HTMLElement;
+      const measuredWidth = Math.max(
+        element.scrollWidth,
+        element.clientWidth,
+        estimateTextPixelWidth(element.textContent?.trim() ?? '')
+      );
+      maxContentWidth = Math.max(maxContentWidth, measuredWidth);
+    }
+
+    const resolvedColumn = column as ResolvedColumnDef;
+    const triggerPadding = this.getColumnMenuTriggerMode() === 'button' || this.getColumnMenuTriggerMode() === 'both' ? 18 : 0;
+    const nextWidth = Math.ceil(maxContentWidth + 26 + triggerPadding);
+    const minWidth = resolvedColumn.minWidth ?? nextWidth;
+    const maxWidth = resolvedColumn.maxWidth ?? nextWidth;
+    return Math.max(minWidth, Math.min(maxWidth, nextWidth));
+  }
+
+  private handleColumnMenuItemSelection(target: HTMLElement | null): boolean {
+    if (!target) {
+      return false;
+    }
+
+    const itemElement = target.closest('.hgrid__column-menu-item') as HTMLButtonElement | null;
+    const openMenuState = this.openColumnMenuState;
+    if (!itemElement || !openMenuState || itemElement.disabled) {
+      return false;
+    }
+
+    const itemIndex = Number.parseInt(itemElement.dataset.menuItemIndex ?? '-1', 10);
+    if (!Number.isFinite(itemIndex) || itemIndex < 0 || itemIndex >= openMenuState.items.length) {
+      return false;
+    }
+
+    const item = openMenuState.items[itemIndex];
+    if (!item || item.isSeparator || item.disabled) {
+      return false;
+    }
+
+    this.closeColumnMenu(true);
+
+    if (item.builtInActionId === 'autoSizeColumn') {
+      this.eventBus.emit('columnResize', {
+        columnId: openMenuState.columnId,
+        width: this.measureAutoSizedColumnWidth(openMenuState.context.column),
+        phase: 'end'
+      });
+      return true;
+    }
+
+    if (item.builtInActionId === 'resetColumnWidth') {
+      const column = openMenuState.context.column as ResolvedColumnDef;
+      this.eventBus.emit('columnResize', {
+        columnId: openMenuState.columnId,
+        width: column.initialWidth ?? column.width,
+        phase: 'end'
+      });
+      return true;
+    }
+
+    if (item.builtInActionId) {
+      this.eventBus.emit('columnMenuAction', {
+        columnId: openMenuState.columnId,
+        actionId: item.builtInActionId,
+        source: openMenuState.source
+      });
+      return true;
+    }
+
+    item.onSelect?.(openMenuState.context);
+    return true;
+  }
+
+  private handleRootContextMenu = (event: MouseEvent): void => {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    if (this.isTargetInsideColumnMenu(event.target)) {
+      event.preventDefault();
+      return;
+    }
+
+    const headerCell =
+      this.resolveHeaderCellFromTarget(event.target as HTMLElement | null) ??
+      this.findHeaderCellAtPoint(event.clientX, event.clientY);
+    if (!headerCell) {
+      this.closeColumnMenu();
+      return;
+    }
+
+    const columnId = headerCell.dataset.columnId;
+    if (!columnId) {
+      return;
+    }
+
+    const column = findVisibleColumnById(this.options.columns, columnId);
+    if (!column || !this.isColumnMenuEligibleColumn(column) || !this.supportsColumnMenuOpenSource('contextmenu')) {
+      return;
+    }
+
+    event.preventDefault();
+    this.openColumnMenuForHeaderCell(headerCell, 'contextmenu', event.clientX, event.clientY);
   }
 
   private getVisibleColumnCount(): number {
@@ -993,7 +1636,13 @@ export class DomRenderer implements GridRendererPort {
     asPlaceholder: boolean,
     ariaColIndex: number
   ): void {
+    const shouldShowMenuTrigger =
+      this.isColumnMenuEligibleColumn(column) &&
+      (this.getColumnMenuTriggerMode() === 'button' || this.getColumnMenuTriggerMode() === 'both');
     headerCellElement.className = 'hgrid__header-cell hgrid__header-cell--leaf';
+    if (shouldShowMenuTrigger) {
+      headerCellElement.classList.add('hgrid__header-cell--menuable');
+    }
     headerCellElement.dataset.columnId = column.id;
     headerCellElement.setAttribute('role', 'columnheader');
     headerCellElement.setAttribute('aria-colindex', String(ariaColIndex));
@@ -3072,6 +3721,11 @@ export class DomRenderer implements GridRendererPort {
         ariaRowIndex: this.headerGroupRowCount + 1,
         left: this.centerColumnLeft[colIndex],
         width: column.width,
+        extraClassName:
+          this.isColumnMenuEligibleColumn(column) &&
+          (this.getColumnMenuTriggerMode() === 'button' || this.getColumnMenuTriggerMode() === 'both')
+            ? 'hgrid__header-cell--menuable'
+            : '',
         ariaColIndex: this.getZoneColumnStartIndex('center') + colIndex + 1
       });
       slotIndex += 1;
@@ -3396,6 +4050,7 @@ export class DomRenderer implements GridRendererPort {
   }
 
   private handleViewportScroll = (event: Event): void => {
+    this.closeColumnMenu();
     if (this.isSyncingScroll) {
       return;
     }
@@ -3416,6 +4071,7 @@ export class DomRenderer implements GridRendererPort {
   };
 
   private handleVerticalScroll = (event: Event): void => {
+    this.closeColumnMenu();
     if (this.isSyncingScroll) {
       return;
     }
@@ -3427,6 +4083,7 @@ export class DomRenderer implements GridRendererPort {
   };
 
   private handleHorizontalScroll = (event: Event): void => {
+    this.closeColumnMenu();
     if (this.isSyncingScroll) {
       return;
     }
@@ -3896,6 +4553,14 @@ export class DomRenderer implements GridRendererPort {
   }
 
   private handleRootPointerDown = (event: PointerEvent): void => {
+    if (this.isTargetInsideColumnMenu(event.target)) {
+      return;
+    }
+
+    if (this.openColumnMenuState) {
+      this.closeColumnMenu();
+    }
+
     if (this.editSession) {
       return;
     }
@@ -3920,6 +4585,12 @@ export class DomRenderer implements GridRendererPort {
     }
 
     const headerCell = this.resolveHeaderCellFromTarget(event.target as HTMLElement | null);
+    if (headerCell && this.isHeaderMenuTriggerHit(event.clientX, headerCell)) {
+      this.openColumnMenuForHeaderCell(headerCell, 'button');
+      event.preventDefault();
+      return;
+    }
+
     if (headerCell && this.options.columns.length > 1) {
       this.startColumnReorderSession(event.pointerId, event.clientX, event.clientY, headerCell);
       event.preventDefault();
@@ -3978,6 +4649,11 @@ export class DomRenderer implements GridRendererPort {
   private handleRootClick = (event: MouseEvent): void => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (this.handleColumnMenuItemSelection(target)) {
+      event.preventDefault();
       return;
     }
 
@@ -4626,7 +5302,41 @@ export class DomRenderer implements GridRendererPort {
       return;
     }
 
+    if (this.openColumnMenuState) {
+      if (event.key === 'Escape') {
+        this.closeColumnMenu(true);
+        event.preventDefault();
+        return;
+      }
+
+      if (this.isTargetInsideColumnMenu(event.target)) {
+        return;
+      }
+    }
+
     if (this.editSession) {
+      return;
+    }
+
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+      const currentSelection = this.selectionModel.getSelection();
+      const activeCell = currentSelection.activeCell ?? this.getInitialActiveCell();
+      if (!activeCell || !this.supportsColumnMenuOpenSource('keyboard')) {
+        return;
+      }
+
+      const activeColumn = this.resolveColumnByGlobalIndex(activeCell.colIndex);
+      if (!activeColumn || !this.isColumnMenuEligibleColumn(activeColumn.column)) {
+        return;
+      }
+
+      const headerCell = this.findVisibleHeaderCellByColumnId(activeColumn.column.id);
+      if (!headerCell) {
+        return;
+      }
+
+      this.openColumnMenuForHeaderCell(headerCell, 'keyboard');
+      event.preventDefault();
       return;
     }
 

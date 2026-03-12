@@ -11,17 +11,19 @@ import {
   TREE_ROW_NODE_KEY_FIELD,
   isTreeRowData
 } from '../data/tree-data-provider';
-import type { ColumnReorderEvent, ColumnResizeEvent, EventBus, GridEventMap } from './event-bus';
+import type { ColumnMenuActionEvent, ColumnReorderEvent, ColumnResizeEvent, EventBus, GridEventMap } from './event-bus';
 import type {
   GridAuditLogPort,
   GridColumnMutationPort,
   GridDerivedViewControllerPort,
+  GridSortMutationPort,
   GridWorkerProjectionCachePort
 } from './grid-internal-contracts';
 
 export interface GridCommandEventServiceParams
   extends GridColumnMutationPort,
     GridDerivedViewControllerPort,
+    GridSortMutationPort,
     GridWorkerProjectionCachePort,
     GridAuditLogPort {
   eventBus: EventBus;
@@ -41,17 +43,22 @@ export class GridCommandEventService {
     const handleEditCommit = (event: GridEventMap['editCommit']): void => {
       this.handleEditCommit(params, event);
     };
+    const handleColumnMenuAction = (event: ColumnMenuActionEvent): void => {
+      this.handleColumnMenuAction(params, event);
+    };
 
     params.eventBus.on('columnResize', handleColumnResize);
     params.eventBus.on('columnReorder', handleColumnReorder);
     params.eventBus.on('cellClick', handleCellClick);
     params.eventBus.on('editCommit', handleEditCommit);
+    params.eventBus.on('columnMenuAction', handleColumnMenuAction);
 
     return () => {
       params.eventBus.off('columnResize', handleColumnResize);
       params.eventBus.off('columnReorder', handleColumnReorder);
       params.eventBus.off('cellClick', handleCellClick);
       params.eventBus.off('editCommit', handleEditCommit);
+      params.eventBus.off('columnMenuAction', handleColumnMenuAction);
     };
   }
 
@@ -75,6 +82,50 @@ export class GridCommandEventService {
 
     params.setColumnOrder(event.columnOrder);
     params.syncColumnsToRenderer();
+  }
+
+  public handleColumnMenuAction(params: GridCommandEventServiceParams, event: ColumnMenuActionEvent): void {
+    if (!params.hasColumn(event.columnId)) {
+      return;
+    }
+
+    if (event.actionId === 'sortAsc') {
+      void params.setSortModel([{ columnId: event.columnId, direction: 'asc' }]);
+      return;
+    }
+
+    if (event.actionId === 'sortDesc') {
+      void params.setSortModel([{ columnId: event.columnId, direction: 'desc' }]);
+      return;
+    }
+
+    if (event.actionId === 'clearSort') {
+      void params.clearSortModel();
+      return;
+    }
+
+    if (event.actionId === 'pinLeft') {
+      params.setColumnPin(event.columnId, 'left');
+      params.syncColumnsToRenderer();
+      return;
+    }
+
+    if (event.actionId === 'pinRight') {
+      params.setColumnPin(event.columnId, 'right');
+      params.syncColumnsToRenderer();
+      return;
+    }
+
+    if (event.actionId === 'unpin') {
+      params.setColumnPin(event.columnId, undefined);
+      params.syncColumnsToRenderer();
+      return;
+    }
+
+    if (event.actionId === 'hideColumn') {
+      params.setColumnVisibility(event.columnId, false);
+      params.syncColumnsToRenderer();
+    }
   }
 
   public handleCellClick(params: GridCommandEventServiceParams, event: GridEventMap['cellClick']): void {

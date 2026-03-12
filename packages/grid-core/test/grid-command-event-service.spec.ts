@@ -19,7 +19,11 @@ function createBaseParams(
     hasColumn: () => true,
     setColumnWidth: () => undefined,
     setColumnOrder: () => undefined,
+    setColumnVisibility: () => undefined,
+    setColumnPin: () => undefined,
     syncColumnsToRenderer: () => undefined,
+    setSortModel: async () => undefined,
+    clearSortModel: async () => undefined,
     isTreeDataActive: () => false,
     isClientGroupingActive: () => false,
     isTreeToggleActive: () => false,
@@ -96,6 +100,54 @@ describe('GridCommandEventService', () => {
     });
 
     expect(setColumnWidth).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies built-in column menu actions through shared mutation ports', async () => {
+    const service = new GridCommandEventService();
+    const eventBus = new EventBus();
+    const setColumnVisibility = vi.fn();
+    const setColumnPin = vi.fn();
+    const setSortModel = vi.fn(async () => undefined);
+    const clearSortModel = vi.fn(async () => undefined);
+    const syncColumnsToRenderer = vi.fn();
+
+    service.register(
+      createBaseParams(eventBus, {
+        hasColumn: (columnId) => columnId === 'score',
+        setColumnVisibility,
+        setColumnPin,
+        setSortModel,
+        clearSortModel,
+        syncColumnsToRenderer
+      })
+    );
+
+    eventBus.emit('columnMenuAction', {
+      columnId: 'score',
+      actionId: 'sortAsc',
+      source: 'button'
+    });
+    eventBus.emit('columnMenuAction', {
+      columnId: 'score',
+      actionId: 'pinRight',
+      source: 'contextmenu'
+    });
+    eventBus.emit('columnMenuAction', {
+      columnId: 'score',
+      actionId: 'hideColumn',
+      source: 'keyboard'
+    });
+    eventBus.emit('columnMenuAction', {
+      columnId: 'score',
+      actionId: 'clearSort',
+      source: 'button'
+    });
+
+    expect(setSortModel).toHaveBeenCalledWith([{ columnId: 'score', direction: 'asc' }]);
+    expect(setColumnPin).toHaveBeenCalledWith('score', 'right');
+    expect(setColumnVisibility).toHaveBeenCalledWith('score', false);
+    expect(clearSortModel).toHaveBeenCalledTimes(1);
+    expect(syncColumnsToRenderer).toHaveBeenCalledTimes(2);
   });
 
   it('toggles grouped rows and emits audit log on edit commit', () => {

@@ -2,8 +2,10 @@ import { EventBus } from './event-bus';
 import type { GridEventMap, GridEventName } from './event-bus';
 import type {
   ColumnDef,
+  GridColumnMenuOptions,
   ColumnGroupDef,
   GroupAggregationDef,
+  GridContextMenuOptions,
   GridLocaleText,
   GroupModelItem,
   GroupingMode,
@@ -165,6 +167,96 @@ function mergeStateColumnOptions(
     ...currentOptions,
     ...nextOptions
   };
+}
+
+function normalizeColumnMenuTrigger(trigger: GridColumnMenuOptions['trigger'] | undefined): GridColumnMenuOptions['trigger'] {
+  if (trigger === 'button' || trigger === 'contextmenu' || trigger === 'both') {
+    return trigger;
+  }
+
+  return undefined;
+}
+
+function cloneColumnMenuOptions(columnMenu?: GridColumnMenuOptions): GridColumnMenuOptions | undefined {
+  if (!columnMenu) {
+    return undefined;
+  }
+
+  return {
+    enabled: columnMenu.enabled !== false,
+    trigger: normalizeColumnMenuTrigger(columnMenu.trigger) ?? 'both',
+    getItems: typeof columnMenu.getItems === 'function' ? columnMenu.getItems : undefined
+  };
+}
+
+function mergeColumnMenuOptions(
+  currentOptions: GridOptions['columnMenu'],
+  nextOptions: GridConfig['columnMenu']
+): GridOptions['columnMenu'] {
+  if (!nextOptions) {
+    return cloneColumnMenuOptions(currentOptions) ?? {
+      enabled: true,
+      trigger: 'both'
+    };
+  }
+
+  const base = cloneColumnMenuOptions(currentOptions) ?? {
+    enabled: true,
+    trigger: 'both' as const,
+    getItems: undefined
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'enabled')) {
+    base.enabled = nextOptions.enabled !== false;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'trigger')) {
+    base.trigger = normalizeColumnMenuTrigger(nextOptions.trigger) ?? 'both';
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'getItems')) {
+    base.getItems = typeof nextOptions.getItems === 'function' ? nextOptions.getItems : undefined;
+  }
+
+  return base;
+}
+
+function cloneContextMenuOptions(contextMenu?: GridContextMenuOptions): GridContextMenuOptions | undefined {
+  if (!contextMenu) {
+    return undefined;
+  }
+
+  return {
+    enabled: contextMenu.enabled !== false,
+    getItems: typeof contextMenu.getItems === 'function' ? contextMenu.getItems : undefined
+  };
+}
+
+function mergeContextMenuOptions(
+  currentOptions: GridOptions['contextMenu'],
+  nextOptions: GridConfig['contextMenu']
+): GridOptions['contextMenu'] {
+  if (!nextOptions) {
+    return cloneContextMenuOptions(currentOptions) ?? {
+      enabled: true,
+      getItems: undefined
+    };
+  }
+
+  const base = cloneContextMenuOptions(currentOptions) ?? {
+    enabled: true,
+    getItems: undefined
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'enabled')) {
+    base.enabled = nextOptions.enabled !== false;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'getItems')) {
+    base.getItems = typeof nextOptions.getItems === 'function' ? nextOptions.getItems : undefined;
+  }
+
+  return base;
 }
 
 function cloneLocaleText(localeText?: Partial<GridLocaleText>): Partial<GridLocaleText> | undefined {
@@ -701,6 +793,8 @@ function normalizeOptions(config?: GridConfig): GridOptions {
   return {
     columns: normalizeSpecialColumns(config?.columns ?? [], rowIndicator),
     columnGroups: cloneColumnGroups(config?.columnGroups),
+    columnMenu: mergeColumnMenuOptions(undefined, config?.columnMenu),
+    contextMenu: mergeContextMenuOptions(undefined, config?.contextMenu),
     grouping: mergeGroupingOptions(undefined, config?.grouping),
     pivoting: mergePivotingOptions(undefined, config?.pivoting),
     treeData: mergeTreeDataOptions(undefined, config?.treeData),
@@ -819,9 +913,17 @@ export class Grid {
       setColumnOrder: (columnOrder) => {
         this.columnModel.setColumnOrder(columnOrder);
       },
+      setColumnVisibility: (columnId, isVisible) => {
+        this.columnModel.setColumnVisibility(columnId, isVisible);
+      },
+      setColumnPin: (columnId, pinned) => {
+        this.columnModel.setColumnPin(columnId, pinned);
+      },
       syncColumnsToRenderer: () => {
         this.syncColumnsToRenderer();
       },
+      setSortModel: (sortModel) => this.setSortModel(sortModel),
+      clearSortModel: () => this.clearSortModel(),
       isTreeDataActive: () => this.hasActiveTreeData(),
       isClientGroupingActive: () => this.hasActiveClientGrouping(),
       isTreeToggleActive: () => this.hasActiveTreeData() || this.shouldUseRemoteServerTreeView(),
@@ -965,6 +1067,8 @@ export class Grid {
   public setOptions(options: GridConfig): void {
     const nextRowIndicator = mergeRowIndicatorOptions(this.options.rowIndicator, options.rowIndicator);
     const nextStateColumn = mergeStateColumnOptions(this.options.stateColumn, options.stateColumn);
+    const nextColumnMenu = mergeColumnMenuOptions(this.options.columnMenu, options.columnMenu);
+    const nextContextMenu = mergeContextMenuOptions(this.options.contextMenu, options.contextMenu);
     const nextGrouping = mergeGroupingOptions(this.options.grouping, options.grouping);
     const nextPivoting = mergePivotingOptions(this.options.pivoting, options.pivoting);
     const nextWorkerRuntime = mergeWorkerRuntimeOptions(this.options.workerRuntime, options.workerRuntime);
@@ -1083,6 +1187,8 @@ export class Grid {
       scrollbarPolicy: mergeScrollbarPolicy(this.options.scrollbarPolicy, options.scrollbarPolicy),
       rowIndicator: nextRowIndicator,
       stateColumn: nextStateColumn,
+      columnMenu: nextColumnMenu,
+      contextMenu: nextContextMenu,
       columnGroups: options.columnGroups ? cloneColumnGroups(options.columnGroups) : this.options.columnGroups,
       grouping: nextGrouping,
       pivoting: {

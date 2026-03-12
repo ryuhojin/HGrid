@@ -105,40 +105,42 @@
 > 엔터프라이즈 핵심 결함. cooperative executor를 실제 Worker 런타임으로 전환한다.
 
 ## E1.1 Worker 엔트리포인트 추가
-- [ ] `sort.worker.ts` 추가
-- [ ] `filter.worker.ts` 추가
-- [ ] `group.worker.ts` 추가
-- [ ] `pivot.worker.ts` 추가
-- [ ] `tree.worker.ts` 추가
+- [x] `sort.worker.ts` 추가
+- [x] `filter.worker.ts` 추가
+- [x] `group.worker.ts` 추가
+- [x] `pivot.worker.ts` 추가
+- [x] `tree.worker.ts` 추가
 
 ## E1.2 메인 스레드 런타임 연결
-- [ ] worker pool 또는 operation dispatcher 설계
-- [ ] `operationId` / `cancel` / timeout / stale response guard 구현
-- [ ] transferable 최적화 적용
-- [ ] Worker 미지원 환경 fallback 정책 정의
+- [x] worker pool 또는 operation dispatcher 설계
+- [x] `operationId` / `cancel` / timeout / stale response guard 구현
+- [x] transferable 최적화 적용
+- [x] Worker 미지원 환경 fallback 정책 정의
 
 ## E1.3 대용량 연산 정책 고정
-- [ ] 100k+ sort는 기본 Worker
-- [ ] 100k+ filter는 기본 Worker
-- [ ] 100k+ group/pivot/tree는 기본 Worker
-- [ ] main-thread fallback은 명시적 옵션 또는 저용량에서만 허용
+- [x] 100k+ sort는 기본 Worker
+- [x] 100k+ filter는 기본 Worker
+- [x] 100k+ group/pivot/tree는 기본 Worker
+- [x] main-thread fallback은 명시적 옵션 또는 저용량에서만 허용
 
 ## E1.4 검증
-- [ ] Worker e2e 추가
-- [ ] cancel race test 추가
-- [ ] Worker crash/retry 정책 테스트
-- [ ] bench에 Worker on/off 비교 추가
+- [x] Worker e2e 추가
+- [x] cancel race test 추가
+- [x] Worker crash/retry 정책 테스트
+- [x] bench에 Worker on/off 비교 추가
 
 ### 변경 대상
-- [ ] `packages/grid-core/src/data/*-executor.ts`
-- [ ] `packages/grid-core/src/data/*.worker.ts`
-- [ ] `packages/grid-core/src/data/worker-protocol.ts`
-- [ ] `packages/grid-core/src/core/grid.ts`
+- [x] `packages/grid-core/src/data/*-executor.ts`
+- [x] `packages/grid-core/src/data/*.worker.ts`
+- [x] `packages/grid-core/src/data/worker-protocol.ts`
+- [x] `packages/grid-core/src/core/grid.ts`
 
 ### 수용 기준
-- [ ] 고비용 연산 시 메인 스레드 long task가 제품 기준 이하로 떨어진다.
-- [ ] Worker cancellation이 실제로 동작한다.
-- [ ] README의 Worker 관련 설명이 구현과 일치한다.
+- [x] 고비용 연산 시 메인 스레드 long task가 제품 기준 이하로 떨어진다.
+- [x] Worker cancellation이 실제로 동작한다.
+- [x] README의 Worker 관련 설명이 구현과 일치한다.
+
+> 2026-03-12 마감 bench: `sort worker-on 115.7ms / worker-off 123.9ms`, `filter worker-on 157.9ms / worker-off 70.1ms`. E1은 종료하고 남은 성능 차이는 E9 회귀/튜닝 대상으로 관리한다.
 
 ---
 
@@ -487,7 +489,7 @@
 # 14. 권장 수행 순서
 - [ ] Step 1: `1. 현재 상태 진단 고정`
 - [ ] Step 2: `2. Phase E0 — Architecture Hardening`
-- [ ] Step 3: `3. Phase E1 — Actual Worker Runtime`
+- [x] Step 3: `3. Phase E1 — Actual Worker Runtime`
 - [ ] Step 4: `4. Phase E2 — Enterprise Server-Side Data Model`
 - [ ] Step 5: `5. Phase E3 — Enterprise Product Surface`
 - [ ] Step 6: `6. Phase E4 — Data Workflow / Editing Productization`

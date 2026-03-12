@@ -3,10 +3,10 @@
 HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 데이터 그리드**입니다.
 `Canvas/WebGL/OffscreenCanvas` 없이 대용량(10M~100M) 스크롤, pinned 컬럼, 수직/수평 가상화, 풀링 렌더를 제공합니다.
 
-## 프로젝트 상태 (2026-03-10)
+## 프로젝트 상태 (2026-03-12)
 
 - 코어 베이스라인: `Phase 0` ~ `Phase 14.3` 범위의 핵심 엔진/테스트/벤치 파이프라인은 구현됨
-- 남은 핵심 범위: actual Worker runtime, mature server-side row model, enterprise product surface, framework/package productization, `Phase 15` (commercial readiness)
+- 남은 핵심 범위: mature server-side row model, enterprise product surface, framework/package productization, `Phase 15` (commercial readiness)
 - 정확한 현재 평가는 `checklist.md`, `docs/enterprise-feature-matrix.md`, `docs/enterprise-known-limitations.md` 기준으로 확인
 
 현재 구현된 핵심 기반:
@@ -21,7 +21,10 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Event delegation/hit-test/wheel orchestration
 - Selection model ranges + keyboard navigation
 - Single overlay editor + sync/async validation
-- Worker protocol 계약 + transferable 유틸
+- Worker protocol 계약 + transferable 유틸 + per-operation worker entrypoint
+- Worker dispatcher + dist worker asset + 100k+ worker-first policy + optional prewarm + configurable poolSize
+- Sort/filter/group/pivot low-overhead columnar worker payload fast path + tree compact key-field payload
+- Worker e2e smoke + cancel/crash recovery test + worker on/off bench comparison + async payload serialization + custom group/pivot reducer hydration + valueGetter/comparator projection + repeated projection cache + selective projection prefix evaluation
 - Cooperative sorting/filtering executor + Grid API 연동
 - Column feature pack (resize/reorder/pin/hide) + selection indicator columns
 - Multi-level column group header
@@ -45,11 +48,12 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 아직 엔터프라이즈 상용 제품으로 완료되지 않은 범위:
 
-- actual Worker runtime (`worker-protocol`은 있으나 `.worker.ts` 런타임은 아직 없음)
 - mature server-side row model (`RemoteDataProvider`는 block cache/query model 중심)
 - enterprise UI surface (column menu, filter UI, side bar/tool panel, status bar 등)
 - React/Vue product package 및 plugin SDK
 - release/commercial readiness (`Phase 15`)
+
+`Phase E1` actual Worker runtime은 현재 기준으로 마감했다. 다만 callback-heavy first-hit과 일부 filter/lazy hydration 경로는 지속 튜닝 여지가 남아 있다.
 
 ## 핵심 원칙
 
@@ -281,7 +285,7 @@ await excel.importXlsx(grid, file, {
 pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 ```
 
-## Examples (현재 1~41)
+## Examples (현재 1~48)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -315,6 +319,18 @@ pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 - `example39`: keyboard-only flow(navigation/selection/editing)
 - `example40`: i18n(localeText/Intl formatting/RTL)
 - `example41`: security/csp hardening(unsafeHtml opt-in + sanitize + audit payload snapshot)
+- `example42`: E0 orchestrator split smoke(state/provider/query/export)
+- `example43`: E0 renderer hardening smoke(pooling/a11y/selection/export)
+- `example44`: E1 worker dispatcher smoke(sort/filter/group/pivot/tree worker path)
+- `example45`: E1 worker policy smoke(threshold/fallback policy)
+- `example46`: E1 worker prewarm smoke(cold vs prewarmed first-offload behavior)
+- `example47`: E1 custom group reducer worker smoke(group structure worker + reducer hydration)
+- `example48`: E1 custom pivot reducer worker smoke(pivot structure worker + reducer hydration)
+- `example49`: E1 valueGetter worker projection smoke(sort/filter on derived column without full-row worker snapshot)
+- `example50`: E1 comparator worker projection smoke(custom comparator sort without worker serialization error)
+- `example51`: E1 worker pool smoke(prewarm wiring + parallel sort queue growth)
+- `example52`: E1 worker projection cache smoke(repeated valueGetter/comparator offload reuse + invalidation)
+- `example53`: E1 worker projection prefix smoke(needed derived prefix only, trailing derived getter skip)
 
 기능 추가 시 규칙:
 

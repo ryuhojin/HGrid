@@ -1,15 +1,23 @@
 # HGrid Enterprise Known Limitations
 
-> 기준일: 2026-03-10
+> 기준일: 2026-03-12
 >
 > 이 문서는 “현재 제품이 아직 아닌 부분”을 숨기지 않고 고정하기 위한 제한사항 문서다.
 
-## 1. 실제 Worker 런타임 없음
-- 현재 정렬/필터/그룹/피벗/트리 연산은 `cooperative executor` 방식이다.
-- `worker-protocol`은 존재하지만 실제 `.worker.ts` 런타임은 없다.
+## 1. Worker runtime phase는 마감됐지만 callback-heavy path는 추가 튜닝 여지가 있음
+- 현재 정렬/필터/그룹/피벗/트리 연산은 `100k+`에서 worker를 기본으로 요구한다.
+- `worker-protocol`, `.worker.ts`, dispatcher, `Grid` 연결, dist worker asset, threshold policy, worker e2e, crash/cancel test, on/off bench comparison까지는 반영됐다.
 - 의미:
-  - UI gap은 줄일 수 있어도 연산 자체가 메인 스레드에서 수행된다.
-  - 대규모 데이터에서 AG Grid Enterprise 수준의 background compute라고 보기 어렵다.
+  - latest `pnpm bench` 기준 1M max gap은 sort worker-on `115.7ms`, worker-off `123.9ms`, filter worker-on `157.9ms`, worker-off `70.1ms`다.
+  - 즉 sort는 cooperative baseline과 사실상 동급까지 내려왔고, filter는 여전히 baseline보다 높지만 coarse gate(`1000ms`) 안에 있다.
+  - group/pivot도 columnar payload fast path가 들어가서 example smoke 기준 `~154ms / ~164ms` 수준으로 내려왔다.
+  - tree도 compact key-field payload가 들어가서 example smoke 기준 `~161ms` 수준으로 내려왔다.
+  - callback 기반 comparator sort도 numeric rank projection으로 worker path를 탈 수 있고, 반복 요청은 projection cache로 재사용되지만, first-hit comparator callback 실행과 rank 생성 비용은 아직 main thread에 남아 있다.
+  - `valueGetter` 선택 컬럼도 columnar projection으로 worker path를 탈 수 있고 반복 요청은 projection cache로 재사용되며 unrelated trailing derived getter는 건너뛰지만, first-hit callback 평가 비용 자체는 아직 main thread에 남아 있다.
+  - `poolSize` 기반 worker pool과 repeated projection cache, selective prefix evaluation, cached tree lazy hydration lookup은 들어갔지만, first-hit callback 실행 비용과 일부 hydration 비용은 여전히 main thread에 남아 있다.
+  - retry는 자동 replay가 아니라 next-operation recreate 수준이다.
+  - tree lazy children batch는 structure-only payload로 줄였지만, 렌더용 full row는 main thread hydration으로 다시 붙인다.
+  - 따라서 E1 phase 자체는 닫았지만, callback-heavy path 튜닝은 계속 필요하다.
 
 ## 2. 완성된 서버사이드 row model 아님
 - 현재 `RemoteDataProvider`는 block cache/LRU/prefetch/query model 중심이다.

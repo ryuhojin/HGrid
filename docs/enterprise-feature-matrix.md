@@ -1,6 +1,6 @@
 # HGrid Enterprise Feature Matrix
 
-> 기준일: 2026-03-10
+> 기준일: 2026-03-12
 >
 > 기준: 저장소 전체 소스, 테스트, examples, docs, scripts, 로컬 품질 게이트 실행 결과
 
@@ -11,7 +11,7 @@
 
 ## 요약
 - HGrid는 현재 `고성능 DOM 가상화 엔진` 영역은 강하다.
-- 반면 `엔터프라이즈 제품 surface`, `실제 Worker 런타임`, `완성된 서버사이드 row model`, `확장 SDK`, `상용 운영 체계`는 부족하다.
+- 반면 `엔터프라이즈 제품 surface`, `완성된 서버사이드 row model`, `확장 SDK`, `상용 운영 체계`는 부족하다.
 - 따라서 현재 평가는 `엔터프라이즈 상용 제품 준비 완료`가 아니라 `엔터프라이즈 전환이 가능한 강한 엔진 기반`이다.
 
 ## Feature Matrix
@@ -23,12 +23,12 @@
 | RowModel 메모리 전략 | 완료 | identity/sparse/materialized 전략과 상태 추적 제공 | server-side model과 별도 체계화 필요 | [row-model.ts](../packages/grid-core/src/data/row-model.ts), [row-model-memory-phase3.md](./row-model-memory-phase3.md) |
 | Selection / Keyboard Navigation | 완료 | range selection, active cell, keyboard navigation, keyboard-only e2e 존재 | 제품형 status UX는 부족 | [selection-model.ts](../packages/grid-core/src/interaction/selection-model.ts), [keyboard-navigation-phase4.md](./keyboard-navigation-phase4.md), [keyboard-only-phase12.md](./keyboard-only-phase12.md) |
 | Editing 1.0 | 부분 완료 | single overlay editor, sync/async validation, audit payload 존재 | editor 종류 확장, batch edit, undo/redo, dirty tracking 부재 | [editing-policy-phase5.md](./editing-policy-phase5.md), [grid.ts](../packages/grid-core/src/core/grid.ts), [dom-renderer.ts](../packages/grid-core/src/render/dom-renderer.ts) |
-| Client Sort / Filter | 부분 완료 | 실제 동작과 테스트는 있음 | 실제 Worker offload가 없고 main-thread cooperative executor 수준 | [sort-executor.ts](../packages/grid-core/src/data/sort-executor.ts), [filter-executor.ts](../packages/grid-core/src/data/filter-executor.ts), [worker-protocol.ts](../packages/grid-core/src/data/worker-protocol.ts) |
-| Grouping | 부분 완료 | group model, aggregation, expand/collapse, remote query pass-through 제공 | 메모리 비용이 크고 Worker runtime 없음, product UI 없음 | [group-executor.ts](../packages/grid-core/src/data/group-executor.ts), [grouping-phase9.md](./grouping-phase9.md) |
-| Tree Data | 부분 완료 | parentId 기반 트리와 lazy children load 제공 | `RemoteDataProvider`와 동시 적용 미지원 | [tree-executor.ts](../packages/grid-core/src/data/tree-executor.ts), [tree-data-phase9.md](./tree-data-phase9.md) |
-| Pivot | 부분 완료 | 로컬 pivot matrix, 동적 컬럼 생성, remote query model 존재 | enterprise pivot panel, server pivot result model, Worker runtime 부족 | [pivot-executor.ts](../packages/grid-core/src/data/pivot-executor.ts), [pivot-phase9.md](./pivot-phase9.md) |
+| Client Sort / Filter | 부분 완료 | 100k+ serializable path는 worker-first, 저용량은 cooperative, sort/filter는 low-overhead columnar payload 적용, `valueGetter` 선택 컬럼과 custom comparator sort도 projected worker path 지원, 반복 요청은 projection cache로 재사용, first-hit도 필요한 derived prefix만 평가, 테스트 존재 | first-hit comparator/valueGetter callback 자체는 여전히 main thread에 남음 | [sort-executor.ts](../packages/grid-core/src/data/sort-executor.ts), [filter-executor.ts](../packages/grid-core/src/data/filter-executor.ts), [worker-operation-payloads.ts](../packages/grid-core/src/data/worker-operation-payloads.ts) |
+| Grouping | 부분 완료 | 100k+ serializable path는 worker-first, group model/aggregation/expand/collapse 제공, low-overhead columnar payload 적용, custom reducer도 worker structure + main-thread hydration 경로 존재 | 메모리 비용, product UI 부족 | [group-executor.ts](../packages/grid-core/src/data/group-executor.ts), [grouping-phase9.md](./grouping-phase9.md), [worker-operation-payloads.ts](../packages/grid-core/src/data/worker-operation-payloads.ts) |
+| Tree Data | 부분 완료 | parentId 기반 트리와 lazy children load 제공, worker compact payload 적용 | `RemoteDataProvider`와 동시 적용 미지원 | [tree-executor.ts](../packages/grid-core/src/data/tree-executor.ts), [tree-data-phase9.md](./tree-data-phase9.md), [worker-operation-payloads.ts](../packages/grid-core/src/data/worker-operation-payloads.ts) |
+| Pivot | 부분 완료 | 100k+ serializable path는 worker-first, 로컬 pivot matrix와 remote query model 존재, low-overhead columnar payload 적용, custom reducer도 worker structure + main-thread hydration 경로 존재 | enterprise pivot panel, server pivot result model 부족 | [pivot-executor.ts](../packages/grid-core/src/data/pivot-executor.ts), [pivot-phase9.md](./pivot-phase9.md), [worker-operation-payloads.ts](../packages/grid-core/src/data/worker-operation-payloads.ts) |
 | Remote Data Provider | 부분 완료 | block cache, prefetch, LRU, query model 제공 | AG Grid SSRM 수준의 server-side row model은 아님 | [remote-data-provider.ts](../packages/grid-core/src/data/remote-data-provider.ts), [remote-data-provider-phase8.md](./remote-data-provider-phase8.md) |
-| Worker Runtime | 미지원 | protocol/response helper만 존재 | 실제 `.worker.ts`, dispatcher, pool, runtime 연결 부재 | [worker-protocol.ts](../packages/grid-core/src/data/worker-protocol.ts), [grid.ts](../packages/grid-core/src/core/grid.ts) |
+| Worker Runtime | 완료 | protocol, `.worker.ts`, dispatcher, `Grid` 연결, dist worker asset, `100k+` default worker policy, optional prewarm, configurable `poolSize`, dedicated e2e/bench comparison, async payload serialization, all operations low-overhead payload 경로, tree lazy batch compact payload + hydration, group/pivot custom reducer hydration, `valueGetter`/comparator projected worker path, projection cache, selective prefix evaluation까지 반영. 최신 bench 기준 sort worker-on `115.7ms`, worker-off `123.9ms`, filter worker-on `157.9ms`, worker-off `70.1ms` | callback-heavy first-hit과 filter flat-view apply/refresh는 지속 튜닝 여지 | [worker-protocol.ts](../packages/grid-core/src/data/worker-protocol.ts), [worker-operation-dispatcher.ts](../packages/grid-core/src/data/worker-operation-dispatcher.ts), [actual-worker-runtime-phase-e1.md](./actual-worker-runtime-phase-e1.md) |
 | Product UI Surface | 미지원 | examples 중심 API 데모만 다수 존재 | column menu, filter builder, sidebar, tool panel, status bar, fill handle, chart, formula, master-detail 부재 | [examples/registry.json](../examples/registry.json), [run-e2e.mjs](../scripts/run-e2e.mjs) |
 | Column Group Header | 부분 완료 | multi-level group header 렌더 지원 | `collapsed`가 실제 child visibility를 토글하지 않음 | [column-group-header-phase7.md](./column-group-header-phase7.md) |
 | Security / CSP 기본선 | 부분 완료 | 기본 text 렌더, CSP smoke, 정적 scan, sanitize hook 제공 | sanitizer 없으면 raw HTML 허용, Trusted Types/플러그인 정책 부재 | [security-csp-phase13.md](./security-csp-phase13.md), [dom-renderer.ts](../packages/grid-core/src/render/dom-renderer.ts) |
@@ -42,9 +42,8 @@
 
 ## 현재 결론
 - `강함`: virtualization, pooling, scroll scaling, row model, core regression discipline
-- `아직 아님`: enterprise product surface, actual Worker runtime, mature SSRM, framework product packages, plugin platform, commercial operations
+- `아직 아님`: enterprise product surface, mature SSRM, framework product packages, plugin platform, commercial operations
 - 즉시 우선순위:
-  - 실제 Worker 런타임
   - 엔터프라이즈 서버사이드 row model
   - 제품형 UI surface
   - 보안/A11y 실측 마감

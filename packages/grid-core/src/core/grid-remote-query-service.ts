@@ -1,5 +1,6 @@
 import type { DataProvider, RowKey } from '../data/data-provider';
-import type { GridFilterModel } from '../data/filter-executor';
+import type { AdvancedFilterModel, GridFilterModel } from '../data/filter-executor';
+import { cloneAdvancedFilterModel } from '../data/filter-model';
 import type { RemoteDataProvider as RemoteDataProviderContract, RemoteQueryModel, SortModelItem } from '../data/remote-data-provider';
 import { cloneRemoteServerSideQueryModel } from '../data/remote-server-side-contracts';
 import type { RemoteServerSideQueryModel } from '../data/remote-server-side-contracts';
@@ -97,6 +98,7 @@ function cloneGroupingAggregations(aggregations: GroupAggregationDef[]): Array<{
 export interface CreateRemoteQueryModelParams {
   sortModel: SortModelItem[];
   filterModel: GridFilterModel;
+  advancedFilterModel?: AdvancedFilterModel | null;
   groupModel: GroupModelItem[];
   pivotModel: PivotModelItem[];
   pivotValues: PivotValueDef[];
@@ -176,6 +178,7 @@ export class GridRemoteQueryService {
     return {
       sortModel: cloneSortModel(params.sortModel),
       filterModel: cloneFilterModel(params.filterModel),
+      advancedFilterModel: cloneAdvancedFilterModel(params.advancedFilterModel) ?? undefined,
       groupModel: params.useServerGrouping ? cloneGroupModel(params.groupModel) : undefined,
       pivotModel: params.useServerPivot ? clonePivotModel(params.pivotModel) : undefined,
       pivotValues: params.useServerPivot ? clonePivotValues(params.pivotValues) : undefined,

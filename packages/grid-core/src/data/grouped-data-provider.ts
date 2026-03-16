@@ -180,6 +180,10 @@ export class GroupedDataProvider implements DataProvider {
     return groupRowObject;
   }
 
+  public peekRow(viewDataIndex: number): GridRowData | undefined {
+    return this.getRow(viewDataIndex);
+  }
+
   public setValue(viewDataIndex: number, columnId: string, value: unknown): void {
     const row = this.rows[viewDataIndex];
     if (!row || row.kind === 'group') {
@@ -191,6 +195,27 @@ export class GroupedDataProvider implements DataProvider {
 
   public applyTransactions(transactions: DataTransaction[]): void {
     this.sourceDataProvider.applyTransactions(transactions);
+  }
+
+  public getDataIndexByRowKey(rowKey: RowKey, dataIndexHint?: number): number {
+    const rowCount = this.rows.length;
+    if (
+      Number.isInteger(dataIndexHint) &&
+      dataIndexHint !== undefined &&
+      dataIndexHint >= 0 &&
+      dataIndexHint < rowCount &&
+      this.getRowKey(dataIndexHint) === rowKey
+    ) {
+      return dataIndexHint;
+    }
+
+    for (let viewDataIndex = 0; viewDataIndex < rowCount; viewDataIndex += 1) {
+      if (this.getRowKey(viewDataIndex) === rowKey) {
+        return viewDataIndex;
+      }
+    }
+
+    return -1;
   }
 
   public isRowLoading(viewDataIndex: number): boolean {

@@ -76,6 +76,73 @@ describe('CooperativeFilterExecutor', () => {
     expect(Array.from(response.result.mapping)).toEqual([2, 0, 1]);
   });
 
+  it('supports nested cross-column advanced filter groups with top-level OR semantics', async () => {
+    const rows = [
+      { id: 1, name: 'Alpha', region: 'KR', score: 30 },
+      { id: 2, name: 'Beta', region: 'US', score: 10 },
+      { id: 3, name: 'Gamma', region: 'JP', score: 20 },
+      { id: 4, name: 'Delta', region: 'DE', score: 40 }
+    ];
+
+    const executor = new CooperativeFilterExecutor();
+    const response = await executor.execute({
+      opId: 'filter-advanced',
+      rowCount: rows.length,
+      filterModel: {
+        score: { kind: 'number', operator: 'gte', value: 20 }
+      },
+      advancedFilterModel: {
+        operator: 'or',
+        rules: [
+          {
+            kind: 'group',
+            operator: 'and',
+            rules: [
+              {
+                columnId: 'name',
+                condition: {
+                  kind: 'text',
+                  operator: 'contains',
+                  value: 'mm'
+                }
+              },
+              {
+                columnId: 'region',
+                condition: {
+                  kind: 'text',
+                  operator: 'equals',
+                  value: 'JP'
+                }
+              }
+            ]
+          },
+          {
+            columnId: 'name',
+            condition: {
+              kind: 'text',
+              operator: 'contains',
+              value: 'ta'
+            }
+          }
+        ]
+      },
+      columns: [
+        { id: 'id', header: 'ID', width: 80, type: 'number' },
+        { id: 'name', header: 'Name', width: 160, type: 'text' },
+        { id: 'region', header: 'Region', width: 120, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ],
+      dataProvider: new LocalDataProvider(rows)
+    });
+
+    expect(response.status).toBe('ok');
+    if (response.status !== 'ok') {
+      return;
+    }
+
+    expect(Array.from(response.result.mapping)).toEqual([2, 3]);
+  });
+
   it('supports cancellation through execution context', async () => {
     const rowCount = 20_000;
     const rows = Array.from({ length: rowCount }, (_value, index) => ({

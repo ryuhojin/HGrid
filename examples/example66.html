@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 66 - Filters Tool Panel</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(14, 116, 144, 0.12), transparent 34%),
+          linear-gradient(180deg, #f7fafc 0%, #e8eef5 100%);
+        color: #163042;
+      }
+
+      .page {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 28px 24px 42px;
+      }
+
+      .hero,
+      .workspace {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(22, 48, 66, 0.08);
+        border-radius: 22px;
+        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+        gap: 18px;
+        padding: 24px;
+        margin-bottom: 18px;
+      }
+
+      .kicker {
+        display: inline-flex;
+        margin-bottom: 12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(14, 116, 144, 0.12);
+        color: #0c627d;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+        line-height: 1.06;
+      }
+
+      p,
+      li {
+        color: #4b6474;
+        line-height: 1.58;
+      }
+
+      .hero ul {
+        margin: 14px 0 0;
+        padding-left: 18px;
+      }
+
+      .policy {
+        padding: 18px 20px;
+        border-radius: 16px;
+        background: #0f2432;
+        color: #dceef7;
+      }
+
+      .policy h2 {
+        margin: 0 0 10px;
+        font-size: 15px;
+      }
+
+      .policy code {
+        display: block;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        color: #d5eef8;
+        font-size: 12px;
+        line-height: 1.6;
+        overflow: auto;
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: #0f5a7a;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #dce7ef;
+        color: #123349;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 16px;
+      }
+
+      #grid {
+        min-width: 0;
+      }
+
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        padding: 12px;
+        border-radius: 14px;
+        background: #eef4f8;
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #617c8a;
+      }
+
+      .metric span {
+        display: block;
+        margin-top: 6px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      #snapshot,
+      #notes {
+        margin: 0;
+        padding: 14px;
+        border-radius: 14px;
+        background: #10212d;
+        color: #d8eef9;
+        font-size: 12px;
+        line-height: 1.52;
+        overflow: auto;
+      }
+
+      @media (max-width: 960px) {
+        .hero,
+        .content {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <div>
+          <div class="kicker">Phase E3.3</div>
+          <h1>Filters Tool Panel</h1>
+          <p>
+            header menu를 열지 않고도 우측 rail의 <strong>Filters</strong> panel에서 column별 필터를 바로 편집할 수 있습니다.
+            현재는 single-column quick filter surface를 sidebar로 올린 형태이고, text / number / date / set 모드는 기존 filter model과
+            같은 계약을 사용합니다.
+          </p>
+          <ul>
+            <li><strong>Region</strong>은 text ↔ set mode 전환을 확인할 수 있습니다.</li>
+            <li><strong>Name</strong>, <strong>Score</strong>, <strong>Created At</strong>도 같은 panel 안에서 편집됩니다.</li>
+            <li>apply / clear는 현재 선택 column filter만 바꾸고 나머지 filter model은 유지합니다.</li>
+          </ul>
+        </div>
+        <aside class="policy">
+          <h2>현재 범위</h2>
+          <code>
+sideBar.panels = ['filters']<br />
+column list + embedded filter editor<br />
+text/number/date 2-clause AND<br />
+set filter + search<br />
+filterModel 양방향 동기화
+          </code>
+        </aside>
+      </section>
+
+      <section class="workspace">
+        <div class="toolbar">
+          <button id="presetRegionApac">Preset Region APAC</button>
+          <button id="presetNameText">Preset Name Text</button>
+          <button id="clearFilters" class="secondary">Clear Filters</button>
+        </div>
+
+        <div class="content">
+          <div id="grid"></div>
+
+          <aside class="side">
+            <div class="metric-grid">
+              <div class="metric">
+                <strong>Filtered Columns</strong>
+                <span id="filteredColumns">0</span>
+              </div>
+              <div class="metric">
+                <strong>Visible IDs</strong>
+                <span id="visibleIds">-</span>
+              </div>
+            </div>
+
+            <pre id="snapshot"></pre>
+            <pre id="notes">Filters panel starts open by default.</pre>
+          </aside>
+        </div>
+      </section>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const rowData = [
+        { id: 1, name: 'Alpha Prime', score: 12, createdAt: '2026-03-01', region: 'APAC' },
+        { id: 2, name: 'Beta North', score: 32, createdAt: '2026-03-02', region: 'EMEA' },
+        { id: 3, name: 'Gamma Delta', score: 48, createdAt: '2026-03-03', region: 'APAC' },
+        { id: 4, name: 'Delta Coast', score: 64, createdAt: '2026-03-04', region: 'AMER' },
+        { id: 5, name: 'Epsilon Bay', score: 79, createdAt: '2026-03-05', region: 'APAC' },
+        { id: 6, name: 'Zeta Ridge', score: 92, createdAt: '2026-03-06', region: 'EMEA' }
+      ];
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' },
+        { id: 'createdAt', header: 'Created At', width: 160, type: 'date' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        sideBar: {
+          enabled: true,
+          panels: ['filters'],
+          defaultPanel: 'filters',
+          width: 340
+        },
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      const filteredColumnsElement = document.getElementById('filteredColumns');
+      const visibleIdsElement = document.getElementById('visibleIds');
+      const snapshotElement = document.getElementById('snapshot');
+      const notesElement = document.getElementById('notes');
+
+      function getVisibleIds() {
+        const dataProvider = grid.getDataProvider();
+        const visibleIds = [];
+        for (let rowIndex = 0; rowIndex < grid.getViewRowCount(); rowIndex += 1) {
+          const row = dataProvider.getRow?.(grid.getDataIndex(rowIndex));
+          if (!row || row.id === null || row.id === undefined) {
+            continue;
+          }
+          visibleIds.push(String(row.id));
+        }
+        return visibleIds;
+      }
+
+      function getSnapshot() {
+        const filterModel = grid.getFilterModel();
+        return {
+          filterModel,
+          filteredColumnCount: Object.keys(filterModel).length,
+          visibleIds: getVisibleIds(),
+          panelOpen: document.querySelector('.hgrid__tool-panel--open') !== null
+        };
+      }
+
+      function renderSnapshot() {
+        const snapshot = getSnapshot();
+        filteredColumnsElement.textContent = String(snapshot.filteredColumnCount);
+        visibleIdsElement.textContent = snapshot.visibleIds.join(', ') || '-';
+        snapshotElement.textContent = JSON.stringify(snapshot, null, 2);
+      }
+
+      renderSnapshot();
+
+      document.getElementById('presetRegionApac').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          region: {
+            kind: 'set',
+            values: ['APAC'],
+            includeNull: false
+          }
+        });
+        notesElement.textContent = 'External setFilterModel applied: Region = APAC';
+        renderSnapshot();
+      });
+
+      document.getElementById('presetNameText').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          name: [
+            { kind: 'text', operator: 'contains', value: 'ta', caseSensitive: false },
+            { kind: 'text', operator: 'startsWith', value: 'Be', caseSensitive: false }
+          ]
+        });
+        notesElement.textContent = 'External setFilterModel applied: Name contains ta AND startsWith Be';
+        renderSnapshot();
+      });
+
+      document.getElementById('clearFilters').addEventListener('click', async () => {
+        await grid.clearFilterModel();
+        notesElement.textContent = 'All filters cleared.';
+        renderSnapshot();
+      });
+
+      const observer = new MutationObserver(() => {
+        renderSnapshot();
+      });
+      observer.observe(document.getElementById('grid'), {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'checked', 'aria-pressed']
+      });
+
+      window.__example66 = {
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

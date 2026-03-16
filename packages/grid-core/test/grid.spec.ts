@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Grid } from '../src';
 import { LocalDataProvider } from '../src/data/local-data-provider';
+import { RemoteDataProvider } from '../src/data/remote-data-provider';
 import type { DataProvider, DataTransaction, GridRowData } from '../src/data/data-provider';
 import type { RemoteQueryModel } from '../src/data/remote-data-provider';
 import { WORKER_TREE_LAZY_ROW_REF_FIELD } from '../src/data/worker-operation-payloads';
@@ -182,6 +183,25 @@ function createClipboardEvent(
   };
 }
 
+function createPointerLikeEvent(
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  init: { pointerId: number; clientX: number; clientY: number; button?: number }
+): MouseEvent {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: init.button ?? 0,
+    clientX: init.clientX,
+    clientY: init.clientY
+  });
+
+  Object.defineProperty(event, 'pointerId', {
+    configurable: true,
+    value: init.pointerId
+  });
+  return event;
+}
+
 function parseTranslateY(transformValue: string): number {
   const match = transformValue.match(/translate3d\(([-\d.]+)(?:px)?,\s*([-\d.]+)(?:px)?,\s*0(?:px)?\)/);
   if (!match) {
@@ -311,7 +331,7 @@ describe('Grid DOM pooling', () => {
     expect(firstVisibleRow.style.transform.startsWith('translate3d(0, ')).toBe(true);
 
     grid.destroy();
-  });
+  }, 15000);
 
   it('coalesces repeated scroll events into a single rAF render pass', async () => {
     const container = document.createElement('div');
@@ -1235,6 +1255,817 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
+  it('opens body cell context menu with row and selection payload', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const capturedPayloads: Array<Record<string, unknown>> = [];
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', status: 'active' },
+        { id: 2, name: 'Beta', status: 'idle' }
+      ],
+      contextMenu: {
+        enabled: true,
+        getItems: (context) => [
+          {
+            id: 'capture',
+            label: 'Capture payload',
+            onSelect: (menuContext) => {
+              capturedPayloads.push({
+                kind: menuContext.kind,
+                rowIndex: menuContext.rowIndex,
+                dataIndex: menuContext.dataIndex,
+                rowKey: menuContext.rowKey,
+                value: menuContext.value,
+                activeCell: menuContext.selection?.activeCell,
+                name: menuContext.row?.name
+              });
+            }
+          }
+        ]
+      },
+      height: 160,
+      rowHeight: 28
+    });
+
+    const nameCell = container.querySelector('.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]') as HTMLDivElement;
+    expect(nameCell).toBeTruthy();
+
+    nameCell.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 120,
+        clientY: 72
+      })
+    );
+    await waitForFrame();
+
+    const captureItem = Array.from(container.querySelectorAll('.hgrid__column-menu-item')).find(
+      (element) => element.textContent?.trim() === 'Capture payload'
+    ) as HTMLButtonElement | undefined;
+    expect(captureItem).toBeTruthy();
+    captureItem?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(capturedPayloads).toEqual([
+      {
+        kind: 'cell',
+        rowIndex: 1,
+        dataIndex: 1,
+        rowKey: 2,
+        value: 'Beta',
+        activeCell: { rowIndex: 1, colIndex: 1 },
+        name: 'Beta'
+      }
+    ]);
+    expect(grid.getSelection().activeCell).toEqual({ rowIndex: 1, colIndex: 1 });
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('executes built-in body context menu actions for copy and filter operations', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const clipboardWrites: string[] = [];
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText(text: string) {
+          clipboardWrites.push(text);
+          return Promise.resolve();
+        }
+      }
+    });
+    let grid: Grid | null = null;
+    try {
+      grid = new Grid(container, {
+        columns: [
+          { id: 'id', header: 'ID', width: 100, type: 'number' },
+          { id: 'name', header: 'Name', width: 180, type: 'text' },
+          { id: 'status', header: 'Status', width: 140, type: 'text' }
+        ],
+        rowData: [
+          { id: 1, name: 'Alpha', status: 'active' },
+          { id: 2, name: 'Beta', status: 'idle' }
+        ],
+        contextMenu: {
+          enabled: true,
+          builtInActions: ['copyCell', 'copyRow', 'copySelection', 'filterByValue', 'clearColumnFilter']
+        },
+        height: 160,
+        rowHeight: 28
+      });
+
+      const openBodyMenuAtNameCell = (): void => {
+        const nameCell = Array.from(container.querySelectorAll('.hgrid__cell[data-column-id="name"]')).find(
+          (element) => element.textContent?.trim() === 'Beta'
+        ) as HTMLDivElement | undefined;
+        expect(nameCell).toBeTruthy();
+        nameCell?.dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            button: 2,
+            clientX: 120,
+            clientY: 72
+          })
+        );
+      };
+
+      const clickMenuItem = (label: string): void => {
+        const menuItem = Array.from(container.querySelectorAll('.hgrid__column-menu-item')).find(
+          (element) => element.textContent?.trim() === label
+        ) as HTMLButtonElement | undefined;
+        expect(menuItem).toBeTruthy();
+        menuItem?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      };
+
+      openBodyMenuAtNameCell();
+      await waitForFrame();
+      clickMenuItem('Copy cell');
+      expect(clipboardWrites[clipboardWrites.length - 1]).toBe('Beta');
+
+      openBodyMenuAtNameCell();
+      await waitForFrame();
+      clickMenuItem('Copy row');
+      expect(clipboardWrites[clipboardWrites.length - 1]).toBe('2\tBeta\tidle');
+
+      openBodyMenuAtNameCell();
+      await waitForFrame();
+      clickMenuItem('Copy selection');
+      expect(clipboardWrites[clipboardWrites.length - 1]).toBe('Beta');
+
+      openBodyMenuAtNameCell();
+      await waitForFrame();
+      clickMenuItem('Filter by this value');
+      await waitForFrame();
+      await waitForFrame();
+      expect(grid.getFilterModel()).toEqual({
+        name: {
+          kind: 'set',
+          values: ['Beta'],
+          includeNull: false
+        }
+      });
+      expect(grid.getViewRowCount()).toBe(1);
+
+      openBodyMenuAtNameCell();
+      await waitForFrame();
+      clickMenuItem('Clear column filter');
+      await waitForFrame();
+      await waitForFrame();
+      expect(grid.getFilterModel()).toEqual({});
+      expect(grid.getViewRowCount()).toBe(2);
+    } finally {
+      grid?.destroy();
+      container.remove();
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: originalClipboard
+      });
+    }
+  });
+
+  it('opens header filter panel, applies multi-condition text filter, and supports set-mode switching', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', region: 'APAC' },
+        { id: 2, name: 'Beta', region: 'EMEA' },
+        { id: 3, name: 'Gamma', region: 'APAC' }
+      ],
+      columnMenu: {
+        enabled: true,
+        trigger: 'contextmenu'
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    const openHeaderFilter = async (columnId: string): Promise<void> => {
+      const headerCell = container.querySelector(`.hgrid__header-cell[data-column-id="${columnId}"]`) as HTMLDivElement;
+      headerCell.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: 120,
+          clientY: 24
+        })
+      );
+      await waitForFrame();
+
+      const openFilterItem = Array.from(container.querySelectorAll('.hgrid__column-menu-item')).find(
+        (element) => element.textContent?.trim() === 'Open filter'
+      ) as HTMLButtonElement | undefined;
+      openFilterItem?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await waitForFrame();
+    };
+
+    await openHeaderFilter('name');
+
+    const filterPanel = container.querySelector('.hgrid__filter-panel') as HTMLDivElement;
+    expect(filterPanel.classList.contains('hgrid__filter-panel--open')).toBe(true);
+    expect(filterPanel.style.display).toBe('flex');
+    expect(filterPanel.style.maxHeight).not.toBe('');
+    expect(filterPanel.style.maxWidth).not.toBe('');
+    expect(filterPanel.style.left).not.toBe('');
+    expect(filterPanel.style.top).not.toBe('');
+
+    const textOperatorOne = filterPanel.querySelector(
+      '[data-filter-role="operator"][data-filter-clause-index="0"]'
+    ) as HTMLSelectElement;
+    const textValueOne = filterPanel.querySelector(
+      '[data-filter-role="value"][data-filter-clause-index="0"]'
+    ) as HTMLInputElement;
+    const textOperatorTwo = filterPanel.querySelector(
+      '[data-filter-role="operator"][data-filter-clause-index="1"]'
+    ) as HTMLSelectElement;
+    const textValueTwo = filterPanel.querySelector(
+      '[data-filter-role="value"][data-filter-clause-index="1"]'
+    ) as HTMLInputElement;
+    textOperatorOne.value = 'contains';
+    textValueOne.value = 'ta';
+    textOperatorTwo.value = 'startsWith';
+    textValueTwo.value = 'Be';
+
+    const applyButton = filterPanel.querySelector('[data-filter-action="apply"]') as HTMLButtonElement;
+    applyButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({
+      name: [
+        {
+          kind: 'text',
+          operator: 'contains',
+          value: 'ta',
+          caseSensitive: false
+        },
+        {
+          kind: 'text',
+          operator: 'startsWith',
+          value: 'Be',
+          caseSensitive: false
+        }
+      ]
+    });
+    const filteredHeader = container.querySelector('.hgrid__header-cell[data-column-id="name"]') as HTMLDivElement;
+    expect(filteredHeader.classList.contains('hgrid__header-cell--filtered')).toBe(true);
+
+    await openHeaderFilter('region');
+    const setModeButton = filterPanel.querySelector('[data-filter-mode-trigger="set"]') as HTMLButtonElement;
+    setModeButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const apacCheckbox = Array.from(filterPanel.querySelectorAll('[data-filter-option-key]')).find((element) => {
+      const label = (element.parentElement?.textContent ?? '').trim();
+      return label === 'APAC';
+    }) as HTMLInputElement | undefined;
+    expect(apacCheckbox).toBeTruthy();
+    if (apacCheckbox) {
+      apacCheckbox.checked = true;
+      apacCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    const setApplyButton = filterPanel.querySelector('[data-filter-action="apply"]') as HTMLButtonElement;
+    setApplyButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({
+      name: [
+        {
+          kind: 'text',
+          operator: 'contains',
+          value: 'ta',
+          caseSensitive: false
+        },
+        {
+          kind: 'text',
+          operator: 'startsWith',
+          value: 'Be',
+          caseSensitive: false
+        }
+      ],
+      region: {
+        kind: 'set',
+        values: ['APAC'],
+        includeNull: false
+      }
+    });
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies nested advanced filter groups from the filters tool panel builder', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 920, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', region: 'APAC', score: 10 },
+        { id: 2, name: 'Beta', region: 'EMEA', score: 80 },
+        { id: 3, name: 'Gamma', region: 'APAC', score: 55 },
+        { id: 4, name: 'Delta', region: 'AMER', score: 35 }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['filters'],
+        defaultPanel: 'filters',
+        initialOpen: true
+      },
+      height: 220,
+      rowHeight: 28
+    });
+
+    const builderTab = container.querySelector(
+      '[data-tool-panel-filter-surface="builder"]'
+    ) as HTMLButtonElement | null;
+    expect(builderTab).toBeTruthy();
+    builderTab?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const matchSelect = container.querySelector('[data-advanced-filter-role="match"]') as HTMLSelectElement;
+    matchSelect.value = 'or';
+    matchSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const firstRuleColumn = container.querySelector(
+      '[data-advanced-filter-role="column"][data-advanced-filter-path="0"]'
+    ) as HTMLSelectElement;
+    firstRuleColumn.value = 'name';
+    firstRuleColumn.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+
+    const firstRuleOperator = container.querySelector(
+      '[data-advanced-filter-role="condition-operator"][data-advanced-filter-path="0"]'
+    ) as HTMLSelectElement;
+    firstRuleOperator.value = 'contains';
+    firstRuleOperator.dispatchEvent(new Event('change', { bubbles: true }));
+    const firstRuleValue = container.querySelector(
+      '[data-advanced-filter-role="value"][data-advanced-filter-path="0"]'
+    ) as HTMLInputElement;
+    firstRuleValue.value = 'ta';
+    firstRuleValue.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const addGroupButton = container.querySelector(
+      '.hgrid__tool-panel-filter-builder > .hgrid__filter-panel-actions [data-advanced-filter-action="add-group"]'
+    ) as HTMLButtonElement;
+    addGroupButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const groupOperator = container.querySelector(
+      '[data-advanced-filter-role="group-operator"][data-advanced-filter-path="1"]'
+    ) as HTMLSelectElement;
+    groupOperator.value = 'and';
+    groupOperator.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const nestedFirstRuleColumn = container.querySelector(
+      '[data-advanced-filter-role="column"][data-advanced-filter-path="1.0"]'
+    ) as HTMLSelectElement;
+    nestedFirstRuleColumn.value = 'region';
+    nestedFirstRuleColumn.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+
+    const nestedFirstRuleOperator = container.querySelector(
+      '[data-advanced-filter-role="condition-operator"][data-advanced-filter-path="1.0"]'
+    ) as HTMLSelectElement;
+    nestedFirstRuleOperator.value = 'equals';
+    nestedFirstRuleOperator.dispatchEvent(new Event('change', { bubbles: true }));
+    const nestedFirstRuleValue = container.querySelector(
+      '[data-advanced-filter-role="value"][data-advanced-filter-path="1.0"]'
+    ) as HTMLInputElement;
+    nestedFirstRuleValue.value = 'APAC';
+    nestedFirstRuleValue.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const nestedAddRuleButton = container.querySelector(
+      '[data-advanced-filter-action="add-rule"][data-advanced-filter-path="1"]'
+    ) as HTMLButtonElement;
+    nestedAddRuleButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const nestedSecondRuleColumn = container.querySelector(
+      '[data-advanced-filter-role="column"][data-advanced-filter-path="1.1"]'
+    ) as HTMLSelectElement;
+    nestedSecondRuleColumn.value = 'score';
+    nestedSecondRuleColumn.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+
+    const nestedSecondRuleOperator = container.querySelector(
+      '[data-advanced-filter-role="condition-operator"][data-advanced-filter-path="1.1"]'
+    ) as HTMLSelectElement;
+    nestedSecondRuleOperator.value = 'gte';
+    nestedSecondRuleOperator.dispatchEvent(new Event('change', { bubbles: true }));
+    const nestedSecondRuleValue = container.querySelector(
+      '[data-advanced-filter-role="value"][data-advanced-filter-path="1.1"]'
+    ) as HTMLInputElement;
+    nestedSecondRuleValue.value = '50';
+    nestedSecondRuleValue.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const applyButton = container.querySelector('[data-advanced-filter-action="apply"]') as HTMLButtonElement;
+    applyButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getAdvancedFilterModel()).toEqual({
+      operator: 'or',
+      rules: [
+        {
+          columnId: 'name',
+          condition: {
+            kind: 'text',
+            operator: 'contains',
+            value: 'ta'
+          }
+        },
+        {
+          kind: 'group',
+          operator: 'and',
+          rules: [
+            {
+              columnId: 'region',
+              condition: {
+                kind: 'text',
+                operator: 'equals',
+                value: 'APAC'
+              }
+            },
+            {
+              columnId: 'score',
+              condition: {
+                kind: 'number',
+                operator: 'gte',
+                value: 50
+              }
+            }
+          ]
+        }
+      ]
+    });
+    expect(grid.getViewRowCount()).toBe(3);
+
+    const clearButton = container.querySelector('[data-advanced-filter-action="clear"]') as HTMLButtonElement;
+    clearButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getAdvancedFilterModel()).toBeNull();
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies header filter row inputs and keeps them synced with filter model changes', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 920, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 180, type: 'date' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', score: 24, updatedAt: '2026-03-10' },
+        { id: 2, name: 'Beta', score: 82, updatedAt: '2026-03-11' },
+        { id: 3, name: 'Gamma', score: 68, updatedAt: '2026-03-12' },
+        { id: 4, name: 'Delta', score: 55, updatedAt: '2026-03-13' }
+      ],
+      filterRow: {
+        enabled: true
+      },
+      height: 220,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const nameInput = container.querySelector(
+      '.hgrid__filter-row-input[data-filter-row-column-id="name"]'
+    ) as HTMLInputElement | null;
+    expect(nameInput).toBeTruthy();
+    nameInput!.value = 'ta';
+    nameInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    nameInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({
+      name: {
+        kind: 'text',
+        operator: 'contains',
+        value: 'ta'
+      }
+    });
+    expect(grid.getViewRowCount()).toBe(2);
+
+    const scoreInput = container.querySelector(
+      '.hgrid__filter-row-input[data-filter-row-column-id="score"]'
+    ) as HTMLInputElement | null;
+    expect(scoreInput).toBeTruthy();
+    scoreInput!.value = '>=60';
+    scoreInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    scoreInput!.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({
+      name: {
+        kind: 'text',
+        operator: 'contains',
+        value: 'ta'
+      },
+      score: {
+        kind: 'number',
+        operator: 'gte',
+        value: 60
+      }
+    });
+    expect(grid.getViewRowCount()).toBe(1);
+
+    grid.setFilterModel({
+      updatedAt: {
+        kind: 'date',
+        operator: 'onOrAfter',
+        value: '2026-03-12'
+      }
+    });
+    await waitForFrame();
+    await waitForFrame();
+
+    const syncedDateOperator = container.querySelector(
+      '.hgrid__filter-row-date-operator[data-filter-row-column-id="updatedAt"]'
+    ) as HTMLSelectElement | null;
+    const syncedDateInput = container.querySelector(
+      '.hgrid__filter-row-date-input[data-filter-row-column-id="updatedAt"][data-filter-row-control="date-value"]'
+    ) as HTMLInputElement | null;
+    expect(syncedDateOperator?.value).toBe('onOrAfter');
+    expect(syncedDateInput?.value).toBe('2026-03-12');
+
+    syncedDateInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({});
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('uses dedicated boolean filter row editor and syncs set filters', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 720, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 92, type: 'number' },
+        { id: 'active', header: 'Active', width: 140, type: 'boolean' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, active: true, name: 'Alpha' },
+        { id: 2, active: false, name: 'Beta' },
+        { id: 3, active: true, name: 'Gamma' }
+      ],
+      filterRow: {
+        enabled: true
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const activeSelect = container.querySelector(
+      '.hgrid__filter-row-select[data-filter-row-column-id="active"]'
+    ) as HTMLSelectElement | null;
+    expect(activeSelect).toBeTruthy();
+
+    activeSelect!.value = 'true';
+    activeSelect!.dispatchEvent(new Event('input', { bubbles: true }));
+    activeSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({
+      active: {
+        kind: 'set',
+        values: [true],
+        includeNull: false
+      }
+    });
+    expect(grid.getViewRowCount()).toBe(2);
+
+    await grid.setFilterModel({
+      active: {
+        kind: 'set',
+        values: [false],
+        includeNull: false
+      }
+    });
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(activeSelect!.value).toBe('false');
+
+    activeSelect!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({});
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('uses a generic set filter row editor for enum text columns and can scan full distinct values', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 720, configurable: true });
+    document.body.append(container);
+
+    const rowData = Array.from({ length: 5205 }, (_, index) => ({
+      id: index + 1,
+      status: index >= 5000 ? 'Escalated' : ['Active', 'Review', 'Hold', 'Draft'][index % 4],
+      owner: `Owner-${(index % 24) + 1}`
+    }));
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 92, type: 'number' },
+        { id: 'status', header: 'Status', width: 160, type: 'text', filterMode: 'set' },
+        { id: 'owner', header: 'Owner', width: 180, type: 'text' }
+      ],
+      rowData,
+      filterRow: {
+        enabled: true
+      },
+      setFilter: {
+        valueSource: 'full',
+        maxDistinctValues: 16
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const statusSelect = container.querySelector(
+      '.hgrid__filter-row-set-select[data-filter-row-column-id="status"]'
+    ) as HTMLSelectElement | null;
+    expect(statusSelect).toBeTruthy();
+
+    const optionLabels = Array.from(statusSelect!.options).map((option) => option.text);
+    expect(optionLabels).toContain('Escalated');
+
+    const escalatedOption = Array.from(statusSelect!.options).find((option) => option.text === 'Escalated');
+    expect(escalatedOption).toBeTruthy();
+
+    statusSelect!.value = escalatedOption!.value;
+    statusSelect!.dispatchEvent(new Event('input', { bubbles: true }));
+    statusSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({
+      status: {
+        kind: 'set',
+        values: ['Escalated'],
+        includeNull: false
+      }
+    });
+    expect(grid.getViewRowCount()).toBe(205);
+
+    await grid.setFilterModel({
+      status: {
+        kind: 'set',
+        values: ['Review'],
+        includeNull: false
+      }
+    });
+    await waitForFrame();
+    await waitForFrame();
+
+    const syncedStatusSelect = container.querySelector(
+      '.hgrid__filter-row-set-select[data-filter-row-column-id="status"]'
+    ) as HTMLSelectElement | null;
+    const reviewOption = Array.from(syncedStatusSelect!.options).find((option) => option.text === 'Review');
+    expect(syncedStatusSelect?.value).toBe(reviewOption?.value);
+
+    syncedStatusSelect!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({});
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('saves, applies, and deletes advanced filter presets', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'active', header: 'Active', width: 120, type: 'boolean' }
+      ],
+      rowData: [
+        { region: 'APAC', active: true },
+        { region: 'EMEA', active: false },
+        { region: 'APAC', active: false }
+      ],
+      height: 160,
+      rowHeight: 28
+    });
+
+    await grid.setAdvancedFilterModel({
+      operator: 'and',
+      rules: [
+        {
+          kind: 'rule',
+          columnId: 'region',
+          condition: {
+            kind: 'set',
+            values: ['APAC']
+          }
+        }
+      ]
+    });
+
+    expect(grid.saveAdvancedFilterPreset('apac-only', 'APAC Only')).toBe(true);
+    expect(grid.getAdvancedFilterPresets()).toEqual([
+      {
+        id: 'apac-only',
+        label: 'APAC Only',
+        advancedFilterModel: {
+          operator: 'and',
+          rules: [
+            {
+              columnId: 'region',
+              condition: {
+                kind: 'set',
+                values: ['APAC']
+              }
+            }
+          ]
+        }
+      }
+    ]);
+
+    await grid.clearAdvancedFilterModel();
+    expect(grid.getAdvancedFilterModel()).toBeNull();
+
+    await grid.applyAdvancedFilterPreset('apac-only');
+    expect(grid.getAdvancedFilterModel()).toEqual({
+      operator: 'and',
+      rules: [
+        {
+          columnId: 'region',
+          condition: {
+            kind: 'set',
+            values: ['APAC']
+          }
+        }
+      ]
+    });
+
+    expect(grid.deleteAdvancedFilterPreset('apac-only')).toBe(true);
+    expect(grid.getAdvancedFilterPresets()).toEqual([]);
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('restores column order through getState/setState', () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -1321,6 +2152,186 @@ describe('Grid DOM pooling', () => {
     expect(container.querySelectorAll('.hgrid__header-cell[data-column-id="score"]').length).toBe(0);
 
     grid.destroy();
+  });
+
+  it('saves and restores column layout including width, visibility, order, and pin state', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'region', header: 'Region', width: 160, type: 'text' },
+        { id: 'balance', header: 'Balance', width: 180, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, name: 'alpha', region: 'APAC', balance: 120 },
+        { id: 2, name: 'beta', region: 'EMEA', balance: 240 }
+      ],
+      height: 120,
+      rowHeight: 30,
+      overscan: 2
+    });
+
+    grid.setColumnOrder(['region', 'name', 'balance', 'id']);
+    grid.setColumnVisibility('balance', false);
+    grid.setColumnPin('region', 'left');
+    grid.setColumnWidth('name', 240);
+
+    const savedLayout = grid.getColumnLayout();
+    expect(savedLayout).toEqual({
+      columnOrder: ['region', 'name', 'balance', 'id'],
+      hiddenColumnIds: ['balance'],
+      pinnedColumns: { region: 'left' },
+      columnWidths: {
+        region: 160,
+        name: 240,
+        balance: 180,
+        id: 100
+      }
+    });
+
+    grid.setColumnOrder(['id', 'name', 'region', 'balance']);
+    grid.setColumnVisibility('balance', true);
+    grid.setColumnPin('region', undefined);
+    grid.setColumnWidth('name', 180);
+
+    grid.setColumnLayout(savedLayout);
+
+    const columns = grid.getColumns();
+    expect(columns.map((column) => column.id)).toEqual(['region', 'name', 'balance', 'id']);
+    expect(columns.find((column) => column.id === 'balance')?.visible).toBe(false);
+    expect(columns.find((column) => column.id === 'region')?.pinned).toBe('left');
+    expect(columns.find((column) => column.id === 'name')?.width).toBe(240);
+    expect(container.querySelectorAll('.hgrid__header-left .hgrid__header-cell[data-column-id="region"]').length).toBe(1);
+    expect(container.querySelectorAll('.hgrid__header-cell[data-column-id="balance"]').length).toBe(0);
+
+    grid.destroy();
+  });
+
+  it('applies column layout presets from the columns tool panel', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const compactPreset = {
+      id: 'compact',
+      label: 'Compact',
+      layout: {
+        columnOrder: ['id', 'region', 'name', 'balance'],
+        hiddenColumnIds: ['balance'],
+        pinnedColumns: { id: 'left' as const },
+        columnWidths: {
+          id: 88,
+          region: 140,
+          name: 180,
+          balance: 160
+        }
+      }
+    };
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 200, type: 'text' },
+        { id: 'region', header: 'Region', width: 160, type: 'text' },
+        { id: 'balance', header: 'Balance', width: 160, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, name: 'Ahn', region: 'APAC', balance: 120 },
+        { id: 2, name: 'Park', region: 'EMEA', balance: 240 }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['columns'],
+        defaultPanel: 'columns',
+        initialOpen: true,
+        columnLayoutPresets: [compactPreset]
+      },
+      height: 160,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const presetSelect = container.querySelector('[data-tool-panel-columns-preset-select="true"]') as HTMLSelectElement;
+    presetSelect.value = 'compact';
+    presetSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    const applyButton = container.querySelector('[data-tool-panel-columns-preset-action="apply"]') as HTMLButtonElement;
+    applyButton.click();
+    await waitForFrame();
+
+    expect(grid.getColumnLayout()).toEqual(compactPreset.layout);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('does not fetch unloaded remote blocks when full distinct options are requested for set filters', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 720, configurable: true });
+    document.body.append(container);
+
+    let fetchCount = 0;
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request) {
+          fetchCount += 1;
+          return {
+            rows: Array.from({ length: request.endIndex - request.startIndex }, (_, offset) => {
+              const index = request.startIndex + offset;
+              return {
+                id: index + 1,
+                status: index === 17 ? 'Escalated' : ['Active', 'Review', 'Hold', 'Draft'][index % 4],
+                owner: `Owner-${(index % 8) + 1}`
+              };
+            }),
+            totalRowCount: 20
+          };
+        }
+      },
+      rowCount: 20,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 2,
+        prefetchBlocks: 0
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 92, type: 'number' },
+        { id: 'status', header: 'Status', width: 160, type: 'text', filterMode: 'set' },
+        { id: 'owner', header: 'Owner', width: 180, type: 'text' }
+      ],
+      dataProvider: provider,
+      filterRow: {
+        enabled: true
+      },
+      setFilter: {
+        valueSource: 'full',
+        maxDistinctValues: 16
+      },
+      height: 28,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await waitForFrame();
+    await waitForFrame();
+    await waitForFrame();
+
+    const statusSelect = container.querySelector(
+      '.hgrid__filter-row-set-select[data-filter-row-column-id="status"]'
+    ) as HTMLSelectElement | null;
+    expect(statusSelect).toBeTruthy();
+
+    const optionLabels = Array.from(statusSelect!.options).map((option) => option.text);
+    expect(optionLabels).not.toContain('Escalated');
+    expect(fetchCount).toBe(1);
+
+    grid.destroy();
+    container.remove();
   });
 
   it('renders multi-level column group headers and keeps them aligned across pin/hide/reorder', async () => {
@@ -2399,6 +3410,503 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
+  it('undos and redoes editor commits with keyboard shortcuts', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true }
+      ],
+      rowData: [{ id: 1, name: 'Alpha' }],
+      height: 160,
+      rowHeight: 28,
+      overscan: 2,
+      undoRedo: {
+        enabled: true
+      }
+    });
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          editorInputElement: HTMLInputElement;
+          editorHostElement: HTMLDivElement;
+        };
+      }
+    ).renderer;
+    const editCommitEvents: GridEventMap['editCommit'][] = [];
+    grid.on('editCommit', (event) => {
+      editCommitEvents.push(event);
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+
+    renderer.editorInputElement.value = 'Beta';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.canUndo()).toBe(true);
+    expect(grid.canRedo()).toBe(false);
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]') as HTMLDivElement).textContent
+    ).toBe('Beta');
+
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]') as HTMLDivElement).textContent
+    ).toBe('Alpha');
+    expect(grid.canUndo()).toBe(false);
+    expect(grid.canRedo()).toBe(true);
+
+    root.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    );
+    await waitForFrame();
+    await waitForFrame();
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]') as HTMLDivElement).textContent
+    ).toBe('Beta');
+    expect(editCommitEvents.map((event) => event.source)).toEqual(['editor', 'undo', 'redo']);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('undos and redoes clipboard paste ranges', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 140, type: 'text', editable: true }
+      ],
+      rowData: [
+        { id: 1, name: 'User-1', status: 'idle' },
+        { id: 2, name: 'User-2', status: 'idle' }
+      ],
+      height: 180,
+      rowHeight: 28,
+      overscan: 2,
+      undoRedo: {
+        enabled: true
+      }
+    });
+
+    const editCommitEvents: GridEventMap['editCommit'][] = [];
+    grid.on('editCommit', (event) => {
+      editCommitEvents.push(event);
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 2 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    const clipboard = createClipboardEvent('paste', {
+      'text/plain': 'Alpha\tactive\nBeta\treview'
+    });
+    root.dispatchEvent(clipboard.event);
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]') as HTMLDivElement).textContent
+    ).toBe('Alpha');
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="status"]') as HTMLDivElement).textContent
+    ).toBe('review');
+
+    expect(grid.undo()).toBe(true);
+    await waitForFrame();
+    await waitForFrame();
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]') as HTMLDivElement).textContent
+    ).toBe('User-1');
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="status"]') as HTMLDivElement).textContent
+    ).toBe('idle');
+
+    expect(grid.redo()).toBe(true);
+    await waitForFrame();
+    await waitForFrame();
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]') as HTMLDivElement).textContent
+    ).toBe('Alpha');
+    expect(
+      (container.querySelector('.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="status"]') as HTMLDivElement).textContent
+    ).toBe('review');
+    expect(editCommitEvents.map((event) => event.source)).toEqual(['clipboard', 'undo', 'redo']);
+    expect(editCommitEvents[0].cellCount).toBe(4);
+    expect(editCommitEvents[0].rowCount).toBe(2);
+    expect(editCommitEvents[0].changes).toHaveLength(4);
+    expect(editCommitEvents[1].cellCount).toBe(4);
+    expect(editCommitEvents[2].cellCount).toBe(4);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('repeats a single-cell value with the fill handle and keeps clipboard export in sync', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const columns = [
+      { id: 'id', header: 'ID', width: 100, type: 'number' as const },
+      { id: 'name', header: 'Name', width: 220, type: 'text' as const, editable: true }
+    ];
+    const grid = new Grid(container, {
+      columns,
+      rowData: [
+        { id: 1, name: 'Alpha' },
+        { id: 2, name: '' },
+        { id: 3, name: '' }
+      ],
+      height: 180,
+      rowHeight: 28,
+      overscan: 2,
+      undoRedo: {
+        enabled: true
+      }
+    });
+
+    const renderer = (grid as unknown as { renderer: { hitTestCellAtPoint: (x: number, y: number) => unknown } }).renderer;
+    const originalHitTest = renderer.hitTestCellAtPoint;
+    renderer.hitTestCellAtPoint = () => ({
+      zone: 'center',
+      rowIndex: 2,
+      dataIndex: 2,
+      columnIndex: 1,
+      column: columns[1]
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const handleElement = container.querySelector('[data-range-handle="true"]') as HTMLDivElement;
+    const pointerId = 701;
+    handleElement.dispatchEvent(createPointerLikeEvent('pointerdown', { pointerId, clientX: 8, clientY: 8 }));
+    window.dispatchEvent(createPointerLikeEvent('pointermove', { pointerId, clientX: 8, clientY: 120 }));
+    window.dispatchEvent(createPointerLikeEvent('pointerup', { pointerId, clientX: 8, clientY: 120 }));
+    await waitForFrame();
+    await waitForFrame();
+    renderer.hitTestCellAtPoint = originalHitTest;
+
+    const secondNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    const thirdNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="2"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+
+    expect(secondNameCell.textContent).toBe('Alpha');
+    expect(thirdNameCell.textContent).toBe('Alpha');
+    expect(grid.getSelection().cellRanges).toEqual([{ r1: 0, c1: 1, r2: 2, c2: 1 }]);
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    const clipboard = createClipboardEvent('copy');
+    root.dispatchEvent(clipboard.event);
+    expect(clipboard.event.defaultPrevented).toBe(true);
+    expect(clipboard.getData('text/plain')).toBe('Alpha\nAlpha\nAlpha');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('extends numeric series with the fill handle and emits fillHandle edit commits', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const columns = [
+      { id: 'id', header: 'ID', width: 100, type: 'number' as const },
+      { id: 'qty', header: 'Qty', width: 160, type: 'number' as const, editable: true }
+    ];
+    const grid = new Grid(container, {
+      columns,
+      rowData: [
+        { id: 1, qty: 10 },
+        { id: 2, qty: 20 },
+        { id: 3, qty: 0 },
+        { id: 4, qty: 0 }
+      ],
+      height: 190,
+      rowHeight: 28,
+      overscan: 2,
+      undoRedo: {
+        enabled: true
+      }
+    });
+
+    const renderer = (grid as unknown as { renderer: { hitTestCellAtPoint: (x: number, y: number) => unknown } }).renderer;
+    const editCommitEvents: GridEventMap['editCommit'][] = [];
+    grid.on('editCommit', (event) => {
+      editCommitEvents.push(event);
+    });
+
+    const originalHitTest = renderer.hitTestCellAtPoint;
+    renderer.hitTestCellAtPoint = () => ({
+      zone: 'center',
+      rowIndex: 3,
+      dataIndex: 3,
+      columnIndex: 1,
+      column: columns[1]
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 1, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const handleElement = container.querySelector('[data-range-handle="true"]') as HTMLDivElement;
+    const pointerId = 702;
+    handleElement.dispatchEvent(createPointerLikeEvent('pointerdown', { pointerId, clientX: 12, clientY: 12 }));
+    window.dispatchEvent(createPointerLikeEvent('pointermove', { pointerId, clientX: 12, clientY: 152 }));
+    window.dispatchEvent(createPointerLikeEvent('pointerup', { pointerId, clientX: 12, clientY: 152 }));
+    await waitForFrame();
+    await waitForFrame();
+    renderer.hitTestCellAtPoint = originalHitTest;
+
+    const thirdQtyCell = container.querySelector(
+      '.hgrid__row[data-row-index="2"] .hgrid__cell[data-column-id="qty"]'
+    ) as HTMLDivElement;
+    const fourthQtyCell = container.querySelector(
+      '.hgrid__row[data-row-index="3"] .hgrid__cell[data-column-id="qty"]'
+    ) as HTMLDivElement;
+
+    expect(thirdQtyCell.textContent).toBe('30');
+    expect(fourthQtyCell.textContent).toBe('40');
+    expect(grid.getSelection().cellRanges).toEqual([{ r1: 0, c1: 1, r2: 3, c2: 1 }]);
+    expect(editCommitEvents.length).toBe(1);
+    expect(editCommitEvents[0]).toMatchObject({
+      rowIndex: 2,
+      columnId: 'qty',
+      value: 30,
+      source: 'fillHandle'
+    });
+    expect(editCommitEvents[0].cellCount).toBe(2);
+    expect(editCommitEvents[0].rowCount).toBe(2);
+    expect(editCommitEvents[0].changes).toHaveLength(2);
+
+    expect(grid.undo()).toBe(true);
+    await waitForFrame();
+    await waitForFrame();
+    expect(thirdQtyCell.textContent).toBe('0');
+    expect(fourthQtyCell.textContent).toBe('0');
+
+    expect(grid.redo()).toBe(true);
+    await waitForFrame();
+    await waitForFrame();
+    expect(thirdQtyCell.textContent).toBe('30');
+    expect(fourthQtyCell.textContent).toBe('40');
+    expect(editCommitEvents.map((event) => event.source)).toEqual(['fillHandle', 'undo', 'redo']);
+    expect(editCommitEvents[1].cellCount).toBe(2);
+    expect(editCommitEvents[2].cellCount).toBe(2);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('extends an affine numeric matrix across rows and columns with the fill handle', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const columns = [
+      { id: 'id', header: 'ID', width: 90, type: 'number' as const },
+      { id: 'q1', header: 'Q1', width: 110, type: 'number' as const, editable: true },
+      { id: 'q2', header: 'Q2', width: 110, type: 'number' as const, editable: true },
+      { id: 'q3', header: 'Q3', width: 110, type: 'number' as const, editable: true },
+      { id: 'q4', header: 'Q4', width: 110, type: 'number' as const, editable: true }
+    ];
+    const grid = new Grid(container, {
+      columns,
+      rowData: [
+        { id: 1, q1: 1, q2: 2, q3: 0, q4: 0 },
+        { id: 2, q1: 11, q2: 12, q3: 0, q4: 0 },
+        { id: 3, q1: 0, q2: 0, q3: 0, q4: 0 },
+        { id: 4, q1: 0, q2: 0, q3: 0, q4: 0 }
+      ],
+      height: 210,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    const renderer = (grid as unknown as { renderer: { hitTestCellAtPoint: (x: number, y: number) => unknown } }).renderer;
+    const originalHitTest = renderer.hitTestCellAtPoint;
+    renderer.hitTestCellAtPoint = () => ({
+      zone: 'center',
+      rowIndex: 3,
+      dataIndex: 3,
+      columnIndex: 4,
+      column: columns[4]
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 1, colIndex: 2 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 2 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const handleElement = container.querySelector('[data-range-handle="true"]') as HTMLDivElement;
+    const pointerId = 703;
+    handleElement.dispatchEvent(createPointerLikeEvent('pointerdown', { pointerId, clientX: 14, clientY: 14 }));
+    window.dispatchEvent(createPointerLikeEvent('pointermove', { pointerId, clientX: 220, clientY: 148 }));
+    window.dispatchEvent(createPointerLikeEvent('pointerup', { pointerId, clientX: 220, clientY: 148 }));
+    await waitForFrame();
+    await waitForFrame();
+    renderer.hitTestCellAtPoint = originalHitTest;
+
+    const dataProvider = grid.getDataProvider();
+    const getRow = dataProvider.getRow!.bind(dataProvider);
+    expect(getRow(0)).toMatchObject({ q1: 1, q2: 2, q3: 3, q4: 4 });
+    expect(getRow(1)).toMatchObject({ q1: 11, q2: 12, q3: 13, q4: 14 });
+    expect(getRow(2)).toMatchObject({ q1: 21, q2: 22, q3: 23, q4: 24 });
+    expect(getRow(3)).toMatchObject({ q1: 31, q2: 32, q3: 33, q4: 34 });
+    expect(grid.getSelection().cellRanges).toEqual([{ r1: 0, c1: 1, r2: 3, c2: 4 }]);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('suppresses browser text selection during pointer range selection and fill-handle drag', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const columns = [
+      { id: 'id', header: 'ID', width: 100, type: 'number' as const },
+      { id: 'name', header: 'Name', width: 180, type: 'text' as const, editable: true }
+    ];
+    const grid = new Grid(container, {
+      columns,
+      rowData: [
+        { id: 1, name: 'Alpha' },
+        { id: 2, name: 'Beta' },
+        { id: 3, name: 'Gamma' },
+        { id: 4, name: 'Delta' }
+      ],
+      height: 190,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    const renderer = (grid as unknown as { renderer: { hitTestCellAtPoint: (x: number, y: number) => unknown } }).renderer;
+    const originalHitTest = renderer.hitTestCellAtPoint;
+    renderer.hitTestCellAtPoint = (_clientX: number, clientY: number) => {
+      const rowIndex = clientY >= 120 ? 2 : 0;
+      return {
+        zone: 'center',
+        rowIndex,
+        dataIndex: rowIndex,
+        columnIndex: 1,
+        column: columns[1]
+      };
+    };
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    const selectionPointerId = 801;
+    const selectionDownEvent = createPointerLikeEvent('pointerdown', {
+      pointerId: selectionPointerId,
+      clientX: 14,
+      clientY: 14
+    });
+    const selectionDispatchResult = root.dispatchEvent(selectionDownEvent);
+
+    expect(selectionDispatchResult).toBe(false);
+    expect(selectionDownEvent.defaultPrevented).toBe(true);
+    expect(root.classList.contains('hgrid--selection-dragging')).toBe(true);
+
+    window.dispatchEvent(
+      createPointerLikeEvent('pointermove', {
+        pointerId: selectionPointerId,
+        clientX: 14,
+        clientY: 120
+      })
+    );
+    window.dispatchEvent(
+      createPointerLikeEvent('pointerup', {
+        pointerId: selectionPointerId,
+        clientX: 14,
+        clientY: 120
+      })
+    );
+
+    expect(root.classList.contains('hgrid--selection-dragging')).toBe(false);
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    renderer.hitTestCellAtPoint = () => ({
+      zone: 'center',
+      rowIndex: 2,
+      dataIndex: 2,
+      columnIndex: 1,
+      column: columns[1]
+    });
+
+    const handleElement = container.querySelector('[data-range-handle="true"]') as HTMLDivElement;
+    const fillPointerId = 802;
+    const fillDownEvent = createPointerLikeEvent('pointerdown', {
+      pointerId: fillPointerId,
+      clientX: 12,
+      clientY: 12
+    });
+    const fillDispatchResult = handleElement.dispatchEvent(fillDownEvent);
+
+    expect(fillDispatchResult).toBe(false);
+    expect(fillDownEvent.defaultPrevented).toBe(true);
+    expect(root.classList.contains('hgrid--selection-dragging')).toBe(true);
+
+    window.dispatchEvent(
+      createPointerLikeEvent('pointermove', {
+        pointerId: fillPointerId,
+        clientX: 12,
+        clientY: 124
+      })
+    );
+    window.dispatchEvent(
+      createPointerLikeEvent('pointerup', {
+        pointerId: fillPointerId,
+        clientX: 12,
+        clientY: 124
+      })
+    );
+
+    await waitForFrame();
+    expect(root.classList.contains('hgrid--selection-dragging')).toBe(false);
+
+    renderer.hitTestCellAtPoint = originalHitTest;
+    grid.destroy();
+    container.remove();
+  });
+
   it('renders unsafe HTML only when opt-in is enabled and sanitize hook is provided', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -2924,6 +4432,680 @@ describe('Grid DOM pooling', () => {
     ) as HTMLDivElement;
     expect(firstIdAfterClear.textContent).toBe('1');
     expect(grid.getSortModel()).toEqual([]);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('opens columns tool panel and applies visibility and pin mutations', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', status: 'active' },
+        { id: 2, name: 'Beta', status: 'idle' }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['columns'],
+        defaultPanel: 'columns',
+        width: 280
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const toolPanel = container.querySelector('.hgrid__tool-panel') as HTMLDivElement;
+    expect(toolPanel.classList.contains('hgrid__tool-panel--open')).toBe(true);
+
+    const statusVisibility = toolPanel.querySelector(
+      '[data-tool-panel-visibility-column-id="status"]'
+    ) as HTMLInputElement;
+    expect(statusVisibility.checked).toBe(true);
+    statusVisibility.checked = false;
+    statusVisibility.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+
+    expect(grid.getVisibleColumns().map((column) => column.id)).toEqual(['id', 'name']);
+
+    const hiddenStatusVisibility = toolPanel.querySelector(
+      '[data-tool-panel-visibility-column-id="status"]'
+    ) as HTMLInputElement;
+    expect(hiddenStatusVisibility.checked).toBe(false);
+    hiddenStatusVisibility.checked = true;
+    hiddenStatusVisibility.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+
+    expect(grid.getVisibleColumns().map((column) => column.id)).toEqual(['id', 'name', 'status']);
+
+    const namePinSelect = toolPanel.querySelector('[data-tool-panel-pin-column-id="name"]') as HTMLSelectElement;
+    namePinSelect.value = 'left';
+    namePinSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+
+    const pinnedNameColumn = grid.getColumns().find((column) => column.id === 'name');
+    expect(pinnedNameColumn?.pinned).toBe('left');
+    expect(grid.getVisibleColumns()[0]?.id).toBe('name');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('filters columns tool panel rows by search and reorders columns from the panel', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', region: 'APAC', status: 'active', score: 10 },
+        { id: 2, name: 'Beta', region: 'EMEA', status: 'idle', score: 20 }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['columns'],
+        defaultPanel: 'columns',
+        width: 300
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const toolPanel = container.querySelector('.hgrid__tool-panel') as HTMLDivElement;
+    const searchInput = toolPanel.querySelector('[data-tool-panel-columns-search="true"]') as HTMLInputElement;
+    searchInput.value = 'st';
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await waitForFrame();
+
+    const visibleRows = Array.from(toolPanel.querySelectorAll('.hgrid__tool-panel-column-row')) as HTMLDivElement[];
+    expect(visibleRows).toHaveLength(1);
+    expect(visibleRows[0]?.textContent).toContain('Status');
+
+    const refreshedSearchInput = toolPanel.querySelector('[data-tool-panel-columns-search="true"]') as HTMLInputElement;
+    refreshedSearchInput.value = '';
+    refreshedSearchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await waitForFrame();
+
+    const regionDownButton = toolPanel.querySelector(
+      '[data-tool-panel-order-kind="columns"][data-tool-panel-order-column-id="region"][data-tool-panel-order-direction="down"]'
+    ) as HTMLButtonElement;
+    regionDownButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(grid.getColumns().map((column) => column.id)).toEqual(['id', 'name', 'status', 'region', 'score']);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('opens filters tool panel and applies set filters from the side bar', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', region: 'APAC' },
+        { id: 2, name: 'Beta', region: 'EMEA' },
+        { id: 3, name: 'Gamma', region: 'APAC' }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['filters'],
+        defaultPanel: 'filters',
+        width: 320
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const toolPanel = container.querySelector('.hgrid__tool-panel') as HTMLDivElement;
+    expect(toolPanel.classList.contains('hgrid__tool-panel--open')).toBe(true);
+
+    const regionButton = toolPanel.querySelector('[data-tool-panel-filter-column-id="region"]') as HTMLButtonElement;
+    regionButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const setModeButton = toolPanel.querySelector('[data-tool-panel-filter-mode-trigger="set"]') as HTMLButtonElement;
+    setModeButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    const emeaCheckbox = toolPanel.querySelector('[data-tool-panel-filter-option-key="s:EMEA"]') as HTMLInputElement;
+    const apacCheckbox = toolPanel.querySelector('[data-tool-panel-filter-option-key="s:APAC"]') as HTMLInputElement;
+    expect(emeaCheckbox).toBeTruthy();
+    expect(apacCheckbox).toBeTruthy();
+    apacCheckbox.checked = true;
+    emeaCheckbox.checked = false;
+
+    const applyButton = toolPanel.querySelector('[data-tool-panel-filter-action="apply"]') as HTMLButtonElement;
+    applyButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({
+      region: {
+        kind: 'set',
+        values: ['APAC'],
+        includeNull: false
+      }
+    });
+
+    expect(grid.getViewRowCount()).toBe(2);
+    const dataProvider = grid.getDataProvider();
+    const visibleNames = [0, 1]
+      .map((rowIndex) => dataProvider.getRow?.(grid.getDataIndex(rowIndex)) as { name?: string } | undefined)
+      .map((row) => row?.name ?? null);
+    expect(visibleNames).toEqual(['Alpha', 'Gamma']);
+
+    const clearButton = toolPanel.querySelector('[data-tool-panel-filter-action="clear"]') as HTMLButtonElement;
+    clearButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({});
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('docks the side bar shell and renders custom tool panel registry entries', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', status: 'Open' },
+        { id: 2, name: 'Beta', status: 'Closed' }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['insights'],
+        defaultPanel: 'insights',
+        width: 320,
+        customPanels: [
+          {
+            id: 'insights',
+            title: 'Insights',
+            render: ({ container: panelContainer, state, actions }) => {
+              const summaryElement = document.createElement('div');
+              summaryElement.dataset.customPanelSummary = 'true';
+              summaryElement.textContent = state.visibleColumns.map((column) => column.id).join(',');
+
+              const applyFilterButton = document.createElement('button');
+              applyFilterButton.type = 'button';
+              applyFilterButton.dataset.customPanelApplyFilter = 'true';
+              applyFilterButton.textContent = 'Filter Open';
+              applyFilterButton.addEventListener('click', () => {
+                void Promise.resolve(
+                  actions.setFilterModel({
+                    status: {
+                      kind: 'set',
+                      values: ['Open'],
+                      includeNull: false
+                    }
+                  })
+                );
+              });
+
+              const clearFilterButton = document.createElement('button');
+              clearFilterButton.type = 'button';
+              clearFilterButton.dataset.customPanelClearFilter = 'true';
+              clearFilterButton.textContent = 'Clear';
+              clearFilterButton.addEventListener('click', () => {
+                void Promise.resolve(actions.clearFilterModel());
+              });
+
+              const compactLayoutButton = document.createElement('button');
+              compactLayoutButton.type = 'button';
+              compactLayoutButton.dataset.customPanelCompactLayout = 'true';
+              compactLayoutButton.textContent = 'Hide Status';
+              compactLayoutButton.addEventListener('click', () => {
+                const pinnedColumns: Record<string, 'left' | 'right'> = {};
+                const columnWidths: Record<string, number> = {};
+                state.columns.forEach((column) => {
+                  if (column.pinned) {
+                    pinnedColumns[column.id] = column.pinned;
+                  }
+                  columnWidths[column.id] = column.width;
+                });
+                actions.setColumnLayout({
+                  columnOrder: state.columns.map((column) => column.id),
+                  hiddenColumnIds: ['status'],
+                  pinnedColumns,
+                  columnWidths
+                });
+              });
+
+              const closeButton = document.createElement('button');
+              closeButton.type = 'button';
+              closeButton.dataset.customPanelClose = 'true';
+              closeButton.textContent = 'Close';
+              closeButton.addEventListener('click', () => actions.closePanel());
+
+              panelContainer.replaceChildren(
+                summaryElement,
+                applyFilterButton,
+                clearFilterButton,
+                compactLayoutButton,
+                closeButton
+              );
+            }
+          }
+        ]
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const rootElement = container.querySelector('.hgrid') as HTMLDivElement;
+    expect(rootElement.style.getPropertyValue('--hgrid-side-bar-space-right')).toBe('320px');
+
+    const summaryElement = container.querySelector('[data-custom-panel-summary="true"]') as HTMLDivElement;
+    expect(summaryElement.textContent).toBe('id,name,status');
+
+    const applyFilterButton = container.querySelector('[data-custom-panel-apply-filter="true"]') as HTMLButtonElement;
+    applyFilterButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({
+      status: {
+        kind: 'set',
+        values: ['Open'],
+        includeNull: false
+      }
+    });
+    expect(grid.getViewRowCount()).toBe(1);
+
+    const compactLayoutButton = container.querySelector('[data-custom-panel-compact-layout="true"]') as HTMLButtonElement;
+    compactLayoutButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(grid.getVisibleColumns().map((column) => column.id)).toEqual(['id', 'name']);
+
+    const clearFilterButton = container.querySelector('[data-custom-panel-clear-filter="true"]') as HTMLButtonElement;
+    clearFilterButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getFilterModel()).toEqual({});
+
+    const closeButton = container.querySelector('[data-custom-panel-close="true"]') as HTMLButtonElement;
+    closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(rootElement.style.getPropertyValue('--hgrid-side-bar-space-right')).toBe('28px');
+    expect(container.querySelector('.hgrid__tool-panel--open')).toBeNull();
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('keeps the side bar closed on first render when initialOpen is false and opens the default panel from the edge handle', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha', region: 'APAC' },
+        { id: 2, name: 'Beta', region: 'EMEA' }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['filters', 'columns'],
+        defaultPanel: 'filters',
+        initialOpen: false,
+        width: 320
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const rootElement = container.querySelector('.hgrid') as HTMLDivElement;
+    expect(rootElement.style.getPropertyValue('--hgrid-side-bar-space-right')).toBe('28px');
+    expect(container.querySelector('.hgrid__tool-panel--open')).toBeNull();
+
+    const toggleButton = container.querySelector('[data-tool-panel-toggle="true"]') as HTMLButtonElement;
+    toggleButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(rootElement.style.getPropertyValue('--hgrid-side-bar-space-right')).toBe('320px');
+    expect(container.querySelector('.hgrid__tool-panel--open')).not.toBeNull();
+    const activeTab = container.querySelector(
+      '[data-tool-panel-tab-id="filters"][aria-selected="true"]'
+    ) as HTMLButtonElement | null;
+    expect(activeTab).not.toBeNull();
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('renders status bar selection, aggregates, rows, and remote sync summaries', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const remoteProvider = new RemoteDataProvider({
+      rowCount: 4,
+      dataSource: {
+        fetchBlock: async () => ({
+          rows: [
+            { id: 1, sales: 100, margin: 10, region: 'APAC' },
+            { id: 2, sales: 200, margin: 20, region: 'EMEA' },
+            { id: 3, sales: 300, margin: 30, region: 'APAC' },
+            { id: 4, sales: 400, margin: 40, region: 'AMER' }
+          ],
+          rowKeys: [1, 2, 3, 4],
+          totalRowCount: 4
+        })
+      },
+      cache: {
+        blockSize: 4,
+        maxBlocks: 2
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' },
+        { id: 'margin', header: 'Margin', width: 140, type: 'number' },
+        { id: 'region', header: 'Region', width: 120, type: 'text' }
+      ],
+      dataProvider: remoteProvider,
+      statusBar: {
+        enabled: true
+      },
+      height: 96,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+    await waitForFrame();
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 2 }]
+    });
+    await waitForFrame();
+
+    remoteProvider.setValue(0, 'sales', 999);
+    await waitForFrame();
+
+    const selectionItem = container.querySelector('[data-status-bar-item="selection"]') as HTMLDivElement;
+    const aggregatesItem = container.querySelector('[data-status-bar-item="aggregates"]') as HTMLDivElement;
+    const rowsItem = container.querySelector('[data-status-bar-item="rows"]') as HTMLDivElement;
+    const remoteItem = container.querySelector('[data-status-bar-item="remote"]') as HTMLDivElement;
+
+    expect(selectionItem.textContent).toBe('4 cells selected');
+    expect(aggregatesItem.textContent).toBe('Sum 1,229 · Avg 307.25 · Min 10 · Max 999');
+    const visibleRange = grid.getVisibleRowRange();
+    const visibleCount = visibleRange ? visibleRange.endRow - visibleRange.startRow + 1 : 0;
+    expect(rowsItem.textContent).toBe(`Visible ${visibleCount} · Rows 4`);
+    expect(remoteItem.textContent).toBe('Pending 1 rows / 1 cells');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('renders and updates custom status bar items', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' }
+      ],
+      rowData: [
+        { id: 1, region: 'APAC', sales: 100 },
+        { id: 2, region: 'EMEA', sales: 200 },
+        { id: 3, region: 'APAC', sales: 300 }
+      ],
+      statusBar: {
+        enabled: true,
+        customItems: [
+          {
+            id: 'filters',
+            align: 'main',
+            render: ({ state }) => ({
+              text: `Filters ${Object.keys(state.filterModel).length}`,
+              tone: Object.keys(state.filterModel).length > 0 ? 'active' : 'default'
+            })
+          },
+          {
+            id: 'columns',
+            align: 'meta',
+            render: ({ state }) => `Cols ${state.visibleColumnCount}/${state.totalColumnCount}`
+          }
+        ],
+        items: ['filters', 'selection', 'columns', 'rows']
+      },
+      height: 120,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    let filtersItem = container.querySelector('[data-status-bar-item="filters"]') as HTMLDivElement;
+    let columnsItem = container.querySelector('[data-status-bar-item="columns"]') as HTMLDivElement;
+
+    expect(filtersItem.textContent).toBe('Filters 0');
+    expect(columnsItem.textContent).toBe('Cols 3/3');
+
+    await grid.setFilterModel({
+      region: {
+        kind: 'set',
+        values: ['APAC']
+      }
+    });
+    await waitForFrame();
+    filtersItem = container.querySelector('[data-status-bar-item="filters"]') as HTMLDivElement;
+
+    expect(filtersItem.textContent).toBe('Filters 1');
+    expect(filtersItem.classList.contains('hgrid__status-bar-item--active')).toBe(true);
+
+    grid.setColumnVisibility('sales', false);
+    await waitForFrame();
+    columnsItem = container.querySelector('[data-status-bar-item="columns"]') as HTMLDivElement;
+
+    expect(columnsItem.textContent).toBe('Cols 2/3');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('starts large selection aggregate computation asynchronously in the status bar', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const rowData = Array.from({ length: 40 }, (_, index) => ({
+      id: index + 1,
+      sales: index + 1,
+      margin: (index + 1) * 2
+    }));
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' },
+        { id: 'margin', header: 'Margin', width: 140, type: 'number' }
+      ],
+      rowData,
+      statusBar: {
+        enabled: true,
+        aggregateAsyncThreshold: 8,
+        aggregateChunkSize: 6
+      },
+      height: 180,
+      rowHeight: 28
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 11, c2: 2 }]
+    });
+
+    await waitForFrame();
+    const aggregatesItem = container.querySelector('[data-status-bar-item="aggregates"]') as HTMLDivElement;
+    expect(aggregatesItem.textContent).toContain('Calculating');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies grouping tool panel changes and keeps docked width in sync', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 120, type: 'number' }
+      ],
+      rowData: [
+        { region: 'APAC', name: 'Alpha', sales: 10 },
+        { region: 'EMEA', name: 'Beta', sales: 22 },
+        { region: 'APAC', name: 'Gamma', sales: 31 }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['grouping'],
+        defaultPanel: 'grouping',
+        width: 320
+      },
+      height: 200,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const rootElement = container.querySelector('.hgrid') as HTMLDivElement;
+    expect(rootElement.style.getPropertyValue('--hgrid-side-bar-space-right')).toBe('320px');
+
+    const regionCheckbox = container.querySelector('[data-tool-panel-group-column-id="region"]') as HTMLInputElement;
+    regionCheckbox.checked = true;
+    regionCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getGroupModel()).toEqual([{ columnId: 'region' }]);
+
+    const salesAggregation = container.querySelector(
+      '[data-tool-panel-aggregate-kind="group"][data-tool-panel-aggregate-column-id="sales"]'
+    ) as HTMLSelectElement;
+    salesAggregation.value = 'sum';
+    salesAggregation.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getGroupAggregations()).toEqual([{ columnId: 'sales', type: 'sum' }]);
+
+    const clearButton = container.querySelector(
+      '[data-tool-panel-action-kind="grouping"][data-tool-panel-action="clear"]'
+    ) as HTMLButtonElement;
+    clearButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getGroupModel()).toEqual([]);
+    expect(grid.getGroupAggregations()).toEqual([]);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('applies pivot tool panel changes through docked side bar controls', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'month', header: 'Month', width: 140, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 120, type: 'number' }
+      ],
+      rowData: [
+        { region: 'APAC', month: 'Jan', sales: 10 },
+        { region: 'APAC', month: 'Feb', sales: 12 },
+        { region: 'EMEA', month: 'Jan', sales: 8 }
+      ],
+      sideBar: {
+        enabled: true,
+        panels: ['pivot'],
+        defaultPanel: 'pivot',
+        width: 320
+      },
+      height: 200,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const monthCheckbox = container.querySelector('[data-tool-panel-pivot-column-id="month"]') as HTMLInputElement;
+    monthCheckbox.checked = true;
+    monthCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getPivotModel()).toEqual([{ columnId: 'month' }]);
+
+    const salesAggregation = container.querySelector(
+      '[data-tool-panel-aggregate-kind="pivot"][data-tool-panel-aggregate-column-id="sales"]'
+    ) as HTMLSelectElement;
+    salesAggregation.value = 'avg';
+    salesAggregation.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getPivotValues()).toEqual([{ columnId: 'sales', type: 'avg' }]);
+
+    const clearButton = container.querySelector(
+      '[data-tool-panel-action-kind="pivot"][data-tool-panel-action="clear"]'
+    ) as HTMLButtonElement;
+    clearButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(grid.getPivotModel()).toEqual([]);
+    expect(grid.getPivotValues()).toEqual([]);
 
     grid.destroy();
     container.remove();

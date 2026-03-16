@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 72 - Layout Persistence UX</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 26px;
+        background: #f3f6fb;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 26px;
+      }
+
+      p {
+        margin: 0;
+        color: #475569;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 340px;
+        gap: 18px;
+        margin-top: 20px;
+      }
+
+      .surface {
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 16px 38px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #e2e8f0;
+        background: linear-gradient(180deg, #fcfdff 0%, #f8fafc 100%);
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: #ffffff;
+        color: inherit;
+        font: inherit;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 16px;
+      }
+
+      .card {
+        border: 1px solid #d5dbe3;
+        border-radius: 16px;
+        background: #ffffff;
+        padding: 14px;
+      }
+
+      .card h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        color: #475569;
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #0f172a;
+      }
+
+      .meta-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13px;
+      }
+
+      .meta-row span:first-child {
+        color: #64748b;
+      }
+
+      .note {
+        font-size: 13px;
+        line-height: 1.5;
+        color: #475569;
+      }
+
+      @media (max-width: 1200px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 72 - Layout Persistence UX</h1>
+    <p>column layout preset과 broader workspace snapshot(layout + state) 저장/복원을 같은 화면에서 확인하는 E3.6 smoke example</p>
+
+    <div class="layout">
+      <section class="surface">
+        <div class="toolbar">
+          <button id="presetCompact">Compact Preset</button>
+          <button id="presetAnalyst">Analyst Preset</button>
+          <button id="presetOps">Ops Preset</button>
+          <button id="saveLayout">Save Layout</button>
+          <button id="loadLayout">Load Saved Layout</button>
+          <button id="saveWorkspace">Save Workspace</button>
+          <button id="loadWorkspace">Load Saved Workspace</button>
+          <button id="restoreDefault">Restore Default</button>
+        </div>
+        <div id="grid"></div>
+      </section>
+
+      <aside class="surface panel">
+        <div class="card">
+          <h2>Current Layout</h2>
+          <div class="meta-row"><span>Visible</span><span id="visibleText"></span></div>
+          <div class="meta-row"><span>Hidden</span><span id="hiddenText"></span></div>
+          <div class="meta-row"><span>Pinned</span><span id="pinnedText"></span></div>
+          <div class="meta-row"><span>ScrollTop</span><span id="scrollText"></span></div>
+          <div class="meta-row"><span>Viewport</span><span id="viewportText"></span></div>
+        </div>
+        <div class="card">
+          <h2>Layout JSON</h2>
+          <pre id="layoutText"></pre>
+        </div>
+        <div class="card">
+          <h2>Workspace JSON</h2>
+          <pre id="workspaceText"></pre>
+        </div>
+        <div class="card">
+          <h2>Saved Storage</h2>
+          <pre id="savedText"></pre>
+        </div>
+        <div class="note">
+          layout recipe:
+          <br />
+          <code>localStorage.setItem('hgrid-example72-layout', JSON.stringify(grid.getColumnLayout()))</code>
+          <br />
+          <code>grid.setColumnLayout(JSON.parse(localStorage.getItem(...)))</code>
+          <br />
+          <br />
+          workspace recipe:
+          <br />
+          <code>localStorage.setItem('hgrid-example72-workspace', JSON.stringify({ layout: grid.getColumnLayout(), state: grid.getState() }))</code>
+          <br />
+          <code>grid.setColumnLayout(saved.layout); grid.setState(saved.state);</code>
+        </div>
+      </aside>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const LAYOUT_STORAGE_KEY = 'hgrid-example72-layout';
+      const WORKSPACE_STORAGE_KEY = 'hgrid-example72-workspace';
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 84, type: 'number' },
+        { id: 'name', header: 'Name', width: 200, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'department', header: 'Department', width: 170, type: 'text' },
+        { id: 'balance', header: 'Balance', width: 170, type: 'number' },
+        { id: 'status', header: 'Status', width: 150, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 180, type: 'date' }
+      ];
+
+      const baseRows = [
+        ['Ahn', 'APAC', 'Sales', 1240, 'active'],
+        ['Park', 'EMEA', 'Ops', 880, 'review'],
+        ['Kim', 'AMER', 'Finance', 1560, 'active'],
+        ['Lee', 'APAC', 'Support', 420, 'draft'],
+        ['Choi', 'EMEA', 'Success', 990, 'active'],
+        ['Han', 'AMER', 'Risk', 770, 'review']
+      ];
+
+      const rowData = Array.from({ length: 24 }, (_value, index) => {
+        const seed = baseRows[index % baseRows.length];
+        const day = String((index % 9) + 10).padStart(2, '0');
+        return {
+          id: index + 1,
+          name: `${seed[0]} ${index + 1}`,
+          region: seed[1],
+          department: seed[2],
+          balance: seed[3] + index * 37,
+          status: seed[4],
+          updatedAt: `2026-03-${day}T0${index % 10}:15:00.000Z`
+        };
+      });
+
+      const defaultLayout = {
+        columnOrder: columns.map((column) => column.id),
+        hiddenColumnIds: [],
+        pinnedColumns: {},
+        columnWidths: Object.fromEntries(columns.map((column) => [column.id, column.width]))
+      };
+
+      const presetCompact = {
+        columnOrder: ['id', 'name', 'region', 'status', 'balance', 'department', 'updatedAt'],
+        hiddenColumnIds: ['department', 'updatedAt'],
+        pinnedColumns: {},
+        columnWidths: {
+          id: 76,
+          name: 180,
+          region: 126,
+          status: 136,
+          balance: 144,
+          department: 160,
+          updatedAt: 168
+        }
+      };
+
+      const presetAnalyst = {
+        columnOrder: ['region', 'name', 'balance', 'status', 'department', 'updatedAt', 'id'],
+        hiddenColumnIds: [],
+        pinnedColumns: {
+          region: 'left',
+          name: 'left',
+          balance: 'right'
+        },
+        columnWidths: {
+          id: 84,
+          name: 230,
+          region: 150,
+          department: 188,
+          balance: 196,
+          status: 152,
+          updatedAt: 204
+        }
+      };
+
+      const presetOps = {
+        columnOrder: ['status', 'department', 'name', 'region', 'updatedAt', 'balance', 'id'],
+        hiddenColumnIds: ['balance'],
+        pinnedColumns: {
+          status: 'left'
+        },
+        columnWidths: {
+          id: 84,
+          name: 188,
+          region: 138,
+          department: 210,
+          balance: 160,
+          status: 164,
+          updatedAt: 190
+        }
+      };
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 320,
+        rowHeight: 32,
+        overscan: 4,
+        sideBar: {
+          enabled: true,
+          initialOpen: false,
+          panels: ['columns']
+        }
+      });
+
+      function cloneLayout(layout) {
+        return JSON.parse(JSON.stringify(layout));
+      }
+
+      function formatPinnedColumns(pinnedColumns) {
+        const entries = Object.entries(pinnedColumns);
+        return entries.length > 0 ? entries.map(([columnId, pinned]) => `${columnId}:${pinned}`).join(', ') : 'none';
+      }
+
+      function getSnapshot() {
+        const layout = grid.getColumnLayout();
+        const state = grid.getState();
+        return {
+          layout,
+          state,
+          visibleColumns: grid.getVisibleColumns().map((column) => column.id),
+          visibleRange: grid.getVisibleRowRange(),
+          savedLayout: localStorage.getItem(LAYOUT_STORAGE_KEY),
+          savedWorkspace: localStorage.getItem(WORKSPACE_STORAGE_KEY)
+        };
+      }
+
+      function renderSnapshot() {
+        const snapshot = getSnapshot();
+        document.getElementById('visibleText').textContent = snapshot.visibleColumns.join(', ') || 'none';
+        document.getElementById('hiddenText').textContent = snapshot.layout.hiddenColumnIds.join(', ') || 'none';
+        document.getElementById('pinnedText').textContent = formatPinnedColumns(snapshot.layout.pinnedColumns);
+        document.getElementById('scrollText').textContent = String(snapshot.state.scrollTop);
+        document.getElementById('viewportText').textContent = snapshot.visibleRange
+          ? `${snapshot.visibleRange.startRow} - ${snapshot.visibleRange.endRow}`
+          : 'empty';
+        document.getElementById('layoutText').textContent = JSON.stringify(snapshot.layout, null, 2);
+        document.getElementById('workspaceText').textContent = JSON.stringify(
+          {
+            layout: snapshot.layout,
+            state: snapshot.state
+          },
+          null,
+          2
+        );
+        document.getElementById('savedText').textContent = JSON.stringify(
+          {
+            layout: snapshot.savedLayout ? JSON.parse(snapshot.savedLayout) : null,
+            workspace: snapshot.savedWorkspace ? JSON.parse(snapshot.savedWorkspace) : null
+          },
+          null,
+          2
+        );
+      }
+
+      function applyLayout(layout) {
+        grid.setColumnLayout(cloneLayout(layout));
+        renderSnapshot();
+      }
+
+      function saveLayout() {
+        localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(grid.getColumnLayout()));
+        renderSnapshot();
+      }
+
+      function loadLayout() {
+        const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
+        if (!saved) {
+          return false;
+        }
+
+        grid.setColumnLayout(JSON.parse(saved));
+        renderSnapshot();
+        return true;
+      }
+
+      function createWorkspaceSnapshot() {
+        return {
+          layout: grid.getColumnLayout(),
+          state: grid.getState()
+        };
+      }
+
+      function saveWorkspace() {
+        localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(createWorkspaceSnapshot()));
+        renderSnapshot();
+      }
+
+      function loadWorkspace() {
+        const saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        if (!saved) {
+          return false;
+        }
+
+        const workspace = JSON.parse(saved);
+        if (workspace.layout) {
+          grid.setColumnLayout(workspace.layout);
+        }
+        if (workspace.state) {
+          grid.setState(workspace.state);
+        }
+        renderSnapshot();
+        return true;
+      }
+
+      function setScrollTop(scrollTop) {
+        grid.setState({
+          ...grid.getState(),
+          scrollTop
+        });
+        renderSnapshot();
+      }
+
+      document.getElementById('presetCompact').addEventListener('click', () => applyLayout(presetCompact));
+      document.getElementById('presetAnalyst').addEventListener('click', () => applyLayout(presetAnalyst));
+      document.getElementById('presetOps').addEventListener('click', () => applyLayout(presetOps));
+      document.getElementById('saveLayout').addEventListener('click', () => saveLayout());
+      document.getElementById('loadLayout').addEventListener('click', () => loadLayout());
+      document.getElementById('saveWorkspace').addEventListener('click', () => saveWorkspace());
+      document.getElementById('loadWorkspace').addEventListener('click', () => loadWorkspace());
+      document.getElementById('restoreDefault').addEventListener('click', () => applyLayout(defaultLayout));
+
+      localStorage.removeItem(LAYOUT_STORAGE_KEY);
+      localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+      renderSnapshot();
+
+      window.__example72 = {
+        applyCompact() {
+          applyLayout(presetCompact);
+        },
+        applyAnalyst() {
+          applyLayout(presetAnalyst);
+        },
+        applyOps() {
+          applyLayout(presetOps);
+        },
+        restoreDefault() {
+          applyLayout(defaultLayout);
+        },
+        saveLayout() {
+          saveLayout();
+        },
+        loadLayout() {
+          return loadLayout();
+        },
+        saveWorkspace() {
+          saveWorkspace();
+        },
+        loadWorkspace() {
+          return loadWorkspace();
+        },
+        setScrollTop(scrollTop) {
+          setScrollTop(scrollTop);
+        },
+        getSnapshot() {
+          return getSnapshot();
+        }
+      };
+    </script>
+  </body>
+</html>

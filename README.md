@@ -27,7 +27,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Worker e2e smoke + cancel/crash recovery test + worker on/off bench comparison + async payload serialization + custom group/pivot reducer hydration + valueGetter/comparator projection + repeated projection cache + selective projection prefix evaluation
 - Cooperative sorting/filtering executor + Grid API 연동
 - Column feature pack (resize/reorder/pin/hide) + selection indicator columns
-- Header column menu / context menu (sort/pin/hide/auto-size/reset + custom menu hooks)
+- Header column menu + header/body context menu + body built-in copy/filter actions + header filter panel(text/number/date 2-clause AND, set) + nested advanced filter builder + advanced filter preset save/apply/delete + header filter row(text expression + number/date operator parser + boolean select + generic set/enum select + date picker) + configurable set distinct source(sampled/full/getValues) + docked columns/filters/grouping/pivot tool panels + columns panel search/reorder + preset apply + custom panel registry + custom panel mutation actions(filter/layout) + status bar(selection/aggregate/rows/remote summary + custom item registry + large selection chunked async aggregate) + fill handle(range fill/copy + numeric series fill + body-edge auto-scroll + 2D affine matrix trend) + shared undo/redo(editor/clipboard/fill handle) + layout persistence(order/visibility/pin/width snapshot + composed workspace recipe)
 - Multi-level column group header
 - Grouping pipeline (client grouping + key 기반 expand/collapse + sum/avg/min/max/count/custom aggregation)
 - Tree data pipeline (client tree model + key expansion state + lazy children load)
@@ -50,7 +50,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 아직 엔터프라이즈 상용 제품으로 완료되지 않은 범위:
 
 - mature server-side row model (store hierarchy, save orchestration, conflict UI는 아직 부족)
-- enterprise UI surface (filter UI, side bar/tool panel, status bar 등)
+- enterprise UI surface(chart/formula/master-detail, layout persistence 확장, filter/profile preset transport 등)
 - React/Vue product package 및 plugin SDK
 - release/commercial readiness (`Phase 15`)
 
@@ -148,7 +148,7 @@ const grid = new HGrid.Grid(container, {
       .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
   },
   onAuditLog(payload) {
-    // editCommit 표준 payload: rowKey/source/commitId/timestamp 포함
+    // editCommit 표준 payload: rowKey/source/commitId/timestamp + cellCount/changes 포함
     console.log(payload.eventName, payload.rowKey, payload.source, payload.commitId);
   }
 });

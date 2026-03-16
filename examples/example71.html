@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 71 - Drag Fill and Range Handle</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f4f7fb;
+        color: #1f2937;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0;
+        color: #475569;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(720px, 1fr) 320px;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .surface {
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        border-radius: 999px;
+        background: white;
+        color: #0f172a;
+        font: inherit;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+
+      button[data-mode-active="true"] {
+        border-color: rgba(37, 99, 235, 0.28);
+        background: rgba(59, 130, 246, 0.12);
+        color: #1d4ed8;
+      }
+
+      #grid {
+        width: 100%;
+        min-width: 720px;
+      }
+
+      .panel {
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .panel h2 {
+        margin: 0;
+        font-size: 15px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #64748b;
+      }
+
+      .metric {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: #f8fafc;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+      }
+
+      .metric strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: #475569;
+      }
+
+      .metric code {
+        display: block;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        color: #0f172a;
+      }
+
+      .note {
+        font-size: 13px;
+        line-height: 1.5;
+        color: #475569;
+      }
+
+      @media (max-width: 1180px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        #grid {
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 71 - Drag Fill and Range Handle</h1>
+    <p>single-cell copy와 numeric series fill을 같은 grid에서 확인하는 E3.5 smoke example</p>
+
+    <div class="layout">
+      <section class="surface workspace">
+        <div class="toolbar">
+          <button id="selectNameCopy">Select Name Copy Seed</button>
+          <button id="dragNameCopy">Drag Copy to Row 4</button>
+          <button id="selectScoreSeries">Select Score Series Seed</button>
+          <button id="dragScoreSeries">Drag Series to Row 6</button>
+          <button id="setFillMode">Fill Mode</button>
+          <button id="setCopyMode">Copy Mode</button>
+        </div>
+        <div id="grid"></div>
+      </section>
+
+      <aside class="surface panel">
+        <h2>Snapshot</h2>
+        <div class="metric">
+          <strong>Mode</strong>
+          <code id="modeText"></code>
+        </div>
+        <div class="metric">
+          <strong>Selection</strong>
+          <code id="selectionText"></code>
+        </div>
+        <div class="metric">
+          <strong>Rows</strong>
+          <code id="rowsText"></code>
+        </div>
+        <div class="metric">
+          <strong>Last Edit</strong>
+          <code id="lastEditText"></code>
+        </div>
+        <div class="note">
+          정책:
+          <br />
+          1x1 source는 drag-to-copy로 반복되고,
+          <br />
+          1D numeric source는 <code>fill</code> mode에서만 arithmetic series로 확장됩니다.
+        </div>
+      </aside>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 88, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'score', header: 'Score', width: 160, type: 'number', editable: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text', editable: true }
+      ];
+
+      const rowData = [
+        { id: 1, name: 'North', score: 10, status: 'draft' },
+        { id: 2, name: '', score: 20, status: 'draft' },
+        { id: 3, name: '', score: 0, status: 'review' },
+        { id: 4, name: '', score: 0, status: 'review' },
+        { id: 5, name: '', score: 0, status: 'approved' },
+        { id: 6, name: '', score: 0, status: 'approved' }
+      ];
+
+      let currentMode = 'fill';
+      let lastEdit = null;
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 344,
+        rowHeight: 32,
+        overscan: 4,
+        rangeHandle: {
+          enabled: true,
+          mode: currentMode
+        },
+        statusBar: {
+          enabled: true,
+          items: ['selection', 'aggregates', 'rows']
+        }
+      });
+
+      grid.on('editCommit', (event) => {
+        lastEdit = event;
+        renderSnapshot();
+      });
+
+      function setMode(mode) {
+        currentMode = mode === 'copy' ? 'copy' : 'fill';
+        grid.setOptions({
+          rangeHandle: {
+            enabled: true,
+            mode: currentMode
+          }
+        });
+        renderSnapshot();
+      }
+
+      function setNameCopySeed() {
+        grid.setSelection({
+          activeCell: { rowIndex: 0, colIndex: 1 },
+          cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+          rowRanges: []
+        });
+        renderSnapshot();
+      }
+
+      function setScoreSeriesSeed() {
+        grid.setSelection({
+          activeCell: { rowIndex: 1, colIndex: 2 },
+          cellRanges: [{ r1: 0, c1: 2, r2: 1, c2: 2 }],
+          rowRanges: []
+        });
+        renderSnapshot();
+      }
+
+      function createPointerLikeEvent(type, pointerId) {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientX: 12,
+          clientY: 12
+        });
+        Object.defineProperty(event, 'pointerId', {
+          configurable: true,
+          value: pointerId
+        });
+        return event;
+      }
+
+      function dragFillTo(rowIndex, colIndex) {
+        const renderer = grid.renderer;
+        const handle = document.querySelector('[data-range-handle="true"]');
+        if (!renderer || !handle) {
+          return false;
+        }
+
+        const dataIndex = grid.getDataIndex(rowIndex);
+        const originalHitTest = renderer.hitTestCellAtPoint;
+        renderer.hitTestCellAtPoint = function() {
+          return {
+            zone: 'center',
+            rowIndex,
+            dataIndex,
+            columnIndex: colIndex,
+            column: columns[colIndex]
+          };
+        };
+
+        const pointerId = 971;
+        handle.dispatchEvent(createPointerLikeEvent('pointerdown', pointerId));
+        window.dispatchEvent(createPointerLikeEvent('pointermove', pointerId));
+        window.dispatchEvent(createPointerLikeEvent('pointerup', pointerId));
+        renderer.hitTestCellAtPoint = originalHitTest;
+        renderSnapshot();
+        return true;
+      }
+
+      function getRowsSnapshot() {
+        const dataProvider = grid.getDataProvider();
+        return Array.from({ length: grid.getViewRowCount() }, (_, index) => {
+          const row = dataProvider.getRow(index) || {};
+          return {
+            id: row.id,
+            name: row.name,
+            score: row.score,
+            status: row.status
+          };
+        });
+      }
+
+      function getSelectionSnapshot() {
+        const selection = grid.getSelection();
+        return selection.cellRanges.length > 0 ? selection.cellRanges[0] : null;
+      }
+
+      function renderSnapshot() {
+        const selection = getSelectionSnapshot();
+        document.getElementById('modeText').textContent = currentMode;
+        document.getElementById('selectionText').textContent = selection ? JSON.stringify(selection) : 'none';
+        document.getElementById('rowsText').textContent = JSON.stringify(getRowsSnapshot(), null, 2);
+        document.getElementById('lastEditText').textContent = lastEdit ? JSON.stringify(lastEdit, null, 2) : 'none';
+        document.getElementById('setFillMode').dataset.modeActive = String(currentMode === 'fill');
+        document.getElementById('setCopyMode').dataset.modeActive = String(currentMode === 'copy');
+      }
+
+      document.getElementById('selectNameCopy').addEventListener('click', () => {
+        setNameCopySeed();
+      });
+      document.getElementById('dragNameCopy').addEventListener('click', () => {
+        dragFillTo(3, 1);
+      });
+      document.getElementById('selectScoreSeries').addEventListener('click', () => {
+        setScoreSeriesSeed();
+      });
+      document.getElementById('dragScoreSeries').addEventListener('click', () => {
+        dragFillTo(5, 2);
+      });
+      document.getElementById('setFillMode').addEventListener('click', () => {
+        setMode('fill');
+      });
+      document.getElementById('setCopyMode').addEventListener('click', () => {
+        setMode('copy');
+      });
+
+      setScoreSeriesSeed();
+      renderSnapshot();
+
+      window.__example71 = {
+        setFillMode() {
+          setMode('fill');
+        },
+        setCopyMode() {
+          setMode('copy');
+        },
+        setNameCopySeed() {
+          setNameCopySeed();
+        },
+        setScoreSeriesSeed() {
+          setScoreSeriesSeed();
+        },
+        dragFillTo(rowIndex, colIndex) {
+          return dragFillTo(rowIndex, colIndex);
+        },
+        getSnapshot() {
+          return {
+            mode: currentMode,
+            selection: getSelectionSnapshot(),
+            rows: getRowsSnapshot(),
+            lastEdit,
+            handleVisible: document.querySelector('[data-range-handle="true"]')?.classList.contains('hgrid__fill-handle--visible') === true
+          };
+        }
+      };
+    </script>
+  </body>
+</html>

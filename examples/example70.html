@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 70 - Status Bar Summary UX</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background: #f3f6fb;
+        color: #1f2937;
+      }
+
+      .page {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px 28px 40px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+        line-height: 1.15;
+      }
+
+      p {
+        margin: 0;
+        color: #475569;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 18px;
+        margin-top: 22px;
+      }
+
+      .surface {
+        border: 1px solid #d5dbe3;
+        border-radius: 18px;
+        background: #ffffff;
+        box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #e2e8f0;
+        background: linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%);
+      }
+
+      .toolbar button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: #ffffff;
+        color: inherit;
+        font: inherit;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .toolbar button:hover {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 16px;
+      }
+
+      .card {
+        border: 1px solid #d5dbe3;
+        border-radius: 16px;
+        background: #ffffff;
+        padding: 14px;
+      }
+
+      .card h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .meta-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .meta-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 13px;
+      }
+
+      .meta-row span:first-child {
+        color: #64748b;
+      }
+
+      pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #0f172a;
+      }
+
+      @media (max-width: 1020px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Status Bar / Summary UX</h1>
+      <p>selection summary, quick aggregate, visible/filter row count, remote loading and pending sync 상태를 한 화면에서 확인합니다.</p>
+
+      <div class="layout">
+        <section class="surface">
+          <div class="toolbar">
+            <button id="selectMetrics" type="button">Select Metrics</button>
+            <button id="applyApacFilter" type="button">Filter APAC</button>
+            <button id="clearFilter" type="button">Clear Filter</button>
+            <button id="stageEdit" type="button">Stage Edit</button>
+            <button id="refreshBlock0" type="button">Refresh Block 0</button>
+            <button id="invalidateBlock0" type="button">Invalidate Block 0</button>
+            <button id="acceptPending" type="button">Accept Pending</button>
+          </div>
+          <div id="grid"></div>
+        </section>
+
+        <aside class="panel">
+          <div class="card">
+            <h2>Status Snapshot</h2>
+            <div class="meta-list">
+              <div class="meta-row"><span>Selection</span><strong id="selectionText">-</strong></div>
+              <div class="meta-row"><span>Aggregates</span><strong id="aggregatesText">-</strong></div>
+              <div class="meta-row"><span>Rows</span><strong id="rowsText">-</strong></div>
+              <div class="meta-row"><span>Remote</span><strong id="remoteText">-</strong></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Debug State</h2>
+            <pre id="debugState"></pre>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 84, type: 'number' },
+        { id: 'region', header: 'Region', width: 120, type: 'text' },
+        { id: 'participant', header: 'Participant', width: 180, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 120, type: 'number' },
+        { id: 'margin', header: 'Margin', width: 120, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 160, type: 'date' }
+      ];
+
+      const regions = ['APAC', 'EMEA', 'AMER'];
+      const rowData = Array.from({ length: 120 }, (_, index) => ({
+        id: index + 1,
+        region: regions[index % regions.length],
+        participant: `Participant ${index + 1}`,
+        sales: 100 + index * 7,
+        margin: 12 + (index % 6) * 4,
+        updatedAt: new Date(Date.UTC(2026, 2, (index % 27) + 1)).toISOString()
+      }));
+
+      function applyQueryModel(rows, queryModel) {
+        let result = rows.slice();
+        const regionFilter = queryModel.filterModel?.region;
+        if (regionFilter && regionFilter.kind === 'set' && Array.isArray(regionFilter.values) && regionFilter.values.length > 0) {
+          const allowed = new Set(regionFilter.values);
+          result = result.filter((row) => allowed.has(row.region));
+        }
+
+        const sortModel = Array.isArray(queryModel.sortModel) ? queryModel.sortModel : [];
+        if (sortModel.length > 0) {
+          const [{ columnId, direction }] = sortModel;
+          const multiplier = direction === 'desc' ? -1 : 1;
+          result.sort((left, right) => {
+            const leftValue = left[columnId];
+            const rightValue = right[columnId];
+            if (leftValue === rightValue) {
+              return 0;
+            }
+            return (leftValue > rightValue ? 1 : -1) * multiplier;
+          });
+        }
+
+        return result;
+      }
+
+      const remoteProvider = new HGrid.RemoteDataProvider({
+        rowCount: rowData.length,
+        cache: {
+          blockSize: 24,
+          maxBlocks: 6
+        },
+        dataSource: {
+          async fetchBlock(request) {
+            await new Promise((resolve) => setTimeout(resolve, 260));
+            const filteredRows = applyQueryModel(rowData, request.queryModel);
+            const rows = filteredRows.slice(request.startIndex, request.endIndex);
+            return {
+              rows,
+              rowKeys: rows.map((row) => row.id),
+              totalRowCount: filteredRows.length
+            };
+          }
+        }
+      });
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: remoteProvider,
+        statusBar: {
+          enabled: true
+        },
+        height: 420,
+        rowHeight: 28
+      });
+
+      const selectionText = document.getElementById('selectionText');
+      const aggregatesText = document.getElementById('aggregatesText');
+      const rowsText = document.getElementById('rowsText');
+      const remoteText = document.getElementById('remoteText');
+      const debugState = document.getElementById('debugState');
+
+      function getStatusBarText(itemId) {
+        const element = document.querySelector(`[data-status-bar-item="${itemId}"]`);
+        return element ? element.textContent.trim() : '';
+      }
+
+      function getVisibleIds() {
+        const count = Math.min(grid.getViewRowCount(), 8);
+        const ids = [];
+        for (let rowIndex = 0; rowIndex < count; rowIndex += 1) {
+          const dataIndex = grid.getDataIndex(rowIndex);
+          const row = grid.getDataProvider().getRow ? grid.getDataProvider().getRow(dataIndex) : null;
+          ids.push(row ? row.id : null);
+        }
+        return ids;
+      }
+
+      function getSnapshot() {
+        return {
+          selectionText: getStatusBarText('selection'),
+          aggregatesText: getStatusBarText('aggregates'),
+          rowsText: getStatusBarText('rows'),
+          remoteText: getStatusBarText('remote'),
+          filterModel: grid.getFilterModel(),
+          viewRowCount: grid.getViewRowCount(),
+          visibleRowRange: grid.getVisibleRowRange(),
+          visibleIds: getVisibleIds(),
+          debugState: remoteProvider.getDebugState()
+        };
+      }
+
+      function renderSnapshot() {
+        const snapshot = getSnapshot();
+        selectionText.textContent = snapshot.selectionText || '-';
+        aggregatesText.textContent = snapshot.aggregatesText || '-';
+        rowsText.textContent = snapshot.rowsText || '-';
+        remoteText.textContent = snapshot.remoteText || '-';
+        debugState.textContent = JSON.stringify(
+          {
+            filterModel: snapshot.filterModel,
+            viewRowCount: snapshot.viewRowCount,
+            visibleRowRange: snapshot.visibleRowRange,
+            visibleIds: snapshot.visibleIds,
+            cachedBlocks: snapshot.debugState.cachedBlockIndexes,
+            loadingBlocks: snapshot.debugState.loadingBlockIndexes,
+            refreshingBlocks: snapshot.debugState.refreshingBlockIndexes,
+            errorBlocks: snapshot.debugState.errorBlockIndexes,
+            pendingChangeSummary: snapshot.debugState.pendingChangeSummary
+          },
+          null,
+          2
+        );
+      }
+
+      function scheduleSnapshot() {
+        requestAnimationFrame(() => requestAnimationFrame(renderSnapshot));
+      }
+
+      document.getElementById('selectMetrics').addEventListener('click', () => {
+        grid.setSelection({
+          activeCell: { rowIndex: 0, colIndex: 3 },
+          cellRanges: [{ r1: 0, c1: 3, r2: 1, c2: 4 }]
+        });
+        scheduleSnapshot();
+      });
+
+      document.getElementById('applyApacFilter').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          region: {
+            kind: 'set',
+            values: ['APAC'],
+            includeNull: false
+          }
+        });
+        scheduleSnapshot();
+      });
+
+      document.getElementById('clearFilter').addEventListener('click', async () => {
+        await grid.setFilterModel({});
+        scheduleSnapshot();
+      });
+
+      document.getElementById('stageEdit').addEventListener('click', () => {
+        remoteProvider.setValue(0, 'sales', 555);
+        scheduleSnapshot();
+      });
+
+      document.getElementById('refreshBlock0').addEventListener('click', () => {
+        remoteProvider.refreshBlocks({
+          blockIndexes: [0],
+          background: true
+        });
+        scheduleSnapshot();
+      });
+
+      document.getElementById('invalidateBlock0').addEventListener('click', () => {
+        remoteProvider.invalidateBlocks({
+          blockIndexes: [0]
+        });
+        scheduleSnapshot();
+      });
+
+      document.getElementById('acceptPending').addEventListener('click', () => {
+        remoteProvider.acceptPendingChanges();
+        scheduleSnapshot();
+      });
+
+      grid.on('selectionChange', scheduleSnapshot);
+      grid.on('editCommit', scheduleSnapshot);
+
+      window.__example70 = {
+        getSnapshot,
+        selectMetrics() {
+          document.getElementById('selectMetrics').click();
+        },
+        applyApacFilter() {
+          document.getElementById('applyApacFilter').click();
+        },
+        clearFilter() {
+          document.getElementById('clearFilter').click();
+        },
+        stageEdit() {
+          document.getElementById('stageEdit').click();
+        },
+        refreshBlock0() {
+          document.getElementById('refreshBlock0').click();
+        },
+        invalidateBlock0() {
+          document.getElementById('invalidateBlock0').click();
+        },
+        acceptPending() {
+          document.getElementById('acceptPending').click();
+        }
+      };
+
+      scheduleSnapshot();
+    </script>
+  </body>
+</html>

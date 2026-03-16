@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 83 - Undo Redo Editing</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f4f7fb;
+        color: #172033;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0;
+        color: #53627c;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 320px;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .surface {
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        border-radius: 999px;
+        background: white;
+        color: #0f172a;
+        font: inherit;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      #grid {
+        width: 100%;
+        min-width: 760px;
+      }
+
+      .panel {
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .metric {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: #f8fafc;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+      }
+
+      .metric strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: #475569;
+      }
+
+      .metric code {
+        display: block;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        color: #0f172a;
+      }
+
+      .note {
+        font-size: 13px;
+        line-height: 1.6;
+        color: #475569;
+      }
+
+      @media (max-width: 1160px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        #grid {
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 83 - Undo Redo Editing</h1>
+    <p>editor, clipboard paste, fill handle 변경을 하나의 undo/redo 스택으로 다루는 E3 workflow example</p>
+
+    <div class="layout">
+      <section class="surface workspace">
+        <div class="toolbar">
+          <button id="resetRows">Reset Data</button>
+          <button id="editFirstNote">Edit First Note</button>
+          <button id="pasteStatusBlock">Paste Status Block</button>
+          <button id="fillQtySeries">Fill Qty Series</button>
+          <button id="undoAction">Undo</button>
+          <button id="redoAction">Redo</button>
+        </div>
+        <div id="grid"></div>
+      </section>
+
+      <aside class="surface panel">
+        <div class="metric">
+          <strong>History</strong>
+          <code id="historyText">-</code>
+        </div>
+        <div class="metric">
+          <strong>Last Edit</strong>
+          <code id="lastEditText">-</code>
+        </div>
+        <div class="metric">
+          <strong>Rows</strong>
+          <code id="rowsText">-</code>
+        </div>
+        <div class="note">
+          단축키:
+          <br />
+          Windows/Linux는 Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y
+          <br />
+          macOS는 Cmd+Z, Cmd+Shift+Z
+        </div>
+      </aside>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const POINTER_ID = 1083;
+      let grid = null;
+      let lastEdit = null;
+
+      function buildRows() {
+        return [
+          { id: 1, qty: 10, status: 'draft', note: 'queued' },
+          { id: 2, qty: 20, status: 'review', note: 'awaiting' },
+          { id: 3, qty: 0, status: 'draft', note: '' },
+          { id: 4, qty: 0, status: 'draft', note: '' }
+        ];
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 84, type: 'number' },
+        { id: 'qty', header: 'Qty', width: 120, type: 'number', editable: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text', editable: true },
+        { id: 'note', header: 'Note', width: 220, type: 'text', editable: true }
+      ];
+
+      function waitFrames(count) {
+        return new Promise((resolve) => {
+          let remaining = Math.max(1, count);
+          const tick = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+      }
+
+      function createClipboardEvent(type, initialData) {
+        const store = new Map();
+        Object.keys(initialData || {}).forEach((mimeType) => {
+          store.set(mimeType, initialData[mimeType]);
+        });
+
+        const event = new Event(type, {
+          bubbles: true,
+          cancelable: true
+        });
+        Object.defineProperty(event, 'clipboardData', {
+          configurable: true,
+          value: {
+            getData(mimeType) {
+              return store.get(mimeType) || '';
+            },
+            setData(mimeType, value) {
+              store.set(mimeType, value);
+            },
+            clearData(mimeType) {
+              if (typeof mimeType === 'string') {
+                store.delete(mimeType);
+                return;
+              }
+              store.clear();
+            }
+          }
+        });
+        return event;
+      }
+
+      function createPointerLikeEvent(type, pointerId, clientX, clientY) {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientX,
+          clientY
+        });
+        Object.defineProperty(event, 'pointerId', {
+          configurable: true,
+          value: pointerId
+        });
+        return event;
+      }
+
+      function getRootElement() {
+        return document.querySelector('.hgrid');
+      }
+
+      function getRowsSnapshot() {
+        const provider = grid.getDataProvider();
+        const rows = [];
+        for (let dataIndex = 0; dataIndex < 4; dataIndex += 1) {
+          const row = provider.getRow ? provider.getRow(dataIndex) : null;
+          rows.push({
+            id: row ? row.id : null,
+            qty: row ? row.qty : null,
+            status: row ? row.status : null,
+            note: row ? row.note : null
+          });
+        }
+        return rows;
+      }
+
+      function renderSnapshot() {
+        const rows = getRowsSnapshot();
+        document.getElementById('historyText').textContent = `undo=${grid.canUndo()} redo=${grid.canRedo()}`;
+        document.getElementById('lastEditText').textContent = lastEdit
+          ? `${lastEdit.source} -> ${lastEdit.columnId} = ${String(lastEdit.value)}`
+          : '-';
+        document.getElementById('rowsText').textContent = rows
+          .map((row) => `${row.id}: qty=${row.qty}, status=${row.status}, note=${row.note}`)
+          .join('\n');
+        document.getElementById('undoAction').disabled = !grid.canUndo();
+        document.getElementById('redoAction').disabled = !grid.canRedo();
+      }
+
+      function mountGrid() {
+        if (grid) {
+          grid.destroy();
+        }
+
+        lastEdit = null;
+        grid = new HGrid.Grid(document.getElementById('grid'), {
+          columns,
+          rowData: buildRows(),
+          height: 248,
+          rowHeight: 32,
+          overscan: 4,
+          undoRedo: {
+            enabled: true
+          },
+          rangeHandle: {
+            enabled: true,
+            mode: 'fill'
+          },
+          statusBar: {
+            enabled: true,
+            items: ['selection', 'aggregates', 'rows']
+          }
+        });
+
+        grid.on('editCommit', (event) => {
+          lastEdit = event;
+          renderSnapshot();
+        });
+
+        renderSnapshot();
+      }
+
+      async function editFirstNote() {
+        grid.setSelection({
+          activeCell: { rowIndex: 0, colIndex: 3 },
+          cellRanges: [{ r1: 0, c1: 3, r2: 0, c2: 3 }],
+          rowRanges: []
+        });
+        await waitFrames(2);
+
+        const root = getRootElement();
+        root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        await waitFrames(2);
+
+        const renderer = grid.renderer;
+        renderer.editorInputElement.value = 'approved';
+        renderer.editorInputElement.dispatchEvent(new Event('input', { bubbles: true }));
+        renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        await waitFrames(4);
+        renderSnapshot();
+      }
+
+      async function pasteStatusBlock() {
+        grid.setSelection({
+          activeCell: { rowIndex: 0, colIndex: 2 },
+          cellRanges: [{ r1: 0, c1: 2, r2: 1, c2: 3 }],
+          rowRanges: []
+        });
+        await waitFrames(2);
+
+        const root = getRootElement();
+        const clipboardEvent = createClipboardEvent('paste', {
+          'text/plain': 'active\tcopied\nhold\tmanual'
+        });
+        root.dispatchEvent(clipboardEvent);
+        await waitFrames(4);
+        renderSnapshot();
+      }
+
+      async function dragHandleToCell(columnId, rowIndex) {
+        const handle = document.querySelector('[data-range-handle="true"]');
+        const targetCell = document.querySelector(`.hgrid__row[data-row-index="${rowIndex}"] .hgrid__cell[data-column-id="${columnId}"]`);
+        if (!handle || !targetCell) {
+          return false;
+        }
+
+        const handleRect = handle.getBoundingClientRect();
+        const targetRect = targetCell.getBoundingClientRect();
+        const startX = handleRect.left + handleRect.width / 2;
+        const startY = handleRect.top + handleRect.height / 2;
+        const targetX = targetRect.left + targetRect.width / 2;
+        const targetY = targetRect.top + targetRect.height / 2;
+
+        handle.dispatchEvent(createPointerLikeEvent('pointerdown', POINTER_ID, startX, startY));
+        window.dispatchEvent(createPointerLikeEvent('pointermove', POINTER_ID, targetX, targetY));
+        await waitFrames(2);
+        window.dispatchEvent(createPointerLikeEvent('pointerup', POINTER_ID, targetX, targetY));
+        await waitFrames(4);
+        renderSnapshot();
+        return true;
+      }
+
+      async function fillQtySeries() {
+        grid.setSelection({
+          activeCell: { rowIndex: 1, colIndex: 1 },
+          cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 1 }],
+          rowRanges: []
+        });
+        await waitFrames(3);
+        await dragHandleToCell('qty', 3);
+      }
+
+      async function undoAction() {
+        grid.undo();
+        await waitFrames(3);
+        renderSnapshot();
+      }
+
+      async function redoAction() {
+        grid.redo();
+        await waitFrames(3);
+        renderSnapshot();
+      }
+
+      document.getElementById('resetRows').addEventListener('click', () => {
+        mountGrid();
+      });
+      document.getElementById('editFirstNote').addEventListener('click', () => {
+        void editFirstNote();
+      });
+      document.getElementById('pasteStatusBlock').addEventListener('click', () => {
+        void pasteStatusBlock();
+      });
+      document.getElementById('fillQtySeries').addEventListener('click', () => {
+        void fillQtySeries();
+      });
+      document.getElementById('undoAction').addEventListener('click', () => {
+        void undoAction();
+      });
+      document.getElementById('redoAction').addEventListener('click', () => {
+        void redoAction();
+      });
+
+      mountGrid();
+
+      window.__example83 = {
+        getSnapshot() {
+          return {
+            canUndo: grid.canUndo(),
+            canRedo: grid.canRedo(),
+            rows: getRowsSnapshot(),
+            lastEdit
+          };
+        },
+        editFirstNote,
+        pasteStatusBlock,
+        fillQtySeries,
+        undoAction,
+        redoAction,
+        mountGrid
+      };
+    </script>
+  </body>
+</html>

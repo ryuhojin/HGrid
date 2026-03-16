@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 78 - Advanced Filter Presets</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background: linear-gradient(180deg, #f6f8fc 0%, #e8eef7 100%);
+        color: #102638;
+      }
+
+      .page {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 28px 24px 40px;
+      }
+
+      .shell,
+      .snapshot-card {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      }
+
+      .shell {
+        padding: 20px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: #1d4ed8;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #dbe6f4;
+        color: #143353;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 16px;
+      }
+
+      .snapshot-card {
+        padding: 16px;
+      }
+
+      pre {
+        margin: 0;
+        padding: 14px;
+        border-radius: 14px;
+        background: #0f1f2f;
+        color: #d7ecf8;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow: auto;
+      }
+
+      @media (max-width: 980px) {
+        .content {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="shell">
+        <div class="toolbar">
+          <button id="openBuilder">Open Builder</button>
+          <button id="clearAll" class="secondary">Clear All Filters</button>
+        </div>
+
+        <div class="content">
+          <div id="grid"></div>
+          <aside class="snapshot-card">
+            <pre id="snapshot"></pre>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const rows = [
+        { id: 1, region: 'APAC', active: true, score: 82, updatedAt: '2026-03-10' },
+        { id: 2, region: 'EMEA', active: false, score: 64, updatedAt: '2026-03-11' },
+        { id: 3, region: 'APAC', active: false, score: 58, updatedAt: '2026-03-12' },
+        { id: 4, region: 'AMER', active: true, score: 91, updatedAt: '2026-03-13' },
+        { id: 5, region: 'EMEA', active: true, score: 73, updatedAt: '2026-03-14' },
+        { id: 6, region: 'LATAM', active: false, score: 47, updatedAt: '2026-03-15' }
+      ];
+
+      const snapshotElement = document.getElementById('snapshot');
+
+      function collectVisibleIds() {
+        const visibleIds = [];
+        const dataProvider = grid.getDataProvider();
+
+        for (let rowIndex = 0; rowIndex < grid.getViewRowCount(); rowIndex += 1) {
+          const row = dataProvider.getRow?.(grid.getDataIndex(rowIndex));
+          const idValue = Number(row && row.id);
+          if (Number.isFinite(idValue)) {
+            visibleIds.push(idValue);
+          }
+        }
+
+        return visibleIds;
+      }
+
+      function readFilterRowValues() {
+        const values = {};
+
+        document.querySelectorAll('.hgrid__filter-row-input[data-filter-row-column-id]').forEach((input) => {
+          if (!(input instanceof HTMLInputElement)) {
+            return;
+          }
+          const columnId = input.dataset.filterRowColumnId;
+          if (columnId) {
+            values[columnId] = input.value;
+          }
+        });
+
+        document.querySelectorAll('.hgrid__filter-row-select[data-filter-row-column-id]').forEach((select) => {
+          if (!(select instanceof HTMLSelectElement)) {
+            return;
+          }
+          const columnId = select.dataset.filterRowColumnId;
+          if (columnId) {
+            values[columnId] = select.value;
+          }
+        });
+
+        return values;
+      }
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: [
+          { id: 'region', header: 'Region', width: 150, type: 'text' },
+          { id: 'active', header: 'Active', width: 120, type: 'boolean' },
+          { id: 'score', header: 'Score', width: 120, type: 'number' },
+          { id: 'updatedAt', header: 'Updated At', width: 180, type: 'date' },
+          { id: 'id', header: 'ID', width: 92, type: 'number', pinned: 'left' }
+        ],
+        rowData: rows.map((row) => ({ ...row })),
+        height: 360,
+        rowHeight: 32,
+        overscan: 4,
+        filterRow: {
+          enabled: true
+        },
+        sideBar: {
+          enabled: true,
+          panels: ['filters'],
+          defaultPanel: 'filters',
+          initialOpen: true,
+          width: 360
+        }
+      });
+
+      function getSnapshot() {
+        return {
+          filterModel: grid.getFilterModel(),
+          advancedFilterModel: grid.getAdvancedFilterModel(),
+          advancedFilterPresets: grid.getAdvancedFilterPresets(),
+          filterRowValues: readFilterRowValues(),
+          visibleIds: collectVisibleIds()
+        };
+      }
+
+      function renderSnapshot() {
+        snapshotElement.textContent = JSON.stringify(getSnapshot(), null, 2);
+      }
+
+      setInterval(renderSnapshot, 250);
+      renderSnapshot();
+
+      document.getElementById('openBuilder').addEventListener('click', () => {
+        const button = document.querySelector('[data-tool-panel-filter-surface="builder"]');
+        if (button instanceof HTMLButtonElement) {
+          button.click();
+        }
+      });
+
+      document.getElementById('clearAll').addEventListener('click', async () => {
+        await grid.clearFilterModel();
+        await grid.clearAdvancedFilterModel();
+        renderSnapshot();
+      });
+
+      window.__example78 = {
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

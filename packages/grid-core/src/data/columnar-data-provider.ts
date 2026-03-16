@@ -114,4 +114,28 @@ export class ColumnarDataProvider implements DataProvider {
 
     return row;
   }
+
+  public peekRow(dataIndex: number): GridRowData {
+    return this.getRow(dataIndex);
+  }
+
+  public getDataIndexByRowKey(rowKey: RowKey, dataIndexHint?: number): number {
+    if (
+      Number.isInteger(dataIndexHint) &&
+      dataIndexHint !== undefined &&
+      dataIndexHint >= 0 &&
+      dataIndexHint < this.rowCount &&
+      this.getRowKey(dataIndexHint) === rowKey
+    ) {
+      return dataIndexHint;
+    }
+
+    for (let dataIndex = 0; dataIndex < this.rowCount; dataIndex += 1) {
+      if (this.getRowKey(dataIndex) === rowKey) {
+        return dataIndex;
+      }
+    }
+
+    return -1;
+  }
 }

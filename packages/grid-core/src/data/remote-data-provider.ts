@@ -1,5 +1,14 @@
-import type { DataProvider, DataTransaction, GridRowData, RowKey, RowsChangedListener } from './data-provider';
+import type {
+  AppliedHistoryCellUpdate,
+  DataProvider,
+  DataTransaction,
+  GridRowData,
+  HistoryCellUpdate,
+  RowKey,
+  RowsChangedListener
+} from './data-provider';
 import type { ColumnDef, GroupModelItem, PivotModelItem, PivotValueDef } from '../core/grid-options';
+import { cloneAdvancedFilterModel, type AdvancedFilterModel } from './filter-model';
 import {
   cloneRemoteServerSidePivotResult,
   cloneRemoteServerSideQueryModel,
@@ -42,6 +51,7 @@ export type FilterModel = Record<string, unknown>;
 export interface RemoteQueryModel {
   sortModel: SortModelItem[];
   filterModel: FilterModel;
+  advancedFilterModel?: AdvancedFilterModel;
   groupModel?: GroupModelItem[];
   pivotModel?: PivotModelItem[];
   pivotValues?: PivotValueDef[];
@@ -199,6 +209,8 @@ interface InternalRemotePendingCellChange extends RemotePendingCellChange {
 
 interface InternalRemotePendingRowChange {
   rowKey: RowKey;
+  dataIndexHint: number | null;
+  allowUnloadedValueRead: boolean;
   changes: Map<string, InternalRemotePendingCellChange>;
 }
 
@@ -316,6 +328,7 @@ function cloneQueryModel(queryModel: RemoteQueryModel): RemoteQueryModel {
   return {
     sortModel: cloneSortModel(queryModel.sortModel),
     filterModel: cloneFilterModel(queryModel.filterModel),
+    advancedFilterModel: cloneAdvancedFilterModel(queryModel.advancedFilterModel) ?? undefined,
     groupModel: cloneGroupModel(queryModel.groupModel),
     pivotModel: clonePivotModel(queryModel.pivotModel),
     pivotValues: clonePivotValues(queryModel.pivotValues),
@@ -340,6 +353,7 @@ function createInitialQueryModel(input?: Partial<RemoteQueryModel>): RemoteQuery
   return {
     sortModel: cloneSortModel(input?.sortModel),
     filterModel: cloneFilterModel(input?.filterModel),
+    advancedFilterModel: cloneAdvancedFilterModel(input?.advancedFilterModel) ?? undefined,
     groupModel: cloneGroupModel(input?.groupModel),
     pivotModel: clonePivotModel(input?.pivotModel),
     pivotValues: clonePivotValues(input?.pivotValues),
@@ -395,6 +409,10 @@ function isSameQueryModel(left: RemoteQueryModel, right: RemoteQueryModel): bool
     return false;
   }
 
+  if (JSON.stringify(left.advancedFilterModel) !== JSON.stringify(right.advancedFilterModel)) {
+    return false;
+  }
+
   if (JSON.stringify(left.groupModel) !== JSON.stringify(right.groupModel)) {
     return false;
   }
@@ -429,6 +447,10 @@ function createQueryChangeSummary(left: RemoteQueryModel, right: RemoteQueryMode
   }
 
   if (!isSameFilterModel(left.filterModel, right.filterModel)) {
+    changedKeys.push('filter');
+  }
+
+  if (JSON.stringify(left.advancedFilterModel) !== JSON.stringify(right.advancedFilterModel) && changedKeys.indexOf('filter') === -1) {
     changedKeys.push('filter');
   }
 
@@ -570,7 +592,25 @@ export class RemoteDataProvider implements DataProvider {
     return block.rows[dataIndex - block.startIndex];
   }
 
+  public peekRow(dataIndex: number): GridRowData | undefined {
+    if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= this.rowCount) {
+      return undefined;
+    }
+
+    const block = this.getReadableBlockForDataIndex(dataIndex);
+    if (!block) {
+      return undefined;
+    }
+
+    return block.rows[dataIndex - block.startIndex];
+  }
+
   public getValue(dataIndex: number, columnId: string): unknown {
+    const pendingValue = this.getPendingValueForDataIndex(dataIndex, columnId);
+    if (pendingValue.hasValue) {
+      return pendingValue.value;
+    }
+
     const row = this.getRow(dataIndex);
     return row ? row[columnId] : undefined;
   }
@@ -589,30 +629,9 @@ export class RemoteDataProvider implements DataProvider {
   }
 
   public setValue(dataIndex: number, columnId: string, value: unknown): void {
-    if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= this.rowCount) {
-      return;
+    if (this.applyUpdateCellTransaction(dataIndex, columnId, value)) {
+      this.emitRowsChanged();
     }
-
-    const blockIndex = this.getBlockIndexByDataIndex(dataIndex);
-    const block = this.blockCache.get(blockIndex);
-    if (!block || !canReadFromBlock(block)) {
-      return;
-    }
-
-    const rowOffset = dataIndex - block.startIndex;
-    const row = block.rows[rowOffset];
-    if (!row || !isRemoteEditableRow(block.rowMetadata[rowOffset])) {
-      return;
-    }
-
-    if (Object.is(row[columnId], value)) {
-      return;
-    }
-
-    const rowKey = this.resolveRowKey(block, rowOffset);
-    this.recordPendingValue(rowKey, row, columnId, value);
-    applyCellValue(row, columnId, value);
-    this.emitRowsChanged();
   }
 
   public applyTransactions(transactions: DataTransaction[]): void {
@@ -625,29 +644,12 @@ export class RemoteDataProvider implements DataProvider {
       const transaction = transactions[transactionIndex];
 
       if (transaction.type === 'updateCell') {
-        const block = this.blockCache.get(this.getBlockIndexByDataIndex(transaction.index));
-        if (block && block.status === 'ready') {
-          const rowOffset = transaction.index - block.startIndex;
-          if (rowOffset >= 0 && rowOffset < block.rows.length) {
-            const row = block.rows[rowOffset];
-            if (row) {
-              row[transaction.columnId] = transaction.value;
-              shouldNotify = true;
-            }
-          }
-        }
+        shouldNotify = this.applyUpdateCellTransaction(transaction.index, transaction.columnId, transaction.value) || shouldNotify;
         continue;
       }
 
       if (transaction.type === 'update') {
-        const block = this.blockCache.get(this.getBlockIndexByDataIndex(transaction.index));
-        if (block && block.status === 'ready') {
-          const rowOffset = transaction.index - block.startIndex;
-          if (rowOffset >= 0 && rowOffset < block.rows.length) {
-            block.rows[rowOffset] = { ...transaction.row };
-            shouldNotify = true;
-          }
-        }
+        shouldNotify = this.applyUpdateRowTransaction(transaction.index, transaction.row) || shouldNotify;
         continue;
       }
 
@@ -674,6 +676,63 @@ export class RemoteDataProvider implements DataProvider {
     }
   }
 
+  public applyHistoryUpdates(updates: HistoryCellUpdate[]): AppliedHistoryCellUpdate[] {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return [];
+    }
+
+    const appliedUpdates: AppliedHistoryCellUpdate[] = [];
+    for (let index = 0; index < updates.length; index += 1) {
+      const update = updates[index];
+      const dataIndex = this.applyHistoryCellUpdate(update);
+      if (dataIndex < 0) {
+        continue;
+      }
+
+      appliedUpdates.push({
+        rowKey: update.rowKey,
+        dataIndex,
+        columnId: update.columnId,
+        previousValue: update.currentValue,
+        value: update.nextValue
+      });
+    }
+
+    if (appliedUpdates.length > 0) {
+      this.emitRowsChanged();
+    }
+
+    return appliedUpdates;
+  }
+
+  public getDataIndexByRowKey(rowKey: RowKey, dataIndexHint?: number): number {
+    if (Number.isInteger(dataIndexHint) && dataIndexHint !== undefined && dataIndexHint >= 0 && dataIndexHint < this.rowCount) {
+      const hintBlock = this.ensureBlockForDataIndex(dataIndexHint, true);
+      if (hintBlock && canReadFromBlock(hintBlock)) {
+        const rowOffset = dataIndexHint - hintBlock.startIndex;
+        if (rowOffset >= 0 && rowOffset < hintBlock.rows.length && this.resolveRowKey(hintBlock, rowOffset) === rowKey) {
+          return dataIndexHint;
+        }
+      }
+    }
+
+    const blocks = Array.from(this.blockCache.values());
+    for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+      const block = blocks[blockIndex];
+      if (!canReadFromBlock(block)) {
+        continue;
+      }
+
+      for (let rowOffset = 0; rowOffset < block.rows.length; rowOffset += 1) {
+        if (this.resolveRowKey(block, rowOffset) === rowKey) {
+          return block.startIndex + rowOffset;
+        }
+      }
+    }
+
+    return -1;
+  }
+
   public onRowsChanged(listener: RowsChangedListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -698,6 +757,7 @@ export class RemoteDataProvider implements DataProvider {
   public setQueryModel(queryModel: Partial<RemoteQueryModel>): void {
     const hasSortModel = Object.prototype.hasOwnProperty.call(queryModel, 'sortModel');
     const hasFilterModel = Object.prototype.hasOwnProperty.call(queryModel, 'filterModel');
+    const hasAdvancedFilterModel = Object.prototype.hasOwnProperty.call(queryModel, 'advancedFilterModel');
     const hasGroupModel = Object.prototype.hasOwnProperty.call(queryModel, 'groupModel');
     const hasPivotModel = Object.prototype.hasOwnProperty.call(queryModel, 'pivotModel');
     const hasPivotValues = Object.prototype.hasOwnProperty.call(queryModel, 'pivotValues');
@@ -706,6 +766,9 @@ export class RemoteDataProvider implements DataProvider {
     const nextQueryModel: RemoteQueryModel = {
       sortModel: hasSortModel ? cloneSortModel(queryModel.sortModel) : this.queryModel.sortModel,
       filterModel: hasFilterModel ? cloneFilterModel(queryModel.filterModel) : this.queryModel.filterModel,
+      advancedFilterModel: hasAdvancedFilterModel
+        ? cloneAdvancedFilterModel(queryModel.advancedFilterModel) ?? undefined
+        : this.queryModel.advancedFilterModel,
       groupModel: hasGroupModel ? cloneGroupModel(queryModel.groupModel) : this.queryModel.groupModel,
       pivotModel: hasPivotModel ? clonePivotModel(queryModel.pivotModel) : this.queryModel.pivotModel,
       pivotValues: hasPivotValues ? clonePivotValues(queryModel.pivotValues) : this.queryModel.pivotValues,
@@ -1360,6 +1423,29 @@ export class RemoteDataProvider implements DataProvider {
     }
   }
 
+  private getReadableBlockForDataIndex(dataIndex: number): CachedBlock | null {
+    const block = this.blockCache.get(this.getBlockIndexByDataIndex(dataIndex));
+    if (!block || !canReadFromBlock(block)) {
+      return null;
+    }
+
+    return block;
+  }
+
+  private peekRowKey(dataIndex: number): RowKey | undefined {
+    const block = this.getReadableBlockForDataIndex(dataIndex);
+    if (!block) {
+      return undefined;
+    }
+
+    const rowOffset = dataIndex - block.startIndex;
+    if (rowOffset < 0 || rowOffset >= block.rows.length) {
+      return undefined;
+    }
+
+    return this.resolveRowKey(block, rowOffset);
+  }
+
   private resolveRowKey(block: CachedBlock, rowOffset: number): RowKey {
     const rowKey = block.rowKeys[rowOffset];
     if (typeof rowKey === 'string' || typeof rowKey === 'number') {
@@ -1369,15 +1455,178 @@ export class RemoteDataProvider implements DataProvider {
     return getFallbackRowKey(block.rows[rowOffset], block.startIndex + rowOffset);
   }
 
-  private recordPendingValue(rowKey: RowKey, row: GridRowData, columnId: string, value: unknown): void {
+  private applyUpdateCellTransaction(dataIndex: number, columnId: string, value: unknown): boolean {
+    if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= this.rowCount) {
+      return false;
+    }
+
+    const block = this.getReadableBlockForDataIndex(dataIndex);
+    if (!block) {
+      return false;
+    }
+
+    const rowOffset = dataIndex - block.startIndex;
+    const row = block.rows[rowOffset];
+    if (!row || !isRemoteEditableRow(block.rowMetadata[rowOffset])) {
+      return false;
+    }
+
+    if (Object.is(row[columnId], value)) {
+      return false;
+    }
+
+    const rowKey = this.resolveRowKey(block, rowOffset);
+    this.recordPendingValue(rowKey, row, columnId, value, dataIndex);
+    applyCellValue(row, columnId, value);
+    return true;
+  }
+
+  private applyUpdateRowTransaction(dataIndex: number, nextRow: GridRowData): boolean {
+    if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= this.rowCount) {
+      return false;
+    }
+
+    const block = this.getReadableBlockForDataIndex(dataIndex);
+    if (!block) {
+      return false;
+    }
+
+    const rowOffset = dataIndex - block.startIndex;
+    const row = block.rows[rowOffset];
+    if (!row || !isRemoteEditableRow(block.rowMetadata[rowOffset])) {
+      return false;
+    }
+
+    const rowKey = this.resolveRowKey(block, rowOffset);
+    const nextLoadedRow: GridRowData = { ...nextRow };
+    const keys = new Set<string>([...Object.keys(row), ...Object.keys(nextLoadedRow)]);
+    let hasChanged = false;
+    keys.forEach((columnId) => {
+      const nextValue = nextLoadedRow[columnId];
+      if (Object.is(row[columnId], nextValue)) {
+        return;
+      }
+
+      this.recordPendingValue(rowKey, row, columnId, nextValue, dataIndex);
+      hasChanged = true;
+    });
+
+    if (!hasChanged) {
+      return false;
+    }
+
+    this.applyPendingValuesToRow(rowKey, nextLoadedRow);
+    block.rows[rowOffset] = nextLoadedRow;
+    return true;
+  }
+
+  private applyHistoryCellUpdate(update: HistoryCellUpdate): number {
+    const hintedDataIndex = update.dataIndexHint;
+    if (Number.isInteger(hintedDataIndex) && hintedDataIndex >= 0 && hintedDataIndex < this.rowCount) {
+      const hintedBlock = this.getReadableBlockForDataIndex(hintedDataIndex);
+      if (hintedBlock) {
+        const rowOffset = hintedDataIndex - hintedBlock.startIndex;
+        if (
+          rowOffset >= 0 &&
+          rowOffset < hintedBlock.rows.length &&
+          this.resolveRowKey(hintedBlock, rowOffset) === update.rowKey &&
+          isRemoteEditableRow(hintedBlock.rowMetadata[rowOffset])
+        ) {
+          const row = hintedBlock.rows[rowOffset];
+          if (!row) {
+            return -1;
+          }
+
+          if (!Object.is(row[update.columnId], update.nextValue)) {
+            this.recordPendingValue(update.rowKey, row, update.columnId, update.nextValue, hintedDataIndex, true);
+            applyCellValue(row, update.columnId, update.nextValue);
+          }
+          return hintedDataIndex;
+        }
+      }
+    }
+
+    const rowChange = this.resolveOrCreatePendingRowChangeForHistory(update);
+    const currentCellChange = rowChange.changes.get(update.columnId);
+    const currentValue = currentCellChange ? currentCellChange.value : update.currentValue;
+    if (Object.is(currentValue, update.nextValue)) {
+      return update.dataIndexHint;
+    }
+
+    if (!currentCellChange) {
+      rowChange.changes.set(update.columnId, {
+        columnId: update.columnId,
+        originalValue: update.currentValue,
+        value: update.nextValue,
+        hadOriginalValue: true
+      });
+    } else if (Object.is(update.nextValue, currentCellChange.originalValue)) {
+      rowChange.changes.delete(update.columnId);
+      if (rowChange.changes.size === 0) {
+        this.pendingRowChanges.delete(update.rowKey);
+      }
+    } else {
+      currentCellChange.value = update.nextValue;
+    }
+
+    const loadedRows = this.findLoadedRowsByKey(update.rowKey);
+    for (let matchIndex = 0; matchIndex < loadedRows.length; matchIndex += 1) {
+      const match = loadedRows[matchIndex];
+      const pendingRowChange = this.pendingRowChanges.get(update.rowKey);
+      const pendingCellChange = pendingRowChange?.changes.get(update.columnId);
+      if (pendingCellChange) {
+        applyCellValue(match.row, update.columnId, pendingCellChange.value);
+      } else {
+        applyCellValue(match.row, update.columnId, update.nextValue);
+      }
+    }
+
+    return update.dataIndexHint;
+  }
+
+  private resolveOrCreatePendingRowChangeForHistory(update: HistoryCellUpdate): InternalRemotePendingRowChange {
+    let rowChange = this.pendingRowChanges.get(update.rowKey);
+    if (!rowChange) {
+      rowChange = {
+        rowKey: update.rowKey,
+        dataIndexHint: update.dataIndexHint,
+        allowUnloadedValueRead: true,
+        changes: new Map()
+      };
+      this.pendingRowChanges.set(update.rowKey, rowChange);
+    }
+
+    if (!Number.isInteger(rowChange.dataIndexHint) || rowChange.dataIndexHint === null) {
+      rowChange.dataIndexHint = update.dataIndexHint;
+    }
+    rowChange.allowUnloadedValueRead = true;
+
+    return rowChange;
+  }
+
+  private recordPendingValue(
+    rowKey: RowKey,
+    row: GridRowData,
+    columnId: string,
+    value: unknown,
+    dataIndexHint?: number,
+    allowUnloadedValueRead = false
+  ): void {
     let rowChange = this.pendingRowChanges.get(rowKey);
     if (!rowChange) {
       rowChange = {
         rowKey,
+        dataIndexHint: Number.isInteger(dataIndexHint) ? Number(dataIndexHint) : null,
+        allowUnloadedValueRead,
         changes: new Map()
       };
       this.pendingRowChanges.set(rowKey, rowChange);
     }
+
+    if (Number.isInteger(dataIndexHint)) {
+      rowChange.dataIndexHint = Number(dataIndexHint);
+    }
+    rowChange.allowUnloadedValueRead = rowChange.allowUnloadedValueRead || allowUnloadedValueRead;
 
     const existingCellChange = rowChange.changes.get(columnId);
     if (!existingCellChange) {
@@ -1399,6 +1648,31 @@ export class RemoteDataProvider implements DataProvider {
     }
 
     existingCellChange.value = value;
+  }
+
+  private getPendingValueForDataIndex(dataIndex: number, columnId: string): { hasValue: boolean; value: unknown } {
+    const pendingRows = Array.from(this.pendingRowChanges.values());
+    for (let index = 0; index < pendingRows.length; index += 1) {
+      const rowChange = pendingRows[index];
+      if (!rowChange.allowUnloadedValueRead || rowChange.dataIndexHint !== dataIndex) {
+        continue;
+      }
+
+      const cellChange = rowChange.changes.get(columnId);
+      if (!cellChange) {
+        continue;
+      }
+
+      return {
+        hasValue: true,
+        value: cellChange.value
+      };
+    }
+
+    return {
+      hasValue: false,
+      value: undefined
+    };
   }
 
   private applyPendingValuesToRow(rowKey: RowKey, row: GridRowData): void {

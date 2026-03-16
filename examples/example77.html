@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 77 - Header Filter Row</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background: linear-gradient(180deg, #f7f9fc 0%, #e6edf6 100%);
+        color: #102638;
+      }
+
+      .page {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px 24px 40px;
+      }
+
+      .shell,
+      .snapshot-card {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      }
+
+      .shell {
+        padding: 20px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: #1d4ed8;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #dbe6f4;
+        color: #143353;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 16px;
+      }
+
+      .snapshot-card {
+        padding: 16px;
+      }
+
+      pre {
+        margin: 0;
+        padding: 14px;
+        border-radius: 14px;
+        background: #0f1f2f;
+        color: #d7ecf8;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow: auto;
+      }
+
+      @media (max-width: 960px) {
+        .content {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="shell">
+        <div class="toolbar">
+          <button id="seedDateFilter">Seed Date >= 2026-03-12</button>
+          <button id="clearFilters" class="secondary">Clear Filters</button>
+        </div>
+
+        <div class="content">
+          <div id="grid"></div>
+          <aside class="snapshot-card">
+            <pre id="snapshot"></pre>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const INITIAL_ROWS = [
+        { id: 1, name: 'Alpha', region: 'APAC', score: 24, updatedAt: '2026-03-10' },
+        { id: 2, name: 'Beta', region: 'EMEA', score: 82, updatedAt: '2026-03-11' },
+        { id: 3, name: 'Gamma', region: 'APAC', score: 68, updatedAt: '2026-03-12' },
+        { id: 4, name: 'Delta', region: 'AMER', score: 55, updatedAt: '2026-03-13' },
+        { id: 5, name: 'Zeta', region: 'LATAM', score: 44, updatedAt: '2026-03-14' }
+      ];
+
+      const snapshotElement = document.getElementById('snapshot');
+
+      function cloneRows() {
+        return INITIAL_ROWS.map((row) => ({ ...row }));
+      }
+
+      function collectVisibleIds() {
+        const rows = Array.from(document.querySelectorAll('.hgrid__row[data-row-index]'));
+        const seen = new Map();
+        rows.forEach((rowElement) => {
+          if (!(rowElement instanceof HTMLDivElement) || rowElement.style.display === 'none') {
+            return;
+          }
+
+          const rowIndex = Number(rowElement.dataset.rowIndex);
+          if (!Number.isFinite(rowIndex) || seen.has(rowIndex)) {
+            return;
+          }
+
+          const idCell = rowElement.querySelector('.hgrid__cell[data-column-id="id"]');
+          const idValue = Number(idCell && idCell.textContent);
+          if (Number.isFinite(idValue)) {
+            seen.set(rowIndex, idValue);
+          }
+        });
+
+        return Array.from(seen.entries())
+          .sort((left, right) => left[0] - right[0])
+          .map((entry) => entry[1]);
+      }
+
+      function readFilterRowValues() {
+        const values = {};
+        const inputs = document.querySelectorAll('.hgrid__filter-row-input[data-filter-row-column-id]');
+        inputs.forEach((input) => {
+          if (!(input instanceof HTMLInputElement)) {
+            return;
+          }
+          const columnId = input.dataset.filterRowColumnId;
+          if (columnId) {
+            values[columnId] = input.value;
+          }
+        });
+
+        const dateShells = document.querySelectorAll('.hgrid__filter-row-date-shell[data-filter-row-column-id]');
+        dateShells.forEach((shell) => {
+          if (!(shell instanceof HTMLDivElement)) {
+            return;
+          }
+          const columnId = shell.dataset.filterRowColumnId;
+          if (!columnId) {
+            return;
+          }
+          const operator = shell.querySelector('.hgrid__filter-row-date-operator');
+          const valueInput = shell.querySelector('.hgrid__filter-row-date-input[data-filter-row-control="date-value"]');
+          const secondaryInput = shell.querySelector('.hgrid__filter-row-date-input[data-filter-row-control="date-secondary"]');
+          if (
+            !(operator instanceof HTMLSelectElement) ||
+            !(valueInput instanceof HTMLInputElement) ||
+            !(secondaryInput instanceof HTMLInputElement)
+          ) {
+            return;
+          }
+
+          const value = valueInput.value.trim();
+          const secondaryValue = secondaryInput.value.trim();
+          if (operator.value === 'between') {
+            values[columnId] = value || secondaryValue ? `${value}..${secondaryValue}` : '';
+            return;
+          }
+          if (operator.value === 'on') {
+            values[columnId] = value;
+            return;
+          }
+          if (value.length === 0) {
+            values[columnId] = '';
+            return;
+          }
+          const operatorToken =
+            operator.value === 'onOrAfter'
+              ? '>='
+              : operator.value === 'after'
+                ? '>'
+                : operator.value === 'onOrBefore'
+                  ? '<='
+                  : operator.value === 'before'
+                    ? '<'
+                    : operator.value === 'notOn'
+                      ? '!='
+                      : '=';
+          values[columnId] = `${operatorToken}${value}`;
+        });
+        return values;
+      }
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: [
+          { id: 'id', header: 'ID', width: 92, type: 'number' },
+          { id: 'name', header: 'Name', width: 180, type: 'text' },
+          { id: 'region', header: 'Region', width: 140, type: 'text' },
+          { id: 'score', header: 'Score', width: 120, type: 'number' },
+          {
+            id: 'updatedAt',
+            header: 'Updated At',
+            width: 180,
+            type: 'date',
+            formatter(value) {
+              return typeof value === 'string' ? value : '';
+            }
+          }
+        ],
+        rowData: cloneRows(),
+        height: 300,
+        rowHeight: 32,
+        overscan: 4,
+        filterRow: {
+          enabled: true
+        }
+      });
+
+      function getSnapshot() {
+        return {
+          filterModel: grid.getFilterModel(),
+          filterRowValues: readFilterRowValues(),
+          visibleIds: collectVisibleIds()
+        };
+      }
+
+      function renderSnapshot() {
+        snapshotElement.textContent = JSON.stringify(getSnapshot(), null, 2);
+      }
+
+      setInterval(renderSnapshot, 250);
+      renderSnapshot();
+
+      document.getElementById('seedDateFilter').addEventListener('click', () => {
+        grid.setFilterModel({
+          updatedAt: {
+            kind: 'date',
+            operator: 'onOrAfter',
+            value: '2026-03-12'
+          }
+        });
+        renderSnapshot();
+      });
+
+      document.getElementById('clearFilters').addEventListener('click', async () => {
+        await grid.clearFilterModel();
+        renderSnapshot();
+      });
+
+      window.__example77 = {
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

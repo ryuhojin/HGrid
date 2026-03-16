@@ -18,6 +18,14 @@
 - `setTheme(themeTokens)`
 - `getState()`
 - `setState(state)`
+- `getColumnLayout()`
+- `setColumnLayout(layout)`
+- `getFilterModel()`
+- `setFilterModel(filterModel)`
+- `clearFilterModel()`
+- `getAdvancedFilterModel()`
+- `setAdvancedFilterModel(advancedFilterModel)`
+- `clearAdvancedFilterModel()`
 - `getSelection()`
 - `setSelection(selection)`
 - `clearSelection()`
@@ -46,6 +54,20 @@
   - `hiddenColumnIds?` stores hidden column ids.
   - `pinnedColumns?` stores per-column pin state (`left`/`right`).
 - `ColumnDef`: includes formatter/comparator/valueGetter/valueSetter hooks.
+  - `filterMode?: "auto" | "text" | "set"`
+- `GridColumnLayout` (Phase E3.6):
+  - `columnOrder: string[]`
+  - `hiddenColumnIds: string[]`
+  - `pinnedColumns: Record<string, "left" | "right">`
+  - `columnWidths: Record<string, number>`
+- `GridFilterModel` / `AdvancedFilterModel` (Phase E3.2):
+  - quick filter: `Record<string, ColumnFilterInput>`
+  - advanced builder:
+    - `{ operator: "and" | "or", rules: AdvancedFilterNode[] }`
+    - `AdvancedFilterNode = { columnId, condition } | { kind: "group", operator, rules: AdvancedFilterNode[] }`
+  - current builder scope:
+    - nested cross-column rule tree
+    - text / number / date rules
 - `ColumnGroupDef`:
   - `groupId: string`
   - `header: string`
@@ -136,8 +158,12 @@
   - `columnMenu.trigger?: "button" | "contextmenu" | "both"`
   - `columnMenu.getItems?(context) => GridMenuItem[]`
   - `contextMenu.enabled?`
+  - `contextMenu.builtInActions?: Array<"copyCell" | "copyRow" | "copySelection" | "filterByValue" | "clearColumnFilter">`
   - `contextMenu.getItems?(context) => GridMenuItem[]`
   - `GridColumnMenuContext`: `{ column, visibleColumns, source }`
+  - `GridContextMenuContext`:
+    - header: `{ kind: "header", column, visibleColumns, source }`
+    - body cell: `{ kind: "cell", column, visibleColumns, source, rowIndex, dataIndex, rowKey, row, value, selection }`
   - `GridMenuItem`: `{ id, label, disabled?, checked?, danger?, separator?, onSelect? }`
   - built-in action ids:
     - `sortAsc`, `sortDesc`, `clearSort`
@@ -145,7 +171,126 @@
     - `autoSizeColumn`, `resetColumnWidth`, `hideColumn`
   - current scope:
     - header trigger click / header contextmenu / keyboard(`Shift+F10`, `ContextMenu`)
-    - body cell context menu는 아직 범위 밖
+    - body cell contextmenu(custom hook + opt-in built-in copy/filter actions)
+    - built-in `Open filter` item opens the E3.2 single-condition filter panel
+- `sideBar` (Phase E3.3):
+  - `sideBar.enabled?`
+  - `sideBar.panels?: Array<string>`
+    - built-in ids: `"columns" | "filters" | "grouping" | "pivot"`
+    - custom ids: `sideBar.customPanels[].id`
+  - `sideBar.defaultPanel?: string | null`
+  - `sideBar.initialOpen?: boolean`
+  - `sideBar.width?: number`
+  - `sideBar.columnLayoutPresets?: Array<{ id, label, layout }>`
+  - `sideBar.customPanels?: Array<{ id, title, render(context) }>`
+  - custom render context:
+    - `container: HTMLElement`
+    - `state: { columns, visibleColumns, filterModel, groupModel, groupAggregations, groupingMode, pivotModel, pivotValues, pivotingMode }`
+    - `actions.closePanel()`
+    - `actions.setFilterModel(filterModel)`
+    - `actions.clearFilterModel()`
+    - `actions.setAdvancedFilterModel(advancedFilterModel | null)`
+    - `actions.setColumnLayout(layout)`
+  - current scope:
+    - docked slim-toggle + tabbed tool panel shell
+    - `columns` panel
+      - search input(header / id)
+      - order move up/down
+      - visibility toggle + pin left/right/none
+      - saved layout preset apply
+      - panel content uses full column catalog so hidden columns can be restored
+    - `filters` panel
+      - `Quick` / `Builder` sub-surface
+      - column list + active column editor
+      - text/number/date 2-clause AND
+      - set filter + search
+      - nested cross-column advanced builder(`AND / OR` + group nesting)
+      - advanced filter preset save/apply/delete
+    - `grouping` panel
+      - grouping mode + grouped columns + order move + aggregation select
+    - `pivot` panel
+      - pivot mode + pivot columns + order move + value aggregation select
+    - custom panel registry
+      - custom title + render callback + official filter/layout mutation actions
+- `statusBar` (Phase E3.4):
+  - `statusBar.enabled?`
+  - `statusBar.items?: Array<"selection" | "aggregates" | "rows" | "remote" | string>`
+  - `statusBar.customItems?: Array<{ id, align?, render(context) }>`
+  - `statusBar.aggregateAsyncThreshold?: number`
+  - `statusBar.aggregateChunkSize?: number`
+  - current scope:
+    - footer status bar shell
+    - selection count
+    - selection quick aggregate(`sum/avg/min/max`)
+    - large selection chunked async aggregate + `Calculating {percent}%`
+    - visible row count + filtered/current row count
+    - remote loading/error/pending sync summary
+    - text-only custom item registry
+- `layout persistence` (Phase E3.6):
+  - `getColumnLayout()`
+  - `setColumnLayout(layout)`
+  - current scope:
+    - order / visibility / pin / width snapshot
+    - preset layout apply
+    - user storage recipe(localStorage 등)와 직접 연결 가능
+    - wider workspace recipe는 `getColumnLayout()` + `getState()` 조합으로 구성 가능
+- `filterRow` (Phase E3 residual):
+  - `filterRow.enabled?`
+  - current scope:
+    - header 아래 상시 filter row
+    - text expression: plain contains, `=`, `!=`, `^`, `$`
+    - number/date expression: `>`, `>=`, `<`, `<=`, `=`, `!=`, `a..b`
+    - boolean dedicated select: `Any | True | False | Blank`
+    - text enum select: `ColumnDef.filterMode = "set"`일 때 `set` condition으로 연결
+    - `Grid.getFilterModel()` / `Grid.setFilterModel()` 양방향 동기화
+- `setFilter` (Phase E3 residual):
+  - `setFilter.valueSource?: "sampled" | "full"`
+  - `setFilter.maxScanRows?: number`
+  - `setFilter.maxDistinctValues?: number`
+  - `setFilter.getValues?(context)`
+  - `context: { column, dataProvider, locale, reason: "panel" | "builder" | "filterRow", sampledOptions }`
+  - current scope:
+    - quick panel / builder / filter row의 set option source를 공통 제어
+    - `full`은 현재 provider가 이미 읽을 수 있는 row를 스캔한다
+    - remote provider가 `peekRow()`를 지원하면 unloaded block fetch를 강제로 만들지 않는다
+    - `getValues()`는 외부 enum/distinct source 주입용 sync hook
+- `advancedFilterPresets` (Phase E3 residual):
+  - `advancedFilterPresets?: GridAdvancedFilterPreset[]`
+  - `GridAdvancedFilterPreset`: `{ id, label, advancedFilterModel }`
+  - control API:
+    - `getAdvancedFilterPresets()`
+    - `setAdvancedFilterPresets(presets)`
+    - `saveAdvancedFilterPreset(presetId, label?)`
+    - `applyAdvancedFilterPreset(presetId)`
+    - `deleteAdvancedFilterPreset(presetId)`
+  - current scope:
+    - filters tool panel builder에서 preset select/save/apply/delete
+    - local runtime state와 양방향 동기화
+    - 앱이 storage/profile transport를 직접 연결 가능
+- `rangeHandle` (Phase E3.5):
+  - `rangeHandle.enabled?`
+  - `rangeHandle.mode?: "fill" | "copy"`
+  - current scope:
+    - active primary selection의 우하단에 fill handle 표시
+    - single-cell source는 drag-to-copy로 반복
+    - 1D numeric source는 `mode: "fill"`일 때 arithmetic series로 확장
+    - 2D affine numeric source는 row/column 둘 다 trend로 확장
+    - drag pointer가 body edge 밖으로 나가면 auto-scroll 유지
+    - drag 결과 selection은 preview rectangle로 확장 유지
+    - resulting edit commit event는 `source: "fillHandle"`로 emitted
+- `undoRedo` (Phase E3 residual close-out):
+  - `undoRedo.enabled?`
+  - `undoRedo.limit?`
+  - control API:
+    - `undo()`
+    - `redo()`
+    - `canUndo()`
+    - `canRedo()`
+  - current scope:
+    - editor, clipboard paste, fill handle cell updates를 하나의 history stack으로 저장
+    - keyboard shortcut: `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, `Ctrl/Cmd+Y`
+    - selection은 undo/redo 시 실제 적용된 cell range로 다시 맞춘다
+    - dataProvider 교체 시 history는 clear된다
 
 ## Wrapper Contract
 `@hgrid/grid-react` and `@hgrid/grid-vue` expose thin adapters with the same control API:
@@ -154,6 +299,10 @@
 - `setColumnPin`
 - `setRowOrder`, `setFilteredRowOrder`, `resetRowOrder`, `setRowModelOptions`, `getRowModelState`, `resetRowHeights`
 - `setTheme`, `getState`, `setState`, `getSelection`, `setSelection`, `clearSelection`
+- `undo`, `redo`, `canUndo`, `canRedo`
+- `getColumnLayout`, `setColumnLayout`
+- `getAdvancedFilterPresets`, `setAdvancedFilterPresets`
+- `saveAdvancedFilterPreset`, `applyAdvancedFilterPreset`, `deleteAdvancedFilterPreset`
 - `exportCsv`, `exportTsv`
 - `on`, `off`, `destroy`
 

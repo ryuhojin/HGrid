@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 80 - Filter Row Enum And Full Distinct</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background: linear-gradient(180deg, #f6f8fb 0%, #e5edf7 100%);
+        color: #102638;
+      }
+
+      .page {
+        max-width: 1220px;
+        margin: 0 auto;
+        padding: 28px 24px 40px;
+      }
+
+      .shell,
+      .snapshot-card {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      }
+
+      .shell {
+        padding: 20px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: #1d4ed8;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #dbe6f4;
+        color: #143353;
+      }
+
+      .note {
+        margin: 0 0 14px;
+        color: #42566d;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 16px;
+      }
+
+      .snapshot-card {
+        padding: 16px;
+      }
+
+      pre {
+        margin: 0;
+        padding: 14px;
+        border-radius: 14px;
+        background: #0f1f2f;
+        color: #d7ecf8;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow: auto;
+      }
+
+      @media (max-width: 980px) {
+        .content {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="shell">
+        <p class="note">
+          `Status` 열은 text 컬럼이지만 `filterMode: "set"`으로 선언돼서 filter row에서 enum select로 렌더됩니다.
+          `Tail-only` 상태는 첫 5000행 뒤에만 존재하고, 이번 예제는 `setFilter.valueSource = "full"`로 전체 provider를 스캔해
+          그 옵션까지 노출합니다.
+        </p>
+
+        <div class="toolbar">
+          <button id="selectTailOnly">Select Tail-only</button>
+          <button id="selectReview" class="secondary">Select Review</button>
+          <button id="clearFilter" class="secondary">Clear Filter</button>
+        </div>
+
+        <div class="content">
+          <div id="grid"></div>
+          <aside class="snapshot-card">
+            <pre id="snapshot"></pre>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const ROW_COUNT = 5205;
+      const snapshotElement = document.getElementById('snapshot');
+
+      function buildRows() {
+        return Array.from({ length: ROW_COUNT }, (_, index) => {
+          const status = index >= 5000 ? 'Tail-only' : ['Active', 'Review', 'Hold', 'Draft'][index % 4];
+          return {
+            id: index + 1,
+            status,
+            owner: 'Owner-' + ((index % 24) + 1),
+            score: (index % 100) + 1
+          };
+        });
+      }
+
+      function getStatusSelect() {
+        return document.querySelector('.hgrid__filter-row-set-select[data-filter-row-column-id="status"]');
+      }
+
+      function collectVisibleIds() {
+        const rows = Array.from(document.querySelectorAll('.hgrid__row[data-row-index]'));
+        const seen = new Map();
+        rows.forEach((rowElement) => {
+          if (!(rowElement instanceof HTMLDivElement) || rowElement.style.display === 'none') {
+            return;
+          }
+
+          const rowIndex = Number(rowElement.dataset.rowIndex);
+          if (!Number.isFinite(rowIndex) || seen.has(rowIndex)) {
+            return;
+          }
+
+          const idCell = rowElement.querySelector('.hgrid__cell[data-column-id="id"]');
+          const idValue = Number(idCell && idCell.textContent);
+          if (Number.isFinite(idValue)) {
+            seen.set(rowIndex, idValue);
+          }
+        });
+
+        return Array.from(seen.entries())
+          .sort((left, right) => left[0] - right[0])
+          .map((entry) => entry[1]);
+      }
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: [
+          { id: 'id', header: 'ID', width: 92, type: 'number' },
+          { id: 'status', header: 'Status', width: 160, type: 'text', filterMode: 'set' },
+          { id: 'owner', header: 'Owner', width: 180, type: 'text' },
+          { id: 'score', header: 'Score', width: 120, type: 'number' }
+        ],
+        rowData: buildRows(),
+        height: 320,
+        rowHeight: 32,
+        overscan: 6,
+        filterRow: {
+          enabled: true
+        },
+        setFilter: {
+          valueSource: 'full',
+          maxDistinctValues: 16
+        }
+      });
+
+      function getSnapshot() {
+        const statusSelect = getStatusSelect();
+        return {
+          filterModel: grid.getFilterModel(),
+          visibleCount: grid.getViewRowCount(),
+          visibleIds: collectVisibleIds(),
+          statusOptions:
+            statusSelect instanceof HTMLSelectElement
+              ? Array.from(statusSelect.options).map((option) => option.textContent)
+              : []
+        };
+      }
+
+      function renderSnapshot() {
+        snapshotElement.textContent = JSON.stringify(getSnapshot(), null, 2);
+      }
+
+      function applyStatusFilterByLabel(label) {
+        const statusSelect = getStatusSelect();
+        if (!(statusSelect instanceof HTMLSelectElement)) {
+          return;
+        }
+
+        const option = Array.from(statusSelect.options).find((candidate) => candidate.textContent === label);
+        if (!option) {
+          return;
+        }
+
+        statusSelect.value = option.value;
+        statusSelect.dispatchEvent(new Event('input', { bubbles: true }));
+        statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        renderSnapshot();
+      }
+
+      document.getElementById('selectTailOnly').addEventListener('click', () => {
+        applyStatusFilterByLabel('Tail-only');
+      });
+
+      document.getElementById('selectReview').addEventListener('click', () => {
+        applyStatusFilterByLabel('Review');
+      });
+
+      document.getElementById('clearFilter').addEventListener('click', async () => {
+        await grid.clearFilterModel();
+        renderSnapshot();
+      });
+
+      grid.on('selectionChange', renderSnapshot);
+      grid.on('editCommit', renderSnapshot);
+      renderSnapshot();
+
+      window.__example80 = {
+        grid,
+        getSnapshot,
+        applyStatusFilterByLabel
+      };
+    </script>
+  </body>
+</html>

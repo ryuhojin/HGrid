@@ -1,58 +1,52 @@
 import type { ColumnDef } from '../core/grid-options';
 import type { DataProvider, GridRowData } from './data-provider';
+import type {
+  AdvancedFilterGroup,
+  AdvancedFilterModel,
+  AdvancedFilterNode,
+  ColumnFilterCondition,
+  ColumnFilterInput,
+  DateFilterCondition,
+  DateFilterOperator,
+  GridFilterModel,
+  NumberFilterCondition,
+  NumberFilterOperator,
+  SetFilterCondition,
+  TextFilterCondition,
+  TextFilterOperator
+} from './filter-model';
+import { isAdvancedFilterGroup } from './filter-model';
 import {
   createWorkerCanceledResponse,
   createWorkerErrorResponse,
   createWorkerOkResponse,
   type WorkerResponseMessage
 } from './worker-protocol';
+export type {
+  AdvancedFilterGroup,
+  AdvancedFilterModel,
+  AdvancedFilterNode,
+  AdvancedFilterOperator,
+  AdvancedFilterRule,
+  ColumnFilterCondition,
+  ColumnFilterInput,
+  DateFilterCondition,
+  DateFilterOperator,
+  GridFilterModel,
+  NumberFilterCondition,
+  NumberFilterOperator,
+  SetFilterCondition,
+  TextFilterCondition,
+  TextFilterOperator
+} from './filter-model';
 
 const DEFAULT_YIELD_INTERVAL = 65_536;
-
-export type TextFilterOperator = 'contains' | 'startsWith' | 'endsWith' | 'equals' | 'notEquals';
-
-export interface TextFilterCondition {
-  kind: 'text';
-  value: string;
-  operator?: TextFilterOperator;
-  caseSensitive?: boolean;
-}
-
-export type NumberFilterOperator = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'between';
-
-export interface NumberFilterCondition {
-  kind: 'number';
-  operator?: NumberFilterOperator;
-  value?: number;
-  min?: number;
-  max?: number;
-}
-
-export type DateFilterOperator = 'on' | 'before' | 'after' | 'onOrBefore' | 'onOrAfter' | 'between' | 'notOn';
-
-export interface DateFilterCondition {
-  kind: 'date';
-  operator?: DateFilterOperator;
-  value?: string | number | Date;
-  min?: string | number | Date;
-  max?: string | number | Date;
-}
-
-export interface SetFilterCondition {
-  kind: 'set';
-  values: unknown[];
-  caseSensitive?: boolean;
-  includeNull?: boolean;
-}
-
-export type ColumnFilterCondition = TextFilterCondition | NumberFilterCondition | DateFilterCondition | SetFilterCondition;
-export type ColumnFilterInput = ColumnFilterCondition | ColumnFilterCondition[];
-export type GridFilterModel = Record<string, ColumnFilterInput | undefined>;
 
 export interface FilterExecutionRequest {
   opId: string;
   rowCount: number;
   filterModel: GridFilterModel;
+  advancedFilterModel?: AdvancedFilterModel | null;
   columns: ColumnDef[];
   dataProvider: DataProvider;
   sourceOrder?: Int32Array | number[];
@@ -84,6 +78,18 @@ interface PreparedFilterColumn {
   column: ColumnDef;
   clauses: PreparedFilterClause[];
 }
+
+interface PreparedAdvancedFilterRule {
+  column: ColumnDef;
+  evaluate: (value: unknown) => boolean;
+}
+
+interface PreparedAdvancedFilterGroup {
+  operator: 'and' | 'or';
+  rules: PreparedAdvancedFilterNode[];
+}
+
+type PreparedAdvancedFilterNode = PreparedAdvancedFilterRule | PreparedAdvancedFilterGroup;
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -407,6 +413,121 @@ function normalizeFilterModel(filterModel: GridFilterModel, columns: ColumnDef[]
   return prepared;
 }
 
+function isPreparedAdvancedFilterGroup(node: PreparedAdvancedFilterNode): node is PreparedAdvancedFilterGroup {
+  return Object.prototype.hasOwnProperty.call(node, 'rules');
+}
+
+function normalizeAdvancedFilterNode(
+  node: AdvancedFilterNode,
+  byId: Map<string, ColumnDef>
+): PreparedAdvancedFilterNode | null {
+  if (!node || typeof node !== 'object') {
+    return null;
+  }
+
+  if (isAdvancedFilterGroup(node)) {
+    const preparedRules: PreparedAdvancedFilterNode[] = [];
+    for (let index = 0; index < node.rules.length; index += 1) {
+      const preparedRule = normalizeAdvancedFilterNode(node.rules[index], byId);
+      if (preparedRule) {
+        preparedRules.push(preparedRule);
+      }
+    }
+
+    if (preparedRules.length === 0) {
+      return null;
+    }
+
+    return {
+      operator: node.operator === 'or' ? 'or' : 'and',
+      rules: preparedRules
+    };
+  }
+
+  const column = byId.get(node.columnId);
+  if (!column) {
+    return null;
+  }
+
+  const evaluate = normalizeFilterClause(node.condition);
+  if (!evaluate) {
+    return null;
+  }
+
+  return {
+    column,
+    evaluate
+  };
+}
+
+function normalizeAdvancedFilterModel(
+  advancedFilterModel: AdvancedFilterModel | null | undefined,
+  columns: ColumnDef[]
+): { operator: 'and' | 'or'; rules: PreparedAdvancedFilterNode[] } | null {
+  if (!advancedFilterModel || typeof advancedFilterModel !== 'object') {
+    return null;
+  }
+
+  const rawRules = Array.isArray(advancedFilterModel.rules) ? advancedFilterModel.rules : [];
+  if (rawRules.length === 0) {
+    return null;
+  }
+
+  const byId = new Map<string, ColumnDef>();
+  for (let index = 0; index < columns.length; index += 1) {
+    byId.set(columns[index].id, columns[index]);
+  }
+
+  const preparedRules: PreparedAdvancedFilterNode[] = [];
+  for (let index = 0; index < rawRules.length; index += 1) {
+    const preparedRule = normalizeAdvancedFilterNode(rawRules[index], byId);
+    if (preparedRule) {
+      preparedRules.push(preparedRule);
+    }
+  }
+
+  if (preparedRules.length === 0) {
+    return null;
+  }
+
+  return {
+    operator: advancedFilterModel.operator === 'or' ? 'or' : 'and',
+    rules: preparedRules
+  };
+}
+
+function evaluatePreparedAdvancedFilterNode(
+  node: PreparedAdvancedFilterNode,
+  rowCache: { row?: GridRowData },
+  request: FilterExecutionRequest,
+  dataIndex: number
+): boolean {
+  if (isPreparedAdvancedFilterGroup(node)) {
+    if (node.operator === 'or') {
+      for (let index = 0; index < node.rules.length; index += 1) {
+        if (evaluatePreparedAdvancedFilterNode(node.rules[index], rowCache, request, dataIndex)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    for (let index = 0; index < node.rules.length; index += 1) {
+      if (!evaluatePreparedAdvancedFilterNode(node.rules[index], rowCache, request, dataIndex)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  const preparedColumn: PreparedFilterColumn = {
+    column: node.column,
+    clauses: []
+  };
+  const value = resolveColumnValue(rowCache, request, preparedColumn, dataIndex);
+  return node.evaluate(value);
+}
+
 function buildIdentityOrder(rowCount: number): Int32Array {
   const mapping = new Int32Array(Math.max(0, rowCount));
   for (let index = 0; index < mapping.length; index += 1) {
@@ -493,8 +614,9 @@ export class CooperativeFilterExecutor implements FilterExecutor {
       }
 
       const normalizedFilters = normalizeFilterModel(request.filterModel, request.columns);
+      const normalizedAdvancedFilter = normalizeAdvancedFilterModel(request.advancedFilterModel, request.columns);
       const sourceOrder = resolveSourceOrder(request.rowCount, request.sourceOrder);
-      if (normalizedFilters.length === 0 || request.rowCount <= 0) {
+      if ((normalizedFilters.length === 0 && !normalizedAdvancedFilter) || request.rowCount <= 0) {
         return createWorkerOkResponse(request.opId, {
           opId: request.opId,
           mapping: sourceOrder
@@ -522,6 +644,17 @@ export class CooperativeFilterExecutor implements FilterExecutor {
               break;
             }
           }
+        }
+
+        if (rowAccepted && normalizedAdvancedFilter) {
+          rowAccepted =
+            normalizedAdvancedFilter.operator === 'or'
+              ? normalizedAdvancedFilter.rules.some((rule) =>
+                  evaluatePreparedAdvancedFilterNode(rule, rowCache, request, dataIndex)
+                )
+              : normalizedAdvancedFilter.rules.every((rule) =>
+                  evaluatePreparedAdvancedFilterNode(rule, rowCache, request, dataIndex)
+                );
         }
 
         if (rowAccepted) {

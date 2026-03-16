@@ -213,6 +213,10 @@ export class TreeDataProvider implements DataProvider {
     return decoratedRow;
   }
 
+  public peekRow(viewDataIndex: number): GridRowData | undefined {
+    return this.getRow(viewDataIndex);
+  }
+
   public setValue(viewDataIndex: number, columnId: string, value: unknown): void {
     const row = this.rows[viewDataIndex];
     if (!row) {
@@ -233,6 +237,27 @@ export class TreeDataProvider implements DataProvider {
 
   public applyTransactions(transactions: DataTransaction[]): void {
     this.sourceDataProvider.applyTransactions(transactions);
+  }
+
+  public getDataIndexByRowKey(rowKey: RowKey, dataIndexHint?: number): number {
+    const rowCount = this.rows.length;
+    if (
+      Number.isInteger(dataIndexHint) &&
+      dataIndexHint !== undefined &&
+      dataIndexHint >= 0 &&
+      dataIndexHint < rowCount &&
+      this.getRowKey(dataIndexHint) === rowKey
+    ) {
+      return dataIndexHint;
+    }
+
+    const token = toTreeNodeKeyToken(rowKey);
+    const hintedIndex = this.nodeIndexByToken.get(token);
+    if (hintedIndex !== undefined) {
+      return hintedIndex;
+    }
+
+    return -1;
   }
 
   public isRowLoading(viewDataIndex: number): boolean {

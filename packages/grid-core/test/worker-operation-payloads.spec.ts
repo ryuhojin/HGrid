@@ -130,6 +130,63 @@ describe('worker operation payloads', () => {
     expect(request.dataProvider.getValue(1, 'fullName')).toBe('Grace Hopper');
   });
 
+  it('includes nested advanced filter rule columns in worker filter payload serialization', () => {
+    const columns: ColumnDef[] = [
+      { id: 'name', header: 'Name', width: 120, type: 'text' },
+      { id: 'region', header: 'Region', width: 120, type: 'text' }
+    ];
+    const provider = new LocalDataProvider([
+      { name: 'Alpha', region: 'APAC' },
+      { name: 'Beta', region: 'EMEA' }
+    ]);
+
+    const payload = serializeFilterExecutionRequest({
+      opId: 'filter-advanced-columns',
+      rowCount: 2,
+      filterModel: {},
+      advancedFilterModel: {
+        operator: 'or',
+        rules: [
+          {
+            kind: 'group',
+            operator: 'and',
+            rules: [
+              {
+                columnId: 'name',
+                condition: {
+                  kind: 'text',
+                  operator: 'contains',
+                  value: 'ta'
+                }
+              },
+              {
+                columnId: 'region',
+                condition: {
+                  kind: 'text',
+                  operator: 'equals',
+                  value: 'APAC'
+                }
+              }
+            ]
+          },
+          { columnId: 'name', condition: { kind: 'text', operator: 'contains', value: 'ta' } }
+        ]
+      },
+      columns,
+      dataProvider: provider
+    });
+
+    expect(payload).not.toBeNull();
+    if (!payload || !('kind' in payload) || payload.kind !== 'columnar') {
+      throw new Error('Expected columnar payload');
+    }
+
+    expect(Object.keys(payload.columnValuesById).sort()).toEqual(['name', 'region']);
+    const request = createFilterExecutionRequest('filter-advanced-columns', payload);
+    expect(request.advancedFilterModel?.rules).toHaveLength(2);
+    expect(request.dataProvider.getValue(0, 'region')).toBe('APAC');
+  });
+
   it('reuses cached valueGetter projections when the projected columns stay the same', () => {
     let valueGetterCallCount = 0;
     const columns: ColumnDef[] = [

@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 68 - Custom Tool Panel Registry</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(14, 116, 144, 0.14), transparent 32%),
+          linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+        color: #163042;
+      }
+
+      .page {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px 24px 40px;
+      }
+
+      .hero,
+      .workspace {
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid rgba(22, 48, 66, 0.08);
+        border-radius: 22px;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+        gap: 18px;
+        padding: 24px;
+        margin-bottom: 18px;
+      }
+
+      .kicker {
+        display: inline-flex;
+        margin-bottom: 12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(14, 116, 144, 0.12);
+        color: #0c627d;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+        line-height: 1.06;
+      }
+
+      p,
+      li {
+        color: #4b6474;
+        line-height: 1.58;
+      }
+
+      .policy {
+        padding: 18px 20px;
+        border-radius: 16px;
+        background: #0f2432;
+        color: #dceef7;
+      }
+
+      .policy h2 {
+        margin: 0 0 10px;
+        font-size: 15px;
+      }
+
+      .policy code {
+        display: block;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        color: #d5eef8;
+        font-size: 12px;
+        line-height: 1.6;
+        overflow: auto;
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: #0f5a7a;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #dce7ef;
+        color: #123349;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 16px;
+      }
+
+      #grid {
+        min-width: 0;
+      }
+
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .insights-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .insights-panel__hero,
+      .insights-card {
+        border: 1px solid rgba(22, 48, 66, 0.08);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(241, 245, 249, 0.96) 100%);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+      }
+
+      .insights-panel__hero {
+        padding: 14px;
+      }
+
+      .insights-panel__eyebrow {
+        display: inline-flex;
+        margin-bottom: 8px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: rgba(14, 116, 144, 0.12);
+        color: #0c627d;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .insights-panel__summary {
+        margin: 0;
+        color: #234255;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .insights-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .insights-card {
+        padding: 12px 14px;
+      }
+
+      .insights-card h3 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #607a8a;
+      }
+
+      .insights-chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .insights-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: rgba(15, 90, 122, 0.08);
+        color: #123349;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .insights-card p {
+        margin: 0;
+        color: #4b6474;
+        font-size: 13px;
+      }
+
+      .insights-panel__footer {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .insights-panel__footer button {
+        border: 1px solid rgba(22, 48, 66, 0.16);
+        background: rgba(255, 255, 255, 0.82);
+        color: #123349;
+        box-shadow: none;
+      }
+
+      .insights-panel__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .insights-panel__actions button {
+        border: 1px solid rgba(22, 48, 66, 0.14);
+        background: rgba(255, 255, 255, 0.82);
+        color: #123349;
+        box-shadow: none;
+      }
+
+      #snapshot,
+      #notes {
+        margin: 0;
+        padding: 14px;
+        border-radius: 14px;
+        background: #10212d;
+        color: #d8eef9;
+        font-size: 12px;
+        line-height: 1.52;
+        overflow: auto;
+      }
+
+      @media (max-width: 960px) {
+        .hero,
+        .content {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <div>
+          <div class="kicker">Phase E3.3</div>
+          <h1>Custom Tool Panel Registry</h1>
+          <p>
+            `sideBar.customPanels`로 built-in panel과 같은 tabbed shell에 custom panel을 등록할 수 있습니다.
+            현재 hook은 panel title, render callback, close/filter/layout mutation action까지를 제공합니다.
+          </p>
+          <ul>
+            <li><strong>Insights</strong> panel은 visible columns와 active filters 요약을 보여줍니다.</li>
+            <li>external API로 filter를 걸면 custom panel도 다시 렌더됩니다.</li>
+            <li>custom panel 내부에서 `setFilterModel()`, `clearFilterModel()`, `setColumnLayout()`를 직접 호출할 수 있습니다.</li>
+          </ul>
+        </div>
+        <aside class="policy">
+          <h2>Registry Hook</h2>
+          <code>
+sideBar.panels = ['insights', 'filters']<br />
+sideBar.customPanels = [{ id, title, render }]<br />
+render({ container, state, actions })<br />
+actions.closePanel()<br />
+actions.setFilterModel(filterModel)<br />
+actions.clearFilterModel()<br />
+actions.setColumnLayout(layout)
+          </code>
+        </aside>
+      </section>
+
+      <section class="workspace">
+        <div class="toolbar">
+          <button id="presetFilter">Preset Region = APAC</button>
+          <button id="clearFilter" class="secondary">Clear Filters</button>
+          <button id="openInsights">Open Insights</button>
+        </div>
+
+        <div class="content">
+          <div id="grid"></div>
+
+          <aside class="side">
+            <pre id="snapshot"></pre>
+            <pre id="notes">Insights panel starts open by default.</pre>
+          </aside>
+        </div>
+      </section>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 120, type: 'number' }
+      ];
+
+      const rowData = [
+        { id: 1, name: 'Alpha Prime', region: 'APAC', sales: 12 },
+        { id: 2, name: 'Beta North', region: 'EMEA', sales: 32 },
+        { id: 3, name: 'Gamma Delta', region: 'APAC', sales: 48 },
+        { id: 4, name: 'Delta Coast', region: 'AMER', sales: 64 }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        sideBar: {
+          enabled: true,
+          panels: ['insights', 'filters'],
+          defaultPanel: 'insights',
+          width: 320,
+          customPanels: [
+            {
+              id: 'insights',
+              title: 'Insights',
+              render: ({ container, state, actions }) => {
+                const panelElement = document.createElement('div');
+                panelElement.className = 'insights-panel';
+
+                const visibleColumnIds = state.visibleColumns.map((column) => column.id);
+                const filteredColumnIds = Object.keys(state.filterModel);
+                const groupedColumnIds = state.groupModel.map((item) => item.columnId);
+
+                const heroElement = document.createElement('section');
+                heroElement.className = 'insights-panel__hero';
+
+                const eyebrowElement = document.createElement('div');
+                eyebrowElement.className = 'insights-panel__eyebrow';
+                eyebrowElement.textContent = 'Workspace snapshot';
+
+                const summary = document.createElement('p');
+                summary.className = 'insights-panel__summary';
+                summary.dataset.customInsightsSummary = 'true';
+                summary.textContent =
+                  'visible=' +
+                  visibleColumnIds.join(',') +
+                  ' | filters=' +
+                  filteredColumnIds.join(',') +
+                  ' | groups=' +
+                  groupedColumnIds.join(',');
+                heroElement.append(eyebrowElement, summary);
+
+                const cardsElement = document.createElement('div');
+                cardsElement.className = 'insights-grid';
+
+                const createCard = (title, chips, fallbackText) => {
+                  const cardElement = document.createElement('section');
+                  cardElement.className = 'insights-card';
+
+                  const titleElement = document.createElement('h3');
+                  titleElement.textContent = title;
+                  cardElement.append(titleElement);
+
+                  if (chips.length === 0) {
+                    const emptyElement = document.createElement('p');
+                    emptyElement.textContent = fallbackText;
+                    cardElement.append(emptyElement);
+                    return cardElement;
+                  }
+
+                  const chipListElement = document.createElement('div');
+                  chipListElement.className = 'insights-chip-list';
+                  for (let index = 0; index < chips.length; index += 1) {
+                    const chipElement = document.createElement('span');
+                    chipElement.className = 'insights-chip';
+                    chipElement.textContent = chips[index];
+                    chipListElement.append(chipElement);
+                  }
+                  cardElement.append(chipListElement);
+                  return cardElement;
+                };
+
+                cardsElement.append(
+                  createCard('Visible Columns', visibleColumnIds, 'No visible columns'),
+                  createCard('Active Filters', filteredColumnIds, 'No active filters'),
+                  createCard('Grouping', groupedColumnIds, 'No grouping applied')
+                );
+
+                const actionsCard = document.createElement('section');
+                actionsCard.className = 'insights-card';
+
+                const actionsTitle = document.createElement('h3');
+                actionsTitle.textContent = 'Actions';
+                actionsCard.append(actionsTitle);
+
+                const actionsRow = document.createElement('div');
+                actionsRow.className = 'insights-panel__actions';
+
+                const applyApacFilterButton = document.createElement('button');
+                applyApacFilterButton.type = 'button';
+                applyApacFilterButton.dataset.customInsightsApplyFilter = 'true';
+                applyApacFilterButton.textContent = 'Filter APAC';
+                applyApacFilterButton.addEventListener('click', () => {
+                  void Promise.resolve(
+                    actions.setFilterModel({
+                      region: {
+                        kind: 'set',
+                        values: ['APAC'],
+                        includeNull: false
+                      }
+                    })
+                  );
+                });
+
+                const clearFilterButton = document.createElement('button');
+                clearFilterButton.type = 'button';
+                clearFilterButton.dataset.customInsightsClearFilter = 'true';
+                clearFilterButton.textContent = 'Clear Filters';
+                clearFilterButton.addEventListener('click', () => {
+                  void Promise.resolve(actions.clearFilterModel());
+                });
+
+                const compactLayoutButton = document.createElement('button');
+                compactLayoutButton.type = 'button';
+                compactLayoutButton.dataset.customInsightsCompactLayout = 'true';
+                compactLayoutButton.textContent = 'Hide Sales';
+                compactLayoutButton.addEventListener('click', () => {
+                  const pinnedColumns = {};
+                  const columnWidths = {};
+                  state.columns.forEach((column) => {
+                    if (column.pinned) {
+                      pinnedColumns[column.id] = column.pinned;
+                    }
+                    columnWidths[column.id] = column.width;
+                  });
+                  actions.setColumnLayout({
+                    columnOrder: state.columns.map((column) => column.id),
+                    hiddenColumnIds: ['sales'],
+                    pinnedColumns,
+                    columnWidths
+                  });
+                });
+
+                actionsRow.append(applyApacFilterButton, clearFilterButton, compactLayoutButton);
+                actionsCard.append(actionsRow);
+                cardsElement.append(actionsCard);
+
+                const footerElement = document.createElement('div');
+                footerElement.className = 'insights-panel__footer';
+
+                const closeButton = document.createElement('button');
+                closeButton.type = 'button';
+                closeButton.dataset.customInsightsClose = 'true';
+                closeButton.textContent = 'Collapse Insights';
+                closeButton.addEventListener('click', () => actions.closePanel());
+                footerElement.append(closeButton);
+
+                panelElement.append(heroElement, cardsElement, footerElement);
+                container.replaceChildren(panelElement);
+              }
+            }
+          ]
+        },
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      const snapshotElement = document.getElementById('snapshot');
+      const notesElement = document.getElementById('notes');
+
+      function getOpenPanelId() {
+        const activeTab = document.querySelector('[data-tool-panel-tab-id][aria-selected="true"]');
+        return activeTab ? activeTab.dataset.toolPanelTabId : null;
+      }
+
+      function getSnapshot() {
+        const rootElement = document.querySelector('.hgrid');
+        const summary = document.querySelector('[data-custom-insights-summary="true"]');
+        return {
+          openPanelId: getOpenPanelId(),
+          dockWidth: rootElement ? getComputedStyle(rootElement).getPropertyValue('--hgrid-side-bar-space-right').trim() : '',
+          filterModel: grid.getFilterModel(),
+          summaryText: summary ? summary.textContent : '',
+          visibleColumns: grid.getVisibleColumns().map((column) => column.id)
+        };
+      }
+
+      function renderSnapshot() {
+        snapshotElement.textContent = JSON.stringify(getSnapshot(), null, 2);
+      }
+
+      function nextFrame() {
+        return new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+
+      async function ensureToolPanel(panelId) {
+        if (!document.querySelector('.hgrid__tool-panel--open')) {
+          document.querySelector('[data-tool-panel-toggle="true"]')?.click();
+          await nextFrame();
+        }
+
+        if (getOpenPanelId() !== panelId) {
+          document.querySelector(`[data-tool-panel-tab-id="${panelId}"]`)?.click();
+          await nextFrame();
+        }
+
+        renderSnapshot();
+      }
+
+      renderSnapshot();
+
+      document.getElementById('presetFilter').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          region: {
+            kind: 'set',
+            values: ['APAC'],
+            includeNull: false
+          }
+        });
+        notesElement.textContent = 'Preset APAC filter applied.';
+        renderSnapshot();
+      });
+
+      document.getElementById('clearFilter').addEventListener('click', async () => {
+        await grid.clearFilterModel();
+        notesElement.textContent = 'Filters cleared.';
+        renderSnapshot();
+      });
+
+      document.getElementById('openInsights').addEventListener('click', async () => {
+        await ensureToolPanel('insights');
+        notesElement.textContent = 'Insights tab opened from toolbar.';
+      });
+
+      const observer = new MutationObserver(() => {
+        renderSnapshot();
+      });
+      observer.observe(document.getElementById('grid'), {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'aria-selected']
+      });
+
+      window.__example68 = {
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

@@ -702,6 +702,86 @@ describe('RemoteDataProvider', () => {
     expect(provider.getPendingChanges()).toEqual([]);
   });
 
+  it('tracks pending changes for remote updateCell transactions', async () => {
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          return {
+            rows: createRows(request.startIndex, request.endIndex),
+            totalRowCount: 20
+          };
+        }
+      },
+      rowCount: 20,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 2,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'name');
+    await flushAsync();
+
+    provider.applyTransactions([
+      {
+        type: 'updateCell',
+        index: 0,
+        columnId: 'name',
+        value: 'Remote-1-Tx'
+      }
+    ]);
+
+    expect(provider.getValue(0, 'name')).toBe('Remote-1-Tx');
+    expect(provider.getPendingChanges()).toEqual([
+      {
+        rowKey: 1,
+        changes: [
+          {
+            columnId: 'name',
+            originalValue: 'Remote-1',
+            value: 'Remote-1-Tx'
+          }
+        ]
+      }
+    ]);
+
+    provider.discardPendingChanges();
+    expect(provider.getValue(0, 'name')).toBe('Remote-1');
+  });
+
+  it('checks the hinted block instead of scanning the full remote provider for rowKey resolution', async () => {
+    let fetchCount = 0;
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          fetchCount += 1;
+          return {
+            rows: createRows(request.startIndex, request.endIndex),
+            totalRowCount: 100
+          };
+        }
+      },
+      rowCount: 100,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 1,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'name');
+    await flushAsync();
+    provider.getValue(25, 'name');
+    await flushAsync();
+
+    expect(fetchCount).toBe(2);
+    expect(provider.getDataIndexByRowKey(1, 0)).toBe(-1);
+    await flushAsync();
+    expect(provider.getDataIndexByRowKey(1, 0)).toBe(0);
+    expect(fetchCount).toBe(3);
+  });
+
   it('ignores pending edits for remote group rows', async () => {
     const provider = new RemoteDataProvider({
       dataSource: {
@@ -740,6 +820,53 @@ describe('RemoteDataProvider', () => {
 
     expect(provider.getValue(0, 'region')).toBe('APAC');
     expect(provider.hasPendingChanges()).toBe(false);
+  });
+
+  it('ignores updateCell transactions for remote group rows', async () => {
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(): Promise<RemoteBlockResponse> {
+          return {
+            rows: [{ region: 'APAC', score: 300 }],
+            rowMetadata: [
+              {
+                kind: 'group',
+                level: 0,
+                childCount: 2,
+                groupColumnId: 'region',
+                groupKey: 'APAC',
+                aggregateValues: {
+                  region: 'APAC',
+                  score: 300
+                }
+              }
+            ],
+            totalRowCount: 1
+          };
+        }
+      },
+      rowCount: 1,
+      cache: {
+        blockSize: 5,
+        maxBlocks: 1,
+        prefetchBlocks: 0
+      }
+    });
+
+    provider.getValue(0, 'region');
+    await flushAsync();
+
+    provider.applyTransactions([
+      {
+        type: 'updateCell',
+        index: 0,
+        columnId: 'region',
+        value: 'EMEA'
+      }
+    ]);
+
+    expect(provider.getValue(0, 'region')).toBe('APAC');
+    expect(provider.getPendingChanges()).toEqual([]);
   });
 });
 
@@ -1327,6 +1454,109 @@ describe('Grid + RemoteDataProvider', () => {
     ) as HTMLDivElement | null;
     expect(provider.getValue(0, 'name')).toBe('Remote-1');
     expect(revertedNameCell?.textContent).toBe('Remote-1');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('undoes and redoes remote edits after the edited block is evicted', async () => {
+    const container = document.createElement('div');
+    container.style.width = '760px';
+    document.body.append(container);
+
+    const provider = new RemoteDataProvider({
+      dataSource: {
+        async fetchBlock(request): Promise<RemoteBlockResponse> {
+          return {
+            rows: createRows(request.startIndex, request.endIndex),
+            totalRowCount: 12
+          };
+        }
+      },
+      rowCount: 12,
+      cache: {
+        blockSize: 4,
+        maxBlocks: 1,
+        prefetchBlocks: 0
+      }
+    });
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 120, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text' }
+      ],
+      dataProvider: provider,
+      height: 200,
+      rowHeight: 28,
+      overscan: 2,
+      undoRedo: {
+        enabled: true
+      }
+    });
+
+    await flushAsync();
+    await waitForFrame();
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          startEditingAtCell: (rowIndex: number, colIndex: number) => boolean;
+          editorInputElement: HTMLInputElement;
+        };
+      }
+    ).renderer;
+
+    expect(renderer.startEditingAtCell(0, 1)).toBe(true);
+    renderer.editorInputElement.value = 'Remote-1-Edited';
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(provider.getPendingChanges()).toEqual([
+      {
+        rowKey: 1,
+        changes: [
+          {
+            columnId: 'name',
+            originalValue: 'Remote-1',
+            value: 'Remote-1-Edited'
+          }
+        ]
+      }
+    ]);
+    expect(
+      (
+        grid as unknown as {
+          renderer: { undoStack: Array<{ updates: Array<{ rowKey: number }> }> };
+        }
+      ).renderer.undoStack[0]?.updates[0]?.rowKey
+    ).toBe(1);
+
+    provider.getValue(6, 'name');
+    await flushAsync();
+    expect(provider.getDebugState().cachedBlockIndexes).toEqual([1]);
+
+    expect(grid.undo()).toBe(true);
+    expect(provider.getPendingChanges()).toEqual([]);
+    expect(provider.getValue(0, 'name')).toBeUndefined();
+    await flushAsync();
+    expect(provider.getValue(0, 'name')).toBe('Remote-1');
+
+    expect(grid.redo()).toBe(true);
+    expect(provider.getPendingChanges()).toEqual([
+      {
+        rowKey: 1,
+        changes: [
+          {
+            columnId: 'name',
+            originalValue: 'Remote-1',
+            value: 'Remote-1-Edited'
+          }
+        ]
+      }
+    ]);
+    expect(provider.getValue(0, 'name')).toBe('Remote-1-Edited');
 
     grid.destroy();
     container.remove();

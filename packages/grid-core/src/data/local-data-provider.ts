@@ -70,6 +70,10 @@ export class LocalDataProvider implements DataProvider {
     return this.rows[dataIndex];
   }
 
+  public peekRow(dataIndex: number): GridRowData | undefined {
+    return this.rows[dataIndex];
+  }
+
   public getValue(dataIndex: number, columnId: string): unknown {
     const row = this.rows[dataIndex];
     return row ? row[columnId] : undefined;
@@ -118,5 +122,26 @@ export class LocalDataProvider implements DataProvider {
         this.rows.splice(transaction.index, count);
       }
     }
+  }
+
+  public getDataIndexByRowKey(rowKey: RowKey, dataIndexHint?: number): number {
+    const rowCount = this.rows.length;
+    if (
+      Number.isInteger(dataIndexHint) &&
+      dataIndexHint !== undefined &&
+      dataIndexHint >= 0 &&
+      dataIndexHint < rowCount &&
+      this.getRowKey(dataIndexHint) === rowKey
+    ) {
+      return dataIndexHint;
+    }
+
+    for (let dataIndex = 0; dataIndex < rowCount; dataIndex += 1) {
+      if (this.getRowKey(dataIndex) === rowKey) {
+        return dataIndex;
+      }
+    }
+
+    return -1;
   }
 }

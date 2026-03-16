@@ -785,6 +785,299 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 63,
+      "file": "example63.html",
+      "title": "Example 63 - Body Cell Context Menu",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "context-menu",
+        "body-context-menu",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 64,
+      "file": "example64.html",
+      "title": "Example 64 - Filter Panel UI",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "filter-ui",
+        "column-menu",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 65,
+      "file": "example65.html",
+      "title": "Example 65 - Columns Tool Panel",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "side-bar",
+        "tool-panel",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 66,
+      "file": "example66.html",
+      "title": "Example 66 - Filters Tool Panel",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "side-bar",
+        "tool-panel",
+        "filter-ui",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 67,
+      "file": "example67.html",
+      "title": "Example 67 - Grouping and Pivot Tool Panels",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "side-bar",
+        "tool-panel",
+        "grouping",
+        "pivot",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 68,
+      "file": "example68.html",
+      "title": "Example 68 - Custom Tool Panel Registry",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "side-bar",
+        "tool-panel",
+        "custom-panel",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 69,
+      "file": "example69.html",
+      "title": "Example 69 - Side Bar Initial Open State",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "side-bar",
+        "tool-panel",
+        "options",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 70,
+      "file": "example70.html",
+      "title": "Example 70 - Status Bar Summary UX",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "status-bar",
+        "summary",
+        "remote",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 71,
+      "file": "example71.html",
+      "title": "Example 71 - Drag Fill and Range Handle",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "fill-handle",
+        "range-handle",
+        "drag-fill",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 72,
+      "file": "example72.html",
+      "title": "Example 72 - Layout Persistence UX",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "layout-persistence",
+        "preset-layout",
+        "workspace-recipe",
+        "local-storage",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 73,
+      "file": "example73.html",
+      "title": "Example 73 - Body Context Built-In Actions",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "context-menu",
+        "body-context-menu",
+        "built-in-actions",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 74,
+      "file": "example74.html",
+      "title": "Example 74 - Advanced Filter Builder",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "filter-ui",
+        "advanced-filter-builder",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 75,
+      "file": "example75.html",
+      "title": "Example 75 - Columns Tool Panel Search Reorder",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "side-bar",
+        "columns-panel",
+        "search",
+        "reorder",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 76,
+      "file": "example76.html",
+      "title": "Example 76 - Nested Advanced Filter Builder",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "filter-ui",
+        "advanced-filter-builder",
+        "nested-groups",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 77,
+      "file": "example77.html",
+      "title": "Example 77 - Header Filter Row",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "filter-ui",
+        "filter-row",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 78,
+      "file": "example78.html",
+      "title": "Example 78 - Advanced Filter Presets",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "filter-ui",
+        "advanced-filter-preset",
+        "boolean-filter-row",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 79,
+      "file": "example79.html",
+      "title": "Example 79 - Columns Presets And Custom Status Bar",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "side-bar",
+        "status-bar",
+        "layout-persistence",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 80,
+      "file": "example80.html",
+      "title": "Example 80 - Filter Row Enum And Full Distinct",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "filter-ui",
+        "filter-row",
+        "set-filter",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 81,
+      "file": "example81.html",
+      "title": "Example 81 - Fill Handle Auto Scroll And Matrix Trend",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "fill-handle",
+        "auto-scroll",
+        "range-fill",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 82,
+      "file": "example82.html",
+      "title": "Example 82 - Status Bar Large Aggregate Async",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "status-bar",
+        "aggregates",
+        "async",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 83,
+      "file": "example83.html",
+      "title": "Example 83 - Undo Redo Editing",
+      "tags": [
+        "enterprise",
+        "product-surface",
+        "editing",
+        "undo-redo",
+        "clipboard",
+        "fill-handle",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

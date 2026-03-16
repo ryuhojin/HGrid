@@ -10,6 +10,8 @@ Required methods:
 
 Optional helper:
 - `getRow(dataIndex): GridRowData | undefined`
+- `peekRow(dataIndex): GridRowData | undefined`
+- `getDataIndexByRowKey(rowKey, dataIndexHint?): number`
 
 Grid uses this contract only, so provider replacement does not require Grid API changes.
 

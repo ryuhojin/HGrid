@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 69 - Side Bar Initial Open State</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(14, 116, 144, 0.1), transparent 32%),
+          linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+        color: #163042;
+      }
+
+      .page {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 28px 24px 40px;
+      }
+
+      .hero,
+      .workspace {
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid rgba(22, 48, 66, 0.08);
+        border-radius: 22px;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      .hero {
+        padding: 24px;
+        margin-bottom: 18px;
+      }
+
+      .kicker {
+        display: inline-flex;
+        margin-bottom: 12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(14, 116, 144, 0.12);
+        color: #0c627d;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+        line-height: 1.06;
+      }
+
+      p {
+        color: #4b6474;
+        line-height: 1.58;
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .cases {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .case {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .case__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .case__title {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .case__badge {
+        display: inline-flex;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: rgba(15, 90, 122, 0.1);
+        color: #0f5a7a;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .case__grid {
+        min-width: 0;
+      }
+
+      .case__notes {
+        margin: 0;
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: #10212d;
+        color: #d8eef9;
+        font-size: 12px;
+        line-height: 1.52;
+      }
+
+      @media (max-width: 1040px) {
+        .cases {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <div class="kicker">Phase E3.3</div>
+        <h1>Side Bar Initial Open State</h1>
+        <p>
+          `sideBar.defaultPanel`과 별도로 `sideBar.initialOpen`으로 처음 렌더 시 panel을 열지 닫을지 고를 수 있습니다.
+          둘 다 같은 `defaultPanel = 'filters'`를 쓰지만, 아래 예제는 초기 열림 상태만 다르게 시작합니다.
+        </p>
+      </section>
+
+      <section class="workspace">
+        <div class="cases">
+          <section class="case" data-case="open">
+            <div class="case__header">
+              <h2 class="case__title">initialOpen: true</h2>
+              <span class="case__badge" id="openBadge">-</span>
+            </div>
+            <div class="case__grid" id="gridOpen"></div>
+            <pre class="case__notes" id="openNotes"></pre>
+          </section>
+
+          <section class="case" data-case="closed">
+            <div class="case__header">
+              <h2 class="case__title">initialOpen: false</h2>
+              <span class="case__badge" id="closedBadge">-</span>
+            </div>
+            <div class="case__grid" id="gridClosed"></div>
+            <pre class="case__notes" id="closedNotes"></pre>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'name', header: 'Name', width: 200, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' }
+      ];
+
+      const rowData = [
+        { id: 1, name: 'Alpha Prime', region: 'APAC', score: 12 },
+        { id: 2, name: 'Beta North', region: 'EMEA', score: 32 },
+        { id: 3, name: 'Gamma Delta', region: 'APAC', score: 48 },
+        { id: 4, name: 'Delta Coast', region: 'AMER', score: 64 }
+      ];
+
+      function createGrid(containerId, initialOpen) {
+        return new HGrid.Grid(document.getElementById(containerId), {
+          columns,
+          rowData,
+          sideBar: {
+            enabled: true,
+            panels: ['filters', 'columns'],
+            defaultPanel: 'filters',
+            initialOpen,
+            width: 320
+          },
+          height: 260,
+          rowHeight: 28,
+          overscan: 4
+        });
+      }
+
+      const openGrid = createGrid('gridOpen', true);
+      const closedGrid = createGrid('gridClosed', false);
+
+      function readCaseSnapshot(caseSelector) {
+        const caseElement = document.querySelector(caseSelector);
+        const gridRoot = caseElement && caseElement.querySelector('.hgrid');
+        const activeTab = caseElement && caseElement.querySelector('[data-tool-panel-tab-id][aria-selected="true"]');
+        return {
+          panelOpen: Boolean(caseElement && caseElement.querySelector('.hgrid__tool-panel--open')),
+          openPanelId: activeTab ? activeTab.dataset.toolPanelTabId : null,
+          dockWidth: gridRoot ? getComputedStyle(gridRoot).getPropertyValue('--hgrid-side-bar-space-right').trim() : ''
+        };
+      }
+
+      function renderCaseState(caseSelector, badgeId, notesId) {
+        const snapshot = readCaseSnapshot(caseSelector);
+        document.getElementById(badgeId).textContent = snapshot.panelOpen ? 'Open' : 'Closed';
+        document.getElementById(notesId).textContent = JSON.stringify(snapshot, null, 2);
+      }
+
+      function renderSnapshot() {
+        renderCaseState('[data-case="open"]', 'openBadge', 'openNotes');
+        renderCaseState('[data-case="closed"]', 'closedBadge', 'closedNotes');
+      }
+
+      const observer = new MutationObserver(() => renderSnapshot());
+      ['gridOpen', 'gridClosed'].forEach((containerId) => {
+        const containerElement = document.getElementById(containerId);
+        if (!containerElement) {
+          return;
+        }
+        observer.observe(containerElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['class', 'style', 'aria-selected']
+        });
+      });
+
+      renderSnapshot();
+
+      window.__example69 = {
+        getSnapshot() {
+          return {
+            open: readCaseSnapshot('[data-case="open"]'),
+            closed: readCaseSnapshot('[data-case="closed"]')
+          };
+        }
+      };
+    </script>
+  </body>
+</html>

@@ -1,6 +1,9 @@
 import { Grid } from '@hgrid/grid-core';
 import type {
+  AdvancedFilterModel,
   ColumnDef,
+  GridAdvancedFilterPreset,
+  GridColumnLayout,
   ColumnPinPosition,
   GroupAggregationDef,
   GroupModelItem,
@@ -24,7 +27,10 @@ import type {
 } from '@hgrid/grid-core';
 
 export type {
+  AdvancedFilterModel,
   ColumnDef,
+  GridAdvancedFilterPreset,
+  GridColumnLayout,
   ColumnPinPosition,
   GroupAggregationDef,
   GroupModelItem,
@@ -76,6 +82,46 @@ export class VueGridAdapter {
 
   public setColumnPin(columnId: string, pinned?: ColumnPinPosition): void {
     this.grid.setColumnPin(columnId, pinned);
+  }
+
+  public getColumnLayout(): GridColumnLayout {
+    return this.grid.getColumnLayout();
+  }
+
+  public setColumnLayout(layout: GridColumnLayout): void {
+    this.grid.setColumnLayout(layout);
+  }
+
+  public getAdvancedFilterModel(): AdvancedFilterModel | null {
+    return this.grid.getAdvancedFilterModel();
+  }
+
+  public setAdvancedFilterModel(advancedFilterModel: AdvancedFilterModel | null): Promise<void> {
+    return this.grid.setAdvancedFilterModel(advancedFilterModel);
+  }
+
+  public clearAdvancedFilterModel(): Promise<void> {
+    return this.grid.clearAdvancedFilterModel();
+  }
+
+  public getAdvancedFilterPresets(): GridAdvancedFilterPreset[] {
+    return this.grid.getAdvancedFilterPresets();
+  }
+
+  public setAdvancedFilterPresets(presets: GridAdvancedFilterPreset[]): void {
+    this.grid.setAdvancedFilterPresets(presets);
+  }
+
+  public saveAdvancedFilterPreset(presetId: string, label?: string): boolean {
+    return this.grid.saveAdvancedFilterPreset(presetId, label);
+  }
+
+  public applyAdvancedFilterPreset(presetId: string): Promise<boolean> {
+    return this.grid.applyAdvancedFilterPreset(presetId);
+  }
+
+  public deleteAdvancedFilterPreset(presetId: string): boolean {
+    return this.grid.deleteAdvancedFilterPreset(presetId);
   }
 
   public getGroupModel(): GroupModelItem[] {
@@ -228,6 +274,22 @@ export class VueGridAdapter {
 
   public clearSelection(): void {
     this.grid.clearSelection();
+  }
+
+  public undo(): boolean {
+    return this.grid.undo();
+  }
+
+  public redo(): boolean {
+    return this.grid.redo();
+  }
+
+  public canUndo(): boolean {
+    return this.grid.canUndo();
+  }
+
+  public canRedo(): boolean {
+    return this.grid.canRedo();
   }
 
   public on<K extends GridEventName>(eventName: K, handler: (payload: GridEventMap[K]) => void): void {

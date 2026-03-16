@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 81 - Fill Handle Auto Scroll And Matrix Trend</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f3f6fb;
+        color: #172033;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0;
+        color: #53627c;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(780px, 1fr) 320px;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .surface {
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        border-radius: 999px;
+        background: white;
+        color: #0f172a;
+        font: inherit;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+
+      #grid {
+        width: 100%;
+        min-width: 780px;
+      }
+
+      .panel {
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .panel h2 {
+        margin: 0;
+        font-size: 15px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #64748b;
+      }
+
+      .metric {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: #f8fafc;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+      }
+
+      .metric strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: #475569;
+      }
+
+      .metric code {
+        display: block;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        color: #0f172a;
+      }
+
+      .note {
+        font-size: 13px;
+        line-height: 1.5;
+        color: #475569;
+      }
+
+      @media (max-width: 1180px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        #grid {
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 81 - Fill Handle Auto Scroll And Matrix Trend</h1>
+    <p>auto-scroll drag fill과 2D numeric matrix trend fill을 같이 확인하는 E3.5 확장 smoke example</p>
+
+    <div class="layout">
+      <section class="surface workspace">
+        <div class="toolbar">
+          <button id="resetRows">Reset Data</button>
+          <button id="selectAutoScrollSeed">Select Auto Scroll Seed</button>
+          <button id="dragAutoScroll">Drag Auto Scroll to Row 19</button>
+          <button id="selectMatrixSeed">Select Matrix Seed</button>
+          <button id="dragMatrixTrend">Drag Matrix Trend to Q4 / Row 4</button>
+        </div>
+        <div id="grid"></div>
+      </section>
+
+      <aside class="surface panel">
+        <h2>Snapshot</h2>
+        <div class="metric">
+          <strong>Selection</strong>
+          <code id="selectionText"></code>
+        </div>
+        <div class="metric">
+          <strong>Scroll</strong>
+          <code id="scrollText"></code>
+        </div>
+        <div class="metric">
+          <strong>Tracked Rows</strong>
+          <code id="rowsText"></code>
+        </div>
+        <div class="metric">
+          <strong>Last Edit</strong>
+          <code id="lastEditText"></code>
+        </div>
+        <div class="note">
+          정책:
+          <br />
+          pointer가 body edge 밖으로 나가면 auto-scroll이 이어지고,
+          <br />
+          2x2 이상의 affine numeric seed는 row/column 둘 다 trend로 확장됩니다.
+        </div>
+      </aside>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const POINTER_ID = 1081;
+      const TRACKED_ROW_INDEXES = [0, 1, 2, 3, 17, 18];
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 88, type: 'number' },
+        { id: 'score', header: 'Score', width: 140, type: 'number', editable: true },
+        { id: 'q1', header: 'Q1', width: 120, type: 'number', editable: true },
+        { id: 'q2', header: 'Q2', width: 120, type: 'number', editable: true },
+        { id: 'q3', header: 'Q3', width: 120, type: 'number', editable: true },
+        { id: 'q4', header: 'Q4', width: 120, type: 'number', editable: true }
+      ];
+
+      function buildRowData() {
+        return Array.from({ length: 24 }, (_, index) => ({
+          id: index + 1,
+          score: index === 0 ? 5 : index === 1 ? 10 : 0,
+          q1: index === 0 ? 1 : index === 1 ? 11 : 0,
+          q2: index === 0 ? 2 : index === 1 ? 12 : 0,
+          q3: 0,
+          q4: 0
+        }));
+      }
+
+      let lastEdit = null;
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: buildRowData(),
+        height: 276,
+        rowHeight: 32,
+        overscan: 4,
+        rangeHandle: {
+          enabled: true,
+          mode: 'fill'
+        },
+        statusBar: {
+          enabled: true,
+          items: ['selection', 'aggregates', 'rows']
+        }
+      });
+
+      grid.on('editCommit', (event) => {
+        lastEdit = event;
+        renderSnapshot();
+      });
+
+      function waitFrames(count) {
+        return new Promise((resolve) => {
+          let remaining = Math.max(1, count);
+          const tick = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+      }
+
+      function createPointerLikeEvent(type, pointerId, clientX, clientY) {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientX,
+          clientY
+        });
+        Object.defineProperty(event, 'pointerId', {
+          configurable: true,
+          value: pointerId
+        });
+        return event;
+      }
+
+      function getViewportElement() {
+        return document.querySelector('.hgrid__viewport');
+      }
+
+      function getSelectionSnapshot() {
+        return grid.getSelection().cellRanges[0] ?? null;
+      }
+
+      function getTrackedRows() {
+        const provider = grid.getDataProvider();
+        return TRACKED_ROW_INDEXES.map((rowIndex) => {
+          const row = provider.getRow(rowIndex) || {};
+          return {
+            rowIndex,
+            id: row.id,
+            score: row.score,
+            q1: row.q1,
+            q2: row.q2,
+            q3: row.q3,
+            q4: row.q4
+          };
+        });
+      }
+
+      function renderSnapshot() {
+        document.getElementById('selectionText').textContent = JSON.stringify(getSelectionSnapshot());
+        document.getElementById('scrollText').textContent = JSON.stringify({
+          scrollTop: Math.round(getViewportElement()?.scrollTop || 0),
+          handleVisible: document.querySelector('[data-range-handle="true"]')?.classList.contains('hgrid__fill-handle--visible') === true
+        });
+        document.getElementById('rowsText').textContent = JSON.stringify(getTrackedRows(), null, 2);
+        document.getElementById('lastEditText').textContent = lastEdit ? JSON.stringify(lastEdit, null, 2) : 'none';
+      }
+
+      async function resetRows() {
+        lastEdit = null;
+        grid.setOptions({ rowData: buildRowData() });
+        await waitFrames(3);
+        const viewport = getViewportElement();
+        if (viewport) {
+          viewport.scrollTop = 0;
+          viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }
+        await waitFrames(3);
+        renderSnapshot();
+      }
+
+      function setAutoScrollSeed() {
+        grid.setSelection({
+          activeCell: { rowIndex: 1, colIndex: 1 },
+          cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 1 }],
+          rowRanges: []
+        });
+        renderSnapshot();
+      }
+
+      function setMatrixSeed() {
+        grid.setSelection({
+          activeCell: { rowIndex: 1, colIndex: 3 },
+          cellRanges: [{ r1: 0, c1: 2, r2: 1, c2: 3 }],
+          rowRanges: []
+        });
+        renderSnapshot();
+      }
+
+      async function dragHandleToPoint(targetX, targetY, holdFrames) {
+        const handle = document.querySelector('[data-range-handle="true"]');
+        if (!handle) {
+          return false;
+        }
+
+        const handleRect = handle.getBoundingClientRect();
+        const startX = handleRect.left + handleRect.width / 2;
+        const startY = handleRect.top + handleRect.height / 2;
+        handle.dispatchEvent(createPointerLikeEvent('pointerdown', POINTER_ID, startX, startY));
+        window.dispatchEvent(createPointerLikeEvent('pointermove', POINTER_ID, targetX, targetY));
+        await waitFrames(Math.max(2, holdFrames));
+        window.dispatchEvent(createPointerLikeEvent('pointerup', POINTER_ID, targetX, targetY));
+        await waitFrames(4);
+        renderSnapshot();
+        return true;
+      }
+
+      async function dragAutoScrollSeries() {
+        setAutoScrollSeed();
+        await waitFrames(3);
+        const bodyRect = document.querySelector('.hgrid__body').getBoundingClientRect();
+        const scoreCell = document.querySelector('.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="score"]');
+        const scoreRect = scoreCell ? scoreCell.getBoundingClientRect() : bodyRect;
+        return dragHandleToPoint(scoreRect.left + scoreRect.width / 2, bodyRect.bottom + 26, 22);
+      }
+
+      async function dragMatrixTrend() {
+        setMatrixSeed();
+        await waitFrames(3);
+        const targetCell = document.querySelector('.hgrid__row[data-row-index="3"] .hgrid__cell[data-column-id="q4"]');
+        if (!targetCell) {
+          return false;
+        }
+        const targetRect = targetCell.getBoundingClientRect();
+        return dragHandleToPoint(targetRect.left + targetRect.width / 2, targetRect.top + targetRect.height / 2, 2);
+      }
+
+      document.getElementById('resetRows').addEventListener('click', () => {
+        void resetRows();
+      });
+      document.getElementById('selectAutoScrollSeed').addEventListener('click', () => {
+        setAutoScrollSeed();
+      });
+      document.getElementById('dragAutoScroll').addEventListener('click', () => {
+        void dragAutoScrollSeries();
+      });
+      document.getElementById('selectMatrixSeed').addEventListener('click', () => {
+        setMatrixSeed();
+      });
+      document.getElementById('dragMatrixTrend').addEventListener('click', () => {
+        void dragMatrixTrend();
+      });
+
+      setAutoScrollSeed();
+      renderSnapshot();
+
+      window.__example81 = {
+        resetRows,
+        setAutoScrollSeed,
+        setMatrixSeed,
+        dragAutoScrollSeries,
+        dragMatrixTrend,
+        getSnapshot() {
+          return {
+            selection: getSelectionSnapshot(),
+            trackedRows: getTrackedRows(),
+            scrollTop: Math.round(getViewportElement()?.scrollTop || 0),
+            lastEdit
+          };
+        }
+      };
+    </script>
+  </body>
+</html>

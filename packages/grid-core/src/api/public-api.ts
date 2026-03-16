@@ -11,13 +11,44 @@ export type {
 export type {
   ColumnComparator,
   ColumnDef,
+  ColumnFilterMode,
+  GridAdvancedFilterPreset,
+  GridColumnLayout,
+  GridColumnLayoutPreset,
+  GridBuiltInStatusBarItemId,
+  GridBuiltInBodyMenuActionId,
+  GridBuiltInToolPanelId,
   GridBuiltInColumnMenuActionId,
   GridColumnMenuContext,
   GridColumnMenuOptions,
   GridColumnMenuTrigger,
+  GridCustomToolPanelDefinition,
+  GridCustomToolPanelRenderContext,
+  GridContextMenuContext,
   GridContextMenuOptions,
   GridMenuItem,
   GridMenuOpenSource,
+  GridRangeHandleMode,
+  GridRangeHandleOptions,
+  GridUndoRedoOptions,
+  GridSetFilterOptions,
+  GridSetFilterReason,
+  GridSetFilterValueOption,
+  GridSetFilterValueSource,
+  GridSetFilterValuesContext,
+  GridSetFilterValuesGetter,
+  GridSideBarOptions,
+  GridStatusBarItemId,
+  GridStatusBarItemAlign,
+  GridStatusBarItemTone,
+  GridStatusBarCustomItemDefinition,
+  GridStatusBarCustomItemRenderContext,
+  GridStatusBarCustomItemRenderResult,
+  GridStatusBarCustomItemState,
+  GridStatusBarOptions,
+  GridToolPanelActions,
+  GridToolPanelId,
+  GridToolPanelRenderState,
   ColumnGroupDef,
   ColumnFormatter,
   GroupAggregationContext,
@@ -68,20 +99,26 @@ export type {
   UnsafeHtmlSanitizer
 } from '../core/grid-options';
 export type {
+  AdvancedFilterPresetUiActionEvent,
   CellClickEvent,
   ColumnReorderEvent,
   ColumnResizeEvent,
   EditCancelEvent,
   EditCommitEvent,
   EditStartEvent,
+  GroupingUiApplyEvent,
   GridEventMap,
-  GridEventName
+  GridEventName,
+  PivotUiApplyEvent
 } from '../core/event-bus';
 export type { EditCommitAuditLogger, EditCommitAuditPayload, EditCommitEventPayload, EditCommitSource } from '../core/edit-events';
 export { LocalDataProvider } from '../data/local-data-provider';
 export { ColumnarDataProvider } from '../data/columnar-data-provider';
 export { CooperativeFilterExecutor } from '../data/filter-executor';
 export type {
+  AdvancedFilterModel,
+  AdvancedFilterOperator,
+  AdvancedFilterRule,
   ColumnFilterCondition,
   ColumnFilterInput,
   DateFilterCondition,

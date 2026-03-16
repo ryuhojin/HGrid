@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 79 - Columns Presets And Custom Status Bar</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background: #eef3f9;
+        color: #12263a;
+      }
+
+      .page {
+        max-width: 1260px;
+        margin: 0 auto;
+        padding: 28px 24px 40px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0;
+        color: #526375;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 18px;
+        margin-top: 22px;
+      }
+
+      .surface,
+      .card {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%);
+      }
+
+      .toolbar button {
+        border: 1px solid rgba(148, 163, 184, 0.34);
+        border-radius: 999px;
+        background: #fff;
+        color: inherit;
+        font: inherit;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .toolbar button:hover {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .card {
+        padding: 16px;
+      }
+
+      .card h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #0f172a;
+      }
+
+      @media (max-width: 1040px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Columns Presets + Custom Status Bar</h1>
+      <p>columns tool panel 안에서 preset layout을 바로 적용하고, custom status item이 filter/column state를 같이 요약하는 E3 smoke example입니다.</p>
+
+      <div class="layout">
+        <section class="surface">
+          <div class="toolbar">
+            <button id="filterEmea" type="button">Filter EMEA</button>
+            <button id="clearFilter" type="button">Clear Filter</button>
+            <button id="openColumns" type="button">Open Columns Panel</button>
+          </div>
+          <div id="grid"></div>
+        </section>
+
+        <aside class="sidebar">
+          <section class="card">
+            <h2>Snapshot</h2>
+            <pre id="snapshot"></pre>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const rows = [
+        { id: 1, name: 'Ahn', region: 'APAC', desk: 'Sales', balance: 1240, status: 'active', updatedAt: '2026-03-10T09:00:00.000Z' },
+        { id: 2, name: 'Park', region: 'EMEA', desk: 'Ops', balance: 880, status: 'review', updatedAt: '2026-03-11T11:30:00.000Z' },
+        { id: 3, name: 'Kim', region: 'AMER', desk: 'Finance', balance: 1560, status: 'active', updatedAt: '2026-03-12T02:15:00.000Z' },
+        { id: 4, name: 'Lee', region: 'APAC', desk: 'Support', balance: 420, status: 'draft', updatedAt: '2026-03-09T18:45:00.000Z' },
+        { id: 5, name: 'Han', region: 'EMEA', desk: 'Revenue', balance: 1160, status: 'active', updatedAt: '2026-03-13T07:05:00.000Z' }
+      ];
+
+      const presetCompact = {
+        id: 'compact',
+        label: 'Compact Preset',
+        layout: {
+          columnOrder: ['id', 'name', 'region', 'desk', 'balance', 'status', 'updatedAt'],
+          hiddenColumnIds: ['updatedAt'],
+          pinnedColumns: { id: 'left' },
+          columnWidths: {
+            id: 84,
+            name: 180,
+            region: 130,
+            desk: 160,
+            balance: 120,
+            status: 120,
+            updatedAt: 180
+          }
+        }
+      };
+
+      const presetAnalyst = {
+        id: 'analyst',
+        label: 'Analyst Preset',
+        layout: {
+          columnOrder: ['id', 'region', 'name', 'balance', 'desk', 'status', 'updatedAt'],
+          hiddenColumnIds: ['status'],
+          pinnedColumns: { id: 'left', region: 'left' },
+          columnWidths: {
+            id: 84,
+            region: 120,
+            name: 180,
+            balance: 130,
+            desk: 160,
+            status: 120,
+            updatedAt: 200
+          }
+        }
+      };
+
+      const snapshotElement = document.getElementById('snapshot');
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: [
+          { id: 'id', header: 'ID', width: 84, type: 'number' },
+          { id: 'name', header: 'Name', width: 180, type: 'text' },
+          { id: 'region', header: 'Region', width: 130, type: 'text' },
+          { id: 'desk', header: 'Department', width: 160, type: 'text' },
+          { id: 'balance', header: 'Balance', width: 120, type: 'number' },
+          { id: 'status', header: 'Status', width: 120, type: 'text' },
+          { id: 'updatedAt', header: 'Updated At', width: 200, type: 'date' }
+        ],
+        rowData: rows.map((row) => ({ ...row })),
+        sideBar: {
+          enabled: true,
+          panels: ['columns'],
+          defaultPanel: 'columns',
+          initialOpen: true,
+          columnLayoutPresets: [presetCompact, presetAnalyst]
+        },
+        statusBar: {
+          enabled: true,
+          customItems: [
+            {
+              id: 'filters',
+              align: 'main',
+              render: ({ state }) => ({
+                text: `Filters ${Object.keys(state.filterModel).length}`,
+                tone: Object.keys(state.filterModel).length > 0 ? 'active' : 'default'
+              })
+            },
+            {
+              id: 'columns',
+              align: 'meta',
+              render: ({ state }) => `Cols ${state.visibleColumnCount}/${state.totalColumnCount}`
+            }
+          ],
+          items: ['filters', 'selection', 'columns', 'rows']
+        },
+        height: 360,
+        rowHeight: 30,
+        overscan: 4
+      });
+
+      function getVisibleIds() {
+        const visibleIds = [];
+        const dataProvider = grid.getDataProvider();
+        for (let rowIndex = 0; rowIndex < grid.getViewRowCount(); rowIndex += 1) {
+          const row = dataProvider.getRow?.(grid.getDataIndex(rowIndex));
+          if (row && row.id !== null && row.id !== undefined) {
+            visibleIds.push(String(row.id));
+          }
+        }
+        return visibleIds;
+      }
+
+      function getSnapshot() {
+        return {
+          filterModel: grid.getFilterModel(),
+          columnLayout: grid.getColumnLayout(),
+          visibleIds: getVisibleIds(),
+          statusBar: {
+            filters: document.querySelector('[data-status-bar-item="filters"]')?.textContent ?? '',
+            columns: document.querySelector('[data-status-bar-item="columns"]')?.textContent ?? ''
+          }
+        };
+      }
+
+      function renderSnapshot() {
+        snapshotElement.textContent = JSON.stringify(getSnapshot(), null, 2);
+      }
+
+      renderSnapshot();
+      setInterval(renderSnapshot, 250);
+
+      document.getElementById('filterEmea').addEventListener('click', async () => {
+        await grid.setFilterModel({
+          region: {
+            kind: 'set',
+            values: ['EMEA']
+          }
+        });
+        renderSnapshot();
+      });
+
+      document.getElementById('clearFilter').addEventListener('click', async () => {
+        await grid.clearFilterModel();
+        renderSnapshot();
+      });
+
+      document.getElementById('openColumns').addEventListener('click', () => {
+        const toggle = document.querySelector('[data-tool-panel-toggle="true"]');
+        if (toggle instanceof HTMLButtonElement) {
+          toggle.click();
+        }
+      });
+
+      window.__example79 = {
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

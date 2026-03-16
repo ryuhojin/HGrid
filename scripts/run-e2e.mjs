@@ -4155,6 +4155,1228 @@ async function runExample54Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample55Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example55.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example55?.getSnapshot), null, { timeout: 20_000 });
+  await page.waitForFunction(() => {
+    const snapshot = window.__example55?.getSnapshot?.();
+    return snapshot && snapshot.serverRequestCount >= 1 && snapshot.firstVisibleId !== null;
+  }, null, { timeout: 20_000 });
+
+  await page.click('#filter-active');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example55?.getSnapshot?.();
+    const statusFilter = snapshot?.queryModel?.filterModel?.status;
+    return snapshot && statusFilter && (statusFilter.kind === 'set' || statusFilter.type === 'set');
+  }, null, { timeout: 20_000 });
+
+  await page.click('#children-full');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example55?.getSnapshot?.();
+    return snapshot && snapshot.serverSideQueryModel?.requestKind === 'children';
+  }, null, { timeout: 20_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample56Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example56.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example56?.inspect), null, { timeout: 20_000 });
+  await page.waitForSelector('#status', { timeout: 20_000, state: 'attached' });
+
+  await page.click('#mode-tree');
+  await page.waitForFunction(() => String(document.getElementById('status')?.textContent || '').includes('remote tree'), null, {
+    timeout: 20_000
+  });
+  await page.click('#expand-first');
+  await page.click('#inspect');
+  await page.waitForFunction(() => String(document.getElementById('contract-log')?.textContent || '').includes('"requestKind"'), null, {
+    timeout: 20_000
+  });
+
+  await page.click('#mode-group-pivot');
+  await page.waitForFunction(
+    () => String(document.getElementById('status')?.textContent || '').includes('grouping + pivot'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+  await page.click('#inspect');
+  await page.waitForFunction(
+    () => String(document.getElementById('preview-log')?.textContent || '').includes('pivotResultColumnIds'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample57Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example57.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example57?.inspect), null, { timeout: 20_000 });
+  await page.waitForSelector('#state-log', { timeout: 20_000, state: 'attached' });
+
+  await page.click('#sort-desc');
+  await page.waitForFunction(
+    () => String(document.getElementById('state-log')?.textContent || '').includes('"sortModel"'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+
+  await page.click('#filter-active');
+  await page.waitForFunction(
+    () => String(document.getElementById('state-log')?.textContent || '').includes('"filterModel"'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample58Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example58.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example58?.getPendingChanges), null, { timeout: 20_000 });
+  await page.waitForSelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]', {
+    timeout: 20_000,
+    state: 'attached'
+  });
+
+  await page.locator('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]').dblclick();
+  await page.waitForSelector('.hgrid__editor-input', { timeout: 10_000, state: 'attached' });
+  await page.locator('.hgrid__editor-input').fill('Remote-1-Edited');
+  await page.locator('.hgrid__editor-input').press('Enter');
+  await page.waitForFunction(() => window.__example58?.getPendingChanges?.().length === 1, null, { timeout: 20_000 });
+
+  await page.evaluate(() => window.__example58.saveChanges());
+  await page.waitForFunction(() => {
+    const payload = window.__example58?.getPendingChanges?.();
+    const serverRows = window.__example58?.getServerRows?.();
+    return Array.isArray(payload) && payload.length === 0 && Array.isArray(serverRows) && serverRows[0]?.name === 'Remote-1-Edited';
+  }, null, { timeout: 20_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample59Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example59.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example59?.inspect), null, { timeout: 20_000 });
+  await page.click('#expand-apac');
+  await page.waitForFunction(
+    () => String(document.getElementById('status')?.textContent || '').includes('APAC'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+  await page.click('#filter-emea');
+  await page.waitForFunction(
+    () => String(document.getElementById('contract-log')?.textContent || '').includes('"EMEA"'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample60Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example60.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example60?.inspect), null, { timeout: 20_000 });
+  await page.click('#sort-feb');
+  await page.waitForFunction(
+    () => String(document.getElementById('contract-log')?.textContent || '').includes('sales::'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+  await page.click('#filter-apac');
+  await page.waitForFunction(
+    () => String(document.getElementById('contract-log')?.textContent || '').includes('"APAC"'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample61Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example61.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example61?.inspect), null, { timeout: 20_000 });
+  await page.click('#expand-root1');
+  await page.waitForFunction(
+    () => String(document.getElementById('status')?.textContent || '').includes('root-1'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+  await page.click('#filter-node1');
+  await page.waitForFunction(
+    () => String(document.getElementById('contract-log')?.textContent || '').includes('"contains"'),
+    null,
+    {
+      timeout: 20_000
+    }
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample63Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example63.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]', {
+    timeout: 20_000,
+    state: 'attached'
+  });
+
+  await page.locator('.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]').click({ button: 'right' });
+  await page.locator('.hgrid__column-menu-item', { hasText: 'Inspect cell context' }).click();
+
+  await page.waitForFunction(() => {
+    const payload = window.__example63?.getLastPayload?.();
+    return (
+      payload &&
+      payload.kind === 'cell' &&
+      payload.rowIndex === 1 &&
+      payload.dataIndex === 1 &&
+      payload.rowKey === 2 &&
+      payload.columnId === 'name' &&
+      payload.selection?.activeCell?.rowIndex === 1 &&
+      payload.selection?.activeCell?.colIndex === 1
+    );
+  }, null, { timeout: 20_000 });
+
+  await page.locator('.hgrid__row[data-row-index="2"] .hgrid__cell[data-column-id="status"]').click({ button: 'right' });
+  await page.locator('.hgrid__column-menu-item', { hasText: 'Mark row reviewed' }).click();
+
+  await page.waitForFunction(() => window.__example63?.getStatusByRowIndex?.(2) === 'reviewed', null, {
+    timeout: 20_000
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample73Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example73.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example73?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__cell[data-column-id="name"]', {
+    timeout: 20_000,
+    state: 'attached'
+  });
+
+  const openBodyMenuAtNameCell = async () => {
+    await page.locator('.hgrid__cell[data-column-id="name"]').filter({ hasText: 'Beta' }).first().click({ button: 'right' });
+  };
+
+  await openBodyMenuAtNameCell();
+  await page.locator('.hgrid__column-menu-item', { hasText: 'Copy cell' }).click();
+  await page.waitForFunction(() => window.__example73?.getSnapshot?.().clipboardText === 'Beta', null, {
+    timeout: 10_000
+  });
+
+  await openBodyMenuAtNameCell();
+  await page.locator('.hgrid__column-menu-item', { hasText: 'Copy row' }).click();
+  await page.waitForFunction(() => window.__example73?.getSnapshot?.().clipboardText === '2\tBeta\treview\t2026-03-11', null, {
+    timeout: 10_000
+  });
+
+  await page.click('#seedSelection');
+  await openBodyMenuAtNameCell();
+  await page.locator('.hgrid__column-menu-item', { hasText: 'Copy selection' }).click();
+  await page.waitForFunction(() => window.__example73?.getSnapshot?.().clipboardText === 'Beta\treview\nGamma\tactive', null, {
+    timeout: 10_000
+  });
+
+  await openBodyMenuAtNameCell();
+  await page.locator('.hgrid__column-menu-item', { hasText: 'Filter by this value' }).click();
+  await page.waitForFunction(() => {
+    const snapshot = window.__example73?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.name?.kind === 'set' &&
+      snapshot.filterModel?.name?.values?.[0] === 'Beta' &&
+      snapshot.visibleIds?.join(',') === '2'
+    );
+  }, null, { timeout: 10_000 });
+
+  await openBodyMenuAtNameCell();
+  await page.locator('.hgrid__column-menu-item', { hasText: 'Clear column filter' }).click();
+  await page.waitForFunction(() => {
+    const snapshot = window.__example73?.getSnapshot?.();
+    return snapshot && Object.keys(snapshot.filterModel ?? {}).length === 0 && snapshot.visibleIds?.join(',') === '1,2,3,4';
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample74Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example74.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example74?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__tool-panel--open', { timeout: 15_000, state: 'visible' });
+
+  await page.click('[data-tool-panel-filter-surface="builder"]');
+  await page.selectOption('[data-advanced-filter-role="match"]', 'or');
+  await page.selectOption('[data-advanced-filter-role="column"][data-advanced-filter-path="0"]', 'name');
+  await page.fill('[data-advanced-filter-role="value"][data-advanced-filter-path="0"]', 'mm');
+  await page.click('[data-advanced-filter-action="add-rule"]');
+  await page.selectOption('[data-advanced-filter-role="column"][data-advanced-filter-path="1"]', 'region');
+  await page.selectOption('[data-advanced-filter-role="condition-operator"][data-advanced-filter-path="1"]', 'equals');
+  await page.fill('[data-advanced-filter-role="value"][data-advanced-filter-path="1"]', 'EMEA');
+  await page.click('[data-advanced-filter-action="apply"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example74?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.advancedFilterModel?.operator === 'or' &&
+      snapshot.advancedFilterModel?.rules?.length === 2 &&
+      snapshot.visibleIds?.join(',') === '2,3'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#seedQuick');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example74?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.status?.kind === 'set' &&
+      snapshot.visibleIds?.join(',') === '2'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#clearAll');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example74?.getSnapshot?.();
+    return (
+      snapshot &&
+      Object.keys(snapshot.filterModel ?? {}).length === 0 &&
+      snapshot.advancedFilterModel === null &&
+      snapshot.visibleIds?.join(',') === '1,2,3,4,5'
+    );
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample64Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example64.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__header-cell[data-column-id="name"]', {
+    timeout: 20_000,
+    state: 'attached'
+  });
+
+  const openHeaderFilter = async (columnId) => {
+    await page.locator(`.hgrid__header-cell[data-column-id="${columnId}"]`).click({ button: 'right' });
+    await page.locator('.hgrid__column-menu-item', { hasText: 'Open filter' }).click();
+  };
+
+  await page.locator('.hgrid__header-cell[data-column-id="name"]').click({ button: 'right' });
+  const initialMenuMetrics = await page.evaluate(() => window.__example64?.getColumnMenuMetrics?.());
+  assert.ok(initialMenuMetrics, 'example64 should expose column menu metrics when the menu is open');
+  assert.ok(
+    initialMenuMetrics.menuTop >= initialMenuMetrics.rootTop - 1 &&
+      initialMenuMetrics.menuBottom <= initialMenuMetrics.rootBottom + 1 &&
+      initialMenuMetrics.menuRight <= initialMenuMetrics.rootRight + 1,
+    `example64 column menu should stay within grid height, actual=${JSON.stringify(initialMenuMetrics)}`
+  );
+  assert.ok(
+    initialMenuMetrics.menuScrollHeight >= initialMenuMetrics.menuHeight,
+    `example64 column menu should remain scrollable when constrained, actual=${JSON.stringify(initialMenuMetrics)}`
+  );
+  await page.keyboard.press('Escape');
+
+  await openHeaderFilter('name');
+  const initialPanelMetrics = await page.evaluate(() => window.__example64?.getFilterPanelMetrics?.());
+  assert.ok(initialPanelMetrics, 'example64 should expose filter panel metrics when the panel is open');
+  assert.ok(
+    initialPanelMetrics.panelTop >= initialPanelMetrics.rootTop - 1 &&
+      initialPanelMetrics.panelBottom <= initialPanelMetrics.rootBottom + 1 &&
+      initialPanelMetrics.panelRight <= initialPanelMetrics.rootRight + 1,
+    `example64 filter panel should stay within grid height, actual=${JSON.stringify(initialPanelMetrics)}`
+  );
+  assert.ok(
+    initialPanelMetrics.bodyScrollHeight >= initialPanelMetrics.bodyHeight,
+    `example64 filter panel body should remain scrollable when constrained, actual=${JSON.stringify(initialPanelMetrics)}`
+  );
+
+  await page.locator('.hgrid__filter-panel [data-filter-role="value"][data-filter-clause-index="0"]').fill('ta');
+  await page.selectOption('.hgrid__filter-panel [data-filter-role="operator"][data-filter-clause-index="1"]', 'startsWith');
+  await page.locator('.hgrid__filter-panel [data-filter-role="value"][data-filter-clause-index="1"]').fill('Be');
+  await page.locator('.hgrid__filter-panel [data-filter-action="apply"]').click();
+  await page.waitForFunction(() => {
+    const snapshot = window.__example64?.getSnapshot?.();
+    return (
+      snapshot &&
+      Array.isArray(snapshot.filterModel?.name) &&
+      snapshot.filterModel.name.length === 2 &&
+      snapshot.filterModel.name[0]?.value === 'ta' &&
+      snapshot.filterModel.name[1]?.value === 'Be' &&
+      snapshot.headers?.name === true &&
+      Array.isArray(snapshot.visibleIds) &&
+      snapshot.visibleIds.join(',') === '2'
+    );
+  }, null, { timeout: 20_000 });
+
+  await page.click('#clearFilters');
+  await page.waitForFunction(() => window.__example64?.getSnapshot?.().filteredColumnCount === 0, null, {
+    timeout: 20_000
+  });
+
+  await openHeaderFilter('score');
+  await page.selectOption('.hgrid__filter-panel [data-filter-role="operator"][data-filter-clause-index="0"]', 'between');
+  await page.locator('.hgrid__filter-panel [data-filter-role="min"][data-filter-clause-index="0"]').fill('40');
+  await page.locator('.hgrid__filter-panel [data-filter-role="max"][data-filter-clause-index="0"]').fill('80');
+  await page.locator('.hgrid__filter-panel [data-filter-action="apply"]').click();
+  await page.waitForFunction(() => {
+    const snapshot = window.__example64?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.score?.kind === 'number' &&
+      snapshot.filterModel?.score?.operator === 'between' &&
+      snapshot.visibleIds?.join(',') === '3,4,5'
+    );
+  }, null, { timeout: 20_000 });
+
+  await page.click('#clearFilters');
+  await page.waitForFunction(() => window.__example64?.getSnapshot?.().filteredColumnCount === 0, null, {
+    timeout: 20_000
+  });
+
+  await openHeaderFilter('createdAt');
+  await page.selectOption('.hgrid__filter-panel [data-filter-role="operator"][data-filter-clause-index="0"]', 'between');
+  await page.locator('.hgrid__filter-panel [data-filter-role="min"][data-filter-clause-index="0"]').fill('2026-03-02');
+  await page.locator('.hgrid__filter-panel [data-filter-role="max"][data-filter-clause-index="0"]').fill('2026-03-05');
+  await page.locator('.hgrid__filter-panel [data-filter-action="apply"]').click();
+  await page.waitForFunction(() => {
+    const snapshot = window.__example64?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.createdAt?.kind === 'date' &&
+      snapshot.filterModel?.createdAt?.operator === 'between' &&
+      snapshot.visibleIds?.join(',') === '2,3,4,5'
+    );
+  }, null, { timeout: 20_000 });
+
+  await page.click('#clearFilters');
+  await page.waitForFunction(() => window.__example64?.getSnapshot?.().filteredColumnCount === 0, null, {
+    timeout: 20_000
+  });
+
+  await openHeaderFilter('region');
+  await page.locator('.hgrid__filter-panel [data-filter-mode-trigger="set"]').click();
+  await page.locator('.hgrid__filter-panel [data-filter-set-search="true"]').fill('APAC');
+  await page.locator('.hgrid__filter-panel-set-option', { hasText: 'APAC' }).locator('input[type="checkbox"]').click();
+  await page.locator('.hgrid__filter-panel [data-filter-action="apply"]').click();
+  await page.waitForFunction(() => {
+    const snapshot = window.__example64?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.region?.kind === 'set' &&
+      Array.isArray(snapshot.filterModel?.region?.values) &&
+      snapshot.filterModel.region.values.length === 1 &&
+      snapshot.filterModel.region.values[0] === 'APAC' &&
+      snapshot.headers?.region === true &&
+      snapshot.visibleIds?.join(',') === '1,3,5'
+    );
+  }, null, { timeout: 20_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample65Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example65.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example65?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__tool-panel--open', { timeout: 15_000, state: 'visible' });
+
+  const initialSnapshot = await page.evaluate(() => window.__example65.getSnapshot());
+  assert.equal(initialSnapshot.panelOpen, true, 'example65 columns panel should start open');
+  assert.deepEqual(
+    initialSnapshot.visibleColumns,
+    ['id', 'name', 'region', 'status', 'score'],
+    'example65 initial visible columns should match source order'
+  );
+
+  await page.locator('[data-tool-panel-visibility-column-id="status"]').setChecked(false);
+  await page.waitForFunction(
+    () => {
+      const snapshot = window.__example65?.getSnapshot?.();
+      return snapshot && snapshot.hiddenColumns.includes('status') && !snapshot.visibleColumns.includes('status');
+    },
+    null,
+    { timeout: 10_000 }
+  );
+
+  await page.locator('[data-tool-panel-visibility-column-id="status"]').setChecked(true);
+  await page.waitForFunction(
+    () => {
+      const snapshot = window.__example65?.getSnapshot?.();
+      return snapshot && !snapshot.hiddenColumns.includes('status') && snapshot.visibleColumns.includes('status');
+    },
+    null,
+    { timeout: 10_000 }
+  );
+
+  await page.selectOption('[data-tool-panel-pin-column-id="name"]', 'left');
+  await page.waitForFunction(
+    () => {
+      const snapshot = window.__example65?.getSnapshot?.();
+      return snapshot && snapshot.pinnedLeft.includes('name') && snapshot.visibleColumns[0] === 'name';
+    },
+    null,
+    { timeout: 10_000 }
+  );
+
+  await page.click('#closePanel');
+  await page.waitForFunction(() => window.__example65?.getSnapshot?.().panelOpen === false, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample75Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example75.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example75?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__tool-panel--open', { timeout: 15_000, state: 'visible' });
+
+  const initialSnapshot = await page.evaluate(() => window.__example75.getSnapshot());
+  assert.equal(initialSnapshot.panelOpen, true, 'example75 columns panel should start open');
+  assert.deepEqual(
+    initialSnapshot.columnOrder,
+    ['id', 'name', 'region', 'status', 'score', 'updatedAt'],
+    'example75 initial column order should match source order'
+  );
+
+  await page.locator('[data-tool-panel-columns-search="true"]').fill('st');
+  await page.waitForFunction(
+    () => {
+      const snapshot = window.__example75?.getSnapshot?.();
+      return snapshot && snapshot.search === 'st' && snapshot.panelRows.join(',') === 'Status';
+    },
+    null,
+    { timeout: 10_000 }
+  );
+
+  await page.locator('[data-tool-panel-columns-search="true"]').fill('');
+  await page.waitForFunction(
+    () => {
+      const snapshot = window.__example75?.getSnapshot?.();
+      return snapshot && snapshot.search === '' && snapshot.panelRows.length === 6;
+    },
+    null,
+    { timeout: 10_000 }
+  );
+
+  await page.click('[data-tool-panel-order-kind="columns"][data-tool-panel-order-column-id="region"][data-tool-panel-order-direction="down"]');
+  await page.waitForFunction(
+    () => {
+      const snapshot = window.__example75?.getSnapshot?.();
+      return snapshot && snapshot.columnOrder.join(',') === 'id,name,status,region,score,updatedAt';
+    },
+    null,
+    { timeout: 10_000 }
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample76Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example76.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example76?.getSnapshot), null, { timeout: 15_000 });
+  await page.click('#seedNested');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example76?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.groupCount === 2 &&
+      snapshot.visibleIds?.join(',') === '1,3,6' &&
+      snapshot.advancedFilterModel?.rules?.[0]?.kind === 'group' &&
+      snapshot.advancedFilterModel?.rules?.[0]?.rules?.[1]?.kind === 'group'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#seedReview');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example76?.getSnapshot?.();
+    return snapshot && snapshot.groupCount === 1 && snapshot.visibleIds?.join(',') === '1,2,3,5';
+  }, null, { timeout: 10_000 });
+
+  await page.click('#clearAll');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example76?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.groupCount === 0 &&
+      snapshot.advancedFilterModel === null &&
+      snapshot.visibleIds?.join(',') === '1,2,3,4,5,6'
+    );
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample77Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example77.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example77?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.locator('.hgrid__filter-row-input[data-filter-row-column-id="name"]').fill('ta');
+  await page.locator('.hgrid__filter-row-input[data-filter-row-column-id="name"]').press('Enter');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example77?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.name?.kind === 'text' &&
+      snapshot.filterModel?.name?.operator === 'contains' &&
+      snapshot.visibleIds?.join(',') === '2,4,5'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.locator('.hgrid__filter-row-input[data-filter-row-column-id="score"]').fill('>=60');
+  await page.locator('.hgrid__filter-row-input[data-filter-row-column-id="score"]').press('Tab');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example77?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.score?.kind === 'number' &&
+      snapshot.filterModel?.score?.operator === 'gte' &&
+      snapshot.visibleIds?.join(',') === '2'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#seedDateFilter');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example77?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.updatedAt?.operator === 'onOrAfter' &&
+      snapshot.filterRowValues?.updatedAt === '>=2026-03-12' &&
+      snapshot.visibleIds?.join(',') === '3,4,5'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page
+    .locator('.hgrid__filter-row-date-input[data-filter-row-column-id="updatedAt"][data-filter-row-control="date-value"]')
+    .press('Escape');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example77?.getSnapshot?.();
+    return snapshot && Object.keys(snapshot.filterModel ?? {}).length === 0 && snapshot.visibleIds?.join(',') === '1,2,3,4,5';
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample78Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example78.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example78?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__tool-panel--open', { timeout: 15_000, state: 'visible' });
+
+  await page.click('[data-tool-panel-filter-surface="builder"]');
+  await page.selectOption('[data-advanced-filter-role="condition-kind"][data-advanced-filter-path="0"]', 'set');
+  await page.locator('[data-advanced-filter-role="set-option"][data-advanced-filter-path="0"][data-advanced-filter-set-key="s:APAC"]').check();
+  await page.locator('[data-advanced-filter-role="set-option"][data-advanced-filter-path="0"][data-advanced-filter-set-key="s:EMEA"]').check();
+  await page.click('[data-advanced-filter-action="apply"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example78?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.advancedFilterModel?.rules?.[0]?.condition?.kind === 'set' &&
+      snapshot.visibleIds?.join(',') === '1,2,3,5'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.locator('[data-advanced-filter-preset-label="true"]').fill('apac-emea');
+  await page.click('[data-advanced-filter-preset-action="save"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example78?.getSnapshot?.();
+    return snapshot && Array.isArray(snapshot.advancedFilterPresets) && snapshot.advancedFilterPresets.some((preset) => preset.id === 'apac-emea');
+  }, null, { timeout: 10_000 });
+
+  await page.click('[data-advanced-filter-action="clear"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example78?.getSnapshot?.();
+    return snapshot && snapshot.advancedFilterModel === null && snapshot.visibleIds?.join(',') === '1,2,3,4,5,6';
+  }, null, { timeout: 10_000 });
+
+  await page.selectOption('[data-advanced-filter-preset-select="true"]', 'apac-emea');
+  await page.click('[data-advanced-filter-preset-action="apply"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example78?.getSnapshot?.();
+    return snapshot && snapshot.advancedFilterModel?.rules?.[0]?.condition?.kind === 'set' && snapshot.visibleIds?.join(',') === '1,2,3,5';
+  }, null, { timeout: 10_000 });
+
+  await page.selectOption('.hgrid__filter-row-select[data-filter-row-column-id="active"]', 'true');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example78?.getSnapshot?.();
+    return snapshot && snapshot.filterModel?.active?.kind === 'set' && snapshot.visibleIds?.join(',') === '1,5';
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample79Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example79.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example79?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__tool-panel--open', { timeout: 15_000, state: 'visible' });
+
+  await page.selectOption('[data-tool-panel-columns-preset-select="true"]', 'analyst');
+  await page.click('[data-tool-panel-columns-preset-action="apply"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example79?.getSnapshot?.();
+    return snapshot && snapshot.columnLayout?.hiddenColumnIds?.includes('status') && snapshot.statusBar?.columns === 'Cols 6/7';
+  }, null, { timeout: 10_000 });
+
+  await page.click('#filterEmea');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example79?.getSnapshot?.();
+    return snapshot && snapshot.statusBar?.filters === 'Filters 1' && snapshot.visibleIds?.join(',') === '2,5';
+  }, null, { timeout: 10_000 });
+
+  await page.click('#clearFilter');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example79?.getSnapshot?.();
+    return snapshot && snapshot.statusBar?.filters === 'Filters 0' && snapshot.visibleIds?.join(',') === '1,2,3,4,5';
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample80Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example80.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example80?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__filter-row-set-select[data-filter-row-column-id="status"]', {
+    timeout: 15_000,
+    state: 'visible'
+  });
+
+  await page.waitForFunction(() => {
+    const snapshot = window.__example80?.getSnapshot?.();
+    return snapshot && Array.isArray(snapshot.statusOptions) && snapshot.statusOptions.includes('Tail-only');
+  }, null, { timeout: 10_000 });
+
+  await page.click('#selectTailOnly');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example80?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel?.status?.kind === 'set' &&
+      snapshot.filterModel?.status?.values?.[0] === 'Tail-only' &&
+      snapshot.visibleCount === 205
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#clearFilter');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example80?.getSnapshot?.();
+    return snapshot && Object.keys(snapshot.filterModel ?? {}).length === 0 && snapshot.visibleCount === 5205;
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample81Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example81.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example81?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.click('#dragAutoScroll');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example81?.getSnapshot?.();
+    if (!snapshot || !Array.isArray(snapshot.trackedRows)) {
+      return false;
+    }
+
+    const row17 = snapshot.trackedRows.find((row) => row.rowIndex === 17);
+    const row18 = snapshot.trackedRows.find((row) => row.rowIndex === 18);
+    return (
+      snapshot.scrollTop > 0 &&
+      snapshot.selection?.r2 >= 18 &&
+      row17?.score === 90 &&
+      row18?.score === 95 &&
+      snapshot.lastEdit?.source === 'fillHandle'
+    );
+  }, null, { timeout: 15_000 });
+
+  await page.click('#resetRows');
+  await page.click('#dragMatrixTrend');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example81?.getSnapshot?.();
+    if (!snapshot || !Array.isArray(snapshot.trackedRows)) {
+      return false;
+    }
+
+    const row0 = snapshot.trackedRows.find((row) => row.rowIndex === 0);
+    const row1 = snapshot.trackedRows.find((row) => row.rowIndex === 1);
+    const row2 = snapshot.trackedRows.find((row) => row.rowIndex === 2);
+    const row3 = snapshot.trackedRows.find((row) => row.rowIndex === 3);
+    return (
+      snapshot.selection?.r1 === 0 &&
+      snapshot.selection?.c1 === 2 &&
+      snapshot.selection?.r2 === 3 &&
+      snapshot.selection?.c2 === 5 &&
+      row0?.q4 === 4 &&
+      row1?.q4 === 14 &&
+      row2?.q1 === 21 &&
+      row3?.q4 === 34 &&
+      snapshot.lastEdit?.source === 'fillHandle'
+    );
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample82Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example82.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example82?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.click('#selectSmallRange');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example82?.getSnapshot?.();
+    return snapshot && snapshot.aggregatesText === 'Sum 9 · Avg 2.25 · Min 1 · Max 4';
+  }, null, { timeout: 10_000 });
+
+  await page.click('#selectLargeRange');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example82?.getSnapshot?.();
+    return snapshot && snapshot.aggregatesText.includes('Calculating');
+  }, null, { timeout: 10_000 });
+  await page.waitForFunction(() => {
+    const snapshot = window.__example82?.getSnapshot?.();
+    return snapshot && snapshot.aggregatesText === 'Sum 1,260 · Avg 21 · Min 1 · Max 60';
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample83Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example83.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example83?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.click('#editFirstNote');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example83?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.canUndo === true &&
+      snapshot.canRedo === false &&
+      snapshot.rows?.[0]?.note === 'approved' &&
+      snapshot.lastEdit?.source === 'editor'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#undoAction');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example83?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.canUndo === false &&
+      snapshot.canRedo === true &&
+      snapshot.rows?.[0]?.note === 'queued' &&
+      snapshot.lastEdit?.source === 'undo'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#redoAction');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example83?.getSnapshot?.();
+    return snapshot && snapshot.rows?.[0]?.note === 'approved' && snapshot.lastEdit?.source === 'redo';
+  }, null, { timeout: 10_000 });
+
+  await page.click('#pasteStatusBlock');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example83?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.rows?.[0]?.status === 'active' &&
+      snapshot.rows?.[0]?.note === 'copied' &&
+      snapshot.rows?.[1]?.status === 'hold' &&
+      snapshot.rows?.[1]?.note === 'manual' &&
+      snapshot.lastEdit?.source === 'clipboard'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#undoAction');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example83?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.rows?.[0]?.status === 'draft' &&
+      snapshot.rows?.[0]?.note === 'approved' &&
+      snapshot.rows?.[1]?.status === 'review' &&
+      snapshot.rows?.[1]?.note === 'awaiting' &&
+      snapshot.lastEdit?.source === 'undo'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#fillQtySeries');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example83?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.rows?.[2]?.qty === 30 &&
+      snapshot.rows?.[3]?.qty === 40 &&
+      snapshot.lastEdit?.source === 'fillHandle'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#undoAction');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example83?.getSnapshot?.();
+    return snapshot && snapshot.rows?.[2]?.qty === 0 && snapshot.rows?.[3]?.qty === 0 && snapshot.lastEdit?.source === 'undo';
+  }, null, { timeout: 10_000 });
+
+  await page.click('#redoAction');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example83?.getSnapshot?.();
+    return snapshot && snapshot.rows?.[2]?.qty === 30 && snapshot.rows?.[3]?.qty === 40 && snapshot.lastEdit?.source === 'redo';
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample66Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example66.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example66?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__tool-panel--open', { timeout: 15_000, state: 'visible' });
+
+  const initialSnapshot = await page.evaluate(() => window.__example66.getSnapshot());
+  assert.equal(initialSnapshot.panelOpen, true, 'example66 filters panel should start open');
+  assert.equal(initialSnapshot.filteredColumnCount, 0, 'example66 should start with empty filter model');
+
+  await page.click('[data-tool-panel-filter-column-id="region"]');
+  await page.click('[data-tool-panel-filter-mode-trigger="set"]');
+  await page.locator('[data-tool-panel-filter-option-key="s:APAC"]').check();
+  await page.click('[data-tool-panel-filter-action="apply"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example66?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filteredColumnCount === 1 &&
+      snapshot.filterModel.region &&
+      snapshot.filterModel.region.kind === 'set' &&
+      Array.isArray(snapshot.visibleIds) &&
+      snapshot.visibleIds.join(',') === '1,3,5'
+    );
+  });
+
+  await page.click('[data-tool-panel-filter-action="clear"]');
+  await page.waitForFunction(() => window.__example66?.getSnapshot?.().filteredColumnCount === 0, null, {
+    timeout: 10_000
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample67Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example67.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example67?.getSnapshot), null, { timeout: 15_000 });
+
+  const initialSnapshot = await page.evaluate(() => window.__example67.getSnapshot());
+  assert.equal(initialSnapshot.openPanelId, 'grouping', 'example67 should start with grouping panel open');
+  assert.equal(initialSnapshot.dockWidth, '320px', 'example67 should reserve docked side bar width');
+
+  await page.locator('[data-tool-panel-group-column-id="region"]').check();
+  await page.selectOption(
+    '[data-tool-panel-aggregate-kind="group"][data-tool-panel-aggregate-column-id="sales"]',
+    'sum'
+  );
+  await page.waitForFunction(() => {
+    const snapshot = window.__example67?.getSnapshot?.();
+    return (
+      snapshot &&
+      Array.isArray(snapshot.groupModel) &&
+      snapshot.groupModel[0]?.columnId === 'region' &&
+      Array.isArray(snapshot.groupAggregations) &&
+      snapshot.groupAggregations[0]?.columnId === 'sales' &&
+      snapshot.groupAggregations[0]?.type === 'sum'
+    );
+  });
+
+  await page.click('[data-tool-panel-tab-id="pivot"]');
+  await page.waitForFunction(() => window.__example67?.getSnapshot?.().openPanelId === 'pivot', null, { timeout: 10_000 });
+  await page.locator('[data-tool-panel-pivot-column-id="month"]').check();
+  await page.selectOption(
+    '[data-tool-panel-aggregate-kind="pivot"][data-tool-panel-aggregate-column-id="sales"]',
+    'avg'
+  );
+  await page.waitForFunction(() => {
+    const snapshot = window.__example67?.getSnapshot?.();
+    return (
+      snapshot &&
+      Array.isArray(snapshot.pivotModel) &&
+      snapshot.pivotModel[0]?.columnId === 'month' &&
+      Array.isArray(snapshot.pivotValues) &&
+      snapshot.pivotValues[0]?.columnId === 'sales' &&
+      snapshot.pivotValues[0]?.type === 'avg'
+    );
+  });
+
+  await page.click('.hgrid__tool-panel-close');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example67?.getSnapshot?.();
+    return snapshot && snapshot.openPanelId === null && snapshot.dockWidth === '28px';
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample68Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example68.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example68?.getSnapshot), null, { timeout: 15_000 });
+
+  const initialSnapshot = await page.evaluate(() => window.__example68.getSnapshot());
+  assert.equal(initialSnapshot.openPanelId, 'insights', 'example68 should start with custom insights panel open');
+  assert.equal(initialSnapshot.dockWidth, '320px', 'example68 should reserve docked side bar width');
+  assert.ok(
+    initialSnapshot.summaryText.includes('visible=id,name,region,sales'),
+    `example68 should render custom summary, actual="${initialSnapshot.summaryText}"`
+  );
+
+  await page.click('[data-custom-insights-apply-filter="true"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example68?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.filterModel.region &&
+      snapshot.filterModel.region.kind === 'set' &&
+      typeof snapshot.summaryText === 'string' &&
+      snapshot.summaryText.includes('filters=region')
+    );
+  });
+
+  await page.click('[data-custom-insights-compact-layout="true"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example68?.getSnapshot?.();
+    return snapshot && Array.isArray(snapshot.visibleColumns) && !snapshot.visibleColumns.includes('sales');
+  });
+
+  await page.click('[data-custom-insights-clear-filter="true"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example68?.getSnapshot?.();
+    return snapshot && Object.keys(snapshot.filterModel ?? {}).length === 0;
+  });
+
+  await page.click('[data-custom-insights-close="true"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example68?.getSnapshot?.();
+    return snapshot && snapshot.openPanelId === null && snapshot.dockWidth === '28px';
+  });
+
+  await page.click('[data-tool-panel-toggle="true"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example68?.getSnapshot?.();
+    return snapshot && snapshot.openPanelId === 'insights' && snapshot.summaryText.includes('visible=id,name,region');
+  });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample69Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example69.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example69?.getSnapshot), null, { timeout: 15_000 });
+
+  const initialSnapshot = await page.evaluate(() => window.__example69.getSnapshot());
+  assert.equal(initialSnapshot.open.panelOpen, true, 'example69 open case should start open');
+  assert.equal(initialSnapshot.open.openPanelId, 'filters', 'example69 open case should start on default filters panel');
+  assert.equal(initialSnapshot.open.dockWidth, '320px', 'example69 open case should reserve panel width');
+  assert.equal(initialSnapshot.closed.panelOpen, false, 'example69 closed case should start closed');
+  assert.equal(initialSnapshot.closed.openPanelId, null, 'example69 closed case should not have an active panel');
+  assert.equal(initialSnapshot.closed.dockWidth, '28px', 'example69 closed case should reserve only edge handle width');
+
+  await page.click('[data-case="closed"] [data-tool-panel-toggle="true"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example69?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.closed &&
+      snapshot.closed.panelOpen === true &&
+      snapshot.closed.openPanelId === 'filters' &&
+      snapshot.closed.dockWidth === '320px'
+    );
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample70Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example70.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example70?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.waitForFunction(() => window.__example70?.getSnapshot?.().remoteText === 'Remote synced', null, {
+    timeout: 20_000
+  });
+
+  await page.click('#selectMetrics');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example70?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.selectionText === '4 cells selected' &&
+      snapshot.aggregatesText === 'Sum 235 · Avg 58.75 · Min 12 · Max 107'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#applyApacFilter');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example70?.getSnapshot?.();
+    return snapshot && snapshot.filterModel?.region?.kind === 'set' && snapshot.rowsText.includes('Rows 40');
+  }, null, { timeout: 20_000 });
+
+  await page.click('#stageEdit');
+  await page.waitForFunction(() => window.__example70?.getSnapshot?.().remoteText.includes('Pending 1 rows / 1 cells'), null, {
+    timeout: 10_000
+  });
+
+  await page.click('#invalidateBlock0');
+  await page.waitForFunction(() => window.__example70?.getSnapshot?.().remoteText.includes('Loading 1'), null, {
+    timeout: 20_000
+  });
+
+  await page.click('#acceptPending');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example70?.getSnapshot?.();
+    return snapshot && snapshot.remoteText === 'Remote synced';
+  }, null, { timeout: 20_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample71Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example71.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example71?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForFunction(() => window.__example71?.getSnapshot?.().handleVisible === true, null, { timeout: 10_000 });
+
+  const initialSnapshot = await page.evaluate(() => window.__example71.getSnapshot());
+  assert.equal(initialSnapshot.mode, 'fill', 'example71 should start in fill mode');
+  assert.deepEqual(initialSnapshot.selection, { r1: 0, c1: 2, r2: 1, c2: 2 }, 'example71 should preload score series seed');
+
+  await page.click('#dragScoreSeries');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example71?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.rows?.[2]?.score === 30 &&
+      snapshot.rows?.[5]?.score === 60 &&
+      snapshot.lastEdit?.source === 'fillHandle'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#setCopyMode');
+  await page.click('#selectNameCopy');
+  await page.click('#dragNameCopy');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example71?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.mode === 'copy' &&
+      snapshot.rows?.[1]?.name === 'North' &&
+      snapshot.rows?.[3]?.name === 'North' &&
+      snapshot.selection?.r2 === 3
+    );
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample72Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example72.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example72?.getSnapshot), null, { timeout: 15_000 });
+
+  const initialSnapshot = await page.evaluate(() => window.__example72.getSnapshot());
+  assert.deepEqual(
+    initialSnapshot.visibleColumns,
+    ['id', 'name', 'region', 'department', 'balance', 'status', 'updatedAt'],
+    'example72 should start with default visible columns'
+  );
+  assert.equal(initialSnapshot.savedLayout, null, 'example72 should start with empty storage');
+  assert.equal(initialSnapshot.savedWorkspace, null, 'example72 should start with empty workspace storage');
+
+  await page.click('#presetAnalyst');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example72?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.layout?.pinnedColumns?.region === 'left' &&
+      snapshot.layout?.pinnedColumns?.name === 'left' &&
+      snapshot.layout?.pinnedColumns?.balance === 'right' &&
+      snapshot.visibleColumns?.[0] === 'region'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#saveLayout');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example72?.getSnapshot?.();
+    return snapshot && typeof snapshot.savedLayout === 'string' && snapshot.savedLayout.includes('"balance":"right"');
+  }, null, { timeout: 10_000 });
+
+  await page.evaluate(() => window.__example72.setScrollTop(224));
+  await page.waitForFunction(() => {
+    const snapshot = window.__example72?.getSnapshot?.();
+    return snapshot && snapshot.state?.scrollTop > 0 && snapshot.visibleRange?.startRow > 0;
+  }, null, { timeout: 10_000 });
+
+  await page.click('#saveWorkspace');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example72?.getSnapshot?.();
+    return (
+      snapshot &&
+      typeof snapshot.savedWorkspace === 'string' &&
+      snapshot.savedWorkspace.includes('"scrollTop":224')
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#restoreDefault');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example72?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.visibleColumns?.[0] === 'id' &&
+      Object.keys(snapshot.layout?.pinnedColumns ?? {}).length === 0 &&
+      snapshot.layout?.hiddenColumnIds?.length === 0
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.evaluate(() => window.__example72.setScrollTop(0));
+  await page.waitForFunction(() => {
+    const snapshot = window.__example72?.getSnapshot?.();
+    return snapshot && snapshot.state?.scrollTop === 0;
+  }, null, { timeout: 10_000 });
+
+  await page.click('#loadLayout');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example72?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.layout?.pinnedColumns?.region === 'left' &&
+      snapshot.layout?.pinnedColumns?.balance === 'right' &&
+      snapshot.visibleColumns?.[0] === 'region'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#restoreDefault');
+  await page.evaluate(() => window.__example72.setScrollTop(0));
+  await page.click('#loadWorkspace');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example72?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.layout?.pinnedColumns?.region === 'left' &&
+      snapshot.layout?.pinnedColumns?.balance === 'right' &&
+      snapshot.visibleColumns?.[0] === 'region' &&
+      snapshot.state?.scrollTop === 224 &&
+      snapshot.visibleRange?.startRow > 0
+    );
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function expectLogContains(logLocator, expectedText) {
   await logLocator.waitFor({ state: 'visible', timeout: 10_000 });
   const logValue = await logLocator.textContent();
@@ -4298,6 +5520,62 @@ async function main() {
     await runExample53Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample54Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample55Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample56Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample57Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample58Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample59Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample60Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample61Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample63Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample73Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample74Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample76Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample77Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample78Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample79Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample80Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample81Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample82Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample83Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample64Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample65Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample75Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample66Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample67Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample68Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample69Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample70Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample71Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample72Checks(page, server.url, pageErrors);
 
     console.log('[e2e] OK');
   } finally {

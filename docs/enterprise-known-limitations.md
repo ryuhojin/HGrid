@@ -46,17 +46,26 @@
 
 ## 6. 제품형 UI surface 부족
 - 현재 저장소에는 다음이 아직 부족하다:
-  - filter builder/panel UI
-  - sidebar/tool panels
-  - status bar
-  - fill handle/range handle UX
   - integrated charts
   - formula editing
   - master-detail
 - 현재 들어간 범위:
-  - header-scoped column menu / context menu
+  - header column menu
+  - header/body context menu
+  - body built-in copy/filter actions
+  - header filter panel(text/number/date 2-clause AND, set single-condition)
+  - filters tool panel inside nested AND/OR cross-column advanced filter builder + preset save/apply/delete
+  - header filter row(text expression + number/date operator parser + boolean select + generic set/enum select + date picker)
+  - docked columns/filter/grouping/pivot tool panels
+  - columns panel search/reorder + preset apply
+  - status bar(selection/aggregate/rows/remote summary + custom item registry + large selection chunked async aggregate)
+  - fill handle(range fill/copy + numeric series fill + body-edge auto-scroll + 2D affine matrix trend)
+  - shared undo/redo(editor / clipboard / fillHandle)
+  - layout persistence(order/visibility/pin/width snapshot + preset apply)
+  - composed workspace recipe(layout + state)
+  - custom side bar panel registry
 - 의미:
-  - 첫 제품형 menu surface는 생겼지만, 사용자가 UI만으로 전체 feature를 탐색/조작하는 수준까지는 아니다.
+  - 주요 product surface는 많이 닫혔지만, chart/formula/master-detail 같은 상위 surface와 domain-specific row action productization은 아직 비어 있다.
 
 ## 7. 보안 정책이 secure-by-default로 닫히지 않음
 - `unsafeHtml` 컬럼에서 sanitizer가 없으면 raw HTML이 렌더된다.

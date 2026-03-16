@@ -197,52 +197,74 @@
 > 지금 HGrid는 엔진 중심이다. 이제 실제 사용자가 만지는 제품 surface를 만든다.
 
 ## E3.1 Column Menu / Context Menu
+### E3.1.1 Header Menu
 - [x] column header menu 추가
 - [x] sort / pin / hide / auto-size / reset 메뉴 추가
-- [x] context menu hook 추가
+- [x] header context menu hook 추가
 - [x] custom menu item 확장 포인트 설계
 
+### E3.1.2 Body Cell Context Menu
+- [x] body cell 우클릭 context menu 추가
+- [x] selection / editing / clipboard 와 body context menu 상호작용 정책 정의
+- [x] cell / row context payload 설계
+- [x] body context menu example + e2e 추가
+
 ## E3.2 Filter UI
-- [ ] text/number/date/set filter panel UI 추가
-- [ ] multi-condition filter UI 추가
-- [ ] advanced filter builder 범위 결정
-- [ ] filter model <-> UI 양방향 동기화
+- [x] text/number/date/set filter panel UI 추가
+- [x] multi-condition filter UI 추가
+- [x] advanced filter builder 범위 결정
+- [x] nested advanced filter group 지원
+- [x] header filter row 1차 UI 추가
+- [x] advanced filter preset save/apply/delete 추가
+- [x] builder set/boolean editor 추가
+- [x] filter row boolean/date 전용 editor 정리
+- [x] filter row generic set/enum editor 추가
+- [x] set filter distinct source(sampled/full/custom) 정리
+- [x] filter model <-> UI 양방향 동기화
 
 ## E3.3 Side Bar / Tool Panels
-- [ ] columns panel
-- [ ] filters panel
-- [ ] grouping panel
-- [ ] pivot panel
-- [ ] panel registry/extension hook 추가
+- [x] columns panel
+- [x] columns panel search / reorder
+- [x] columns panel preset action
+- [x] filters panel
+- [x] grouping panel
+- [x] pivot panel
+- [x] panel registry/extension hook 추가
+- [x] custom panel mutation action API(filter/layout) 추가
 
 ## E3.4 Status Bar / Summary UX
-- [ ] selection count
-- [ ] sum/avg/min/max quick aggregate
-- [ ] visible row count / filtered row count
-- [ ] remote loading / sync status 표시
+- [x] selection count
+- [x] sum/avg/min/max quick aggregate
+- [x] large selection aggregate async policy
+- [x] visible row count / filtered row count
+- [x] remote loading / sync status 표시
+- [x] custom status bar item registry
 
 ## E3.5 Drag/Fill/Range UX
-- [ ] fill handle 정책 정의
-- [ ] auto fill / series fill 범위 정의
-- [ ] drag-to-copy UX 정의
-- [ ] range handle / clipboard 상호작용 회귀 테스트
+- [x] fill handle 정책 정의
+- [x] auto fill / series fill 범위 정의
+- [x] drag-to-copy UX 정의
+- [x] fill handle drag auto-scroll 추가
+- [x] multi-axis numeric trend fill 추가
+- [x] editor / clipboard / fillHandle shared undo/redo 연동
+- [x] range handle / clipboard 상호작용 회귀 테스트
 
 ## E3.6 Layout Persistence UX
-- [ ] save/load column layout API 정리
-- [ ] preset layout example 추가
-- [ ] user layout storage recipe 문서화
-- [ ] support matrix에 persistence 포함
+- [x] save/load column layout API 정리
+- [x] preset layout example 추가
+- [x] layout / workspace storage recipe 문서화
+- [x] support matrix에 persistence 포함
 
 ### 경쟁 제품 parity 최소 범위
-- [ ] column menu
-- [ ] filter panel
-- [ ] side bar / tool panel
-- [ ] status bar
-- [ ] layout persistence
+- [x] column menu
+- [x] filter panel
+- [x] side bar / tool panel
+- [x] status bar
+- [x] layout persistence
 
 ### 수용 기준
-- [ ] 코드 API만 아는 개발자가 아니라 일반 업무 사용자가 UI만으로 주요 기능을 쓸 수 있다.
-- [ ] examples가 “엔진 데모”에서 “업무 시나리오 데모”로 확장된다.
+- [x] 코드 API만 아는 개발자가 아니라 일반 업무 사용자가 UI만으로 주요 기능을 쓸 수 있다.
+- [x] examples가 “엔진 데모”에서 “업무 시나리오 데모”로 확장된다.
 
 ---
 
@@ -256,7 +278,7 @@
 - [ ] batch edit / dirty tracking 정책 정의
 
 ## E4.2 Undo/Redo / Transaction UX
-- [ ] edit undo/redo stack 설계
+- [ ] transaction-grade edit undo/redo semantics 고도화
 - [ ] clipboard paste undo 범위 정의
 - [ ] transaction rollback 정책 정의
 - [ ] audit log와 undo/redo 관계 문서화
@@ -500,7 +522,7 @@
 - [ ] Step 2: `2. Phase E0 — Architecture Hardening`
 - [x] Step 3: `3. Phase E1 — Actual Worker Runtime`
 - [ ] Step 4: `4. Phase E2 — Enterprise Server-Side Data Model`
-- [ ] Step 5: `5. Phase E3 — Enterprise Product Surface`
+- [x] Step 5: `5. Phase E3 — Enterprise Product Surface`
 - [ ] Step 6: `6. Phase E4 — Data Workflow / Editing Productization`
 - [ ] Step 7: `7. Phase E5 — Security / CSP / Compliance`
 - [ ] Step 8: `8. Phase E6 — Accessibility / i18n / RTL`

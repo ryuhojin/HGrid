@@ -8,6 +8,8 @@ import type {
 } from '../core/grid-options';
 import type { DataProvider, GridRowData, RowKey } from './data-provider';
 import type { FilterExecutionRequest, GridFilterModel } from './filter-executor';
+import type { AdvancedFilterModel } from './filter-model';
+import { cloneAdvancedFilterModel, visitAdvancedFilterRules } from './filter-model';
 import type { GroupExecutionRequest } from './group-executor';
 import { LocalDataProvider } from './local-data-provider';
 import type { PivotExecutionRequest } from './pivot-executor';
@@ -69,6 +71,7 @@ export interface FilterWorkerRowsPayload {
   rows: GridRowData[];
   columns: WorkerColumnSnapshot[];
   filterModel: GridFilterModel;
+  advancedFilterModel?: AdvancedFilterModel | null;
   sourceOrder?: Int32Array | number[];
 }
 
@@ -77,6 +80,7 @@ export interface FilterWorkerColumnarPayload {
   rowCount: number;
   columns: WorkerColumnSnapshot[];
   filterModel: GridFilterModel;
+  advancedFilterModel?: AdvancedFilterModel | null;
   sourceOrder?: Int32Array | number[];
   columnValuesById: WorkerColumnValueMap;
 }
@@ -246,6 +250,20 @@ class ColumnValueSnapshotDataProvider implements DataProvider {
   public setValue(): void {}
 
   public applyTransactions(): void {}
+
+  public getDataIndexByRowKey(rowKey: RowKey, dataIndexHint?: number): number {
+    if (
+      Number.isInteger(dataIndexHint) &&
+      dataIndexHint !== undefined &&
+      dataIndexHint >= 0 &&
+      dataIndexHint < this.rowCount &&
+      dataIndexHint === rowKey
+    ) {
+      return dataIndexHint;
+    }
+
+    return typeof rowKey === 'number' && rowKey >= 0 && rowKey < this.rowCount ? rowKey : -1;
+  }
 }
 
 function resolveWorkerColumnValue(values: WorkerColumnValuesPayload | undefined, dataIndex: number): unknown {
@@ -1210,21 +1228,37 @@ function collectSortColumnIds(request: SortExecutionRequest): string[] {
   return columnIds;
 }
 
-function collectFilterColumnIds(filterModel: GridFilterModel, columns: ColumnDef[]): string[] {
+function collectFilterColumnIds(
+  filterModel: GridFilterModel,
+  advancedFilterModel: AdvancedFilterModel | null | undefined,
+  columns: ColumnDef[]
+): string[] {
   const knownColumnIds = new Set<string>();
   for (let index = 0; index < columns.length; index += 1) {
     knownColumnIds.add(columns[index].id);
   }
 
   const columnIds: string[] = [];
+  const seen = new Set<string>();
   const rawKeys = Object.keys(filterModel);
   for (let index = 0; index < rawKeys.length; index += 1) {
     const columnId = rawKeys[index];
-    if (!knownColumnIds.has(columnId) || filterModel[columnId] === undefined) {
+    if (!knownColumnIds.has(columnId) || filterModel[columnId] === undefined || seen.has(columnId)) {
       continue;
     }
+    seen.add(columnId);
     columnIds.push(columnId);
   }
+
+  visitAdvancedFilterRules(advancedFilterModel?.rules, (rule) => {
+    const columnId = rule.columnId;
+    if (typeof columnId !== 'string' || columnId.length === 0 || !knownColumnIds.has(columnId) || seen.has(columnId)) {
+      return;
+    }
+    seen.add(columnId);
+    columnIds.push(columnId);
+  });
+
   return columnIds;
 }
 
@@ -1389,7 +1423,7 @@ export function serializeFilterExecutionRequest(
   request: FilterExecutionRequest,
   context?: WorkerPayloadSerializationContext
 ): FilterWorkerPayload | null {
-  const filterColumnIds = collectFilterColumnIds(request.filterModel, request.columns);
+  const filterColumnIds = collectFilterColumnIds(request.filterModel, request.advancedFilterModel, request.columns);
   const filterColumns = collectColumnsByIds(request.columns, filterColumnIds);
   const columnValuesById = usesValueGetter(filterColumns)
     ? snapshotProjectedColumnValues(request.rowCount, request.dataProvider, request.columns, filterColumns, undefined, context)
@@ -1400,6 +1434,7 @@ export function serializeFilterExecutionRequest(
       rowCount: request.rowCount,
       columns: toWorkerColumns(filterColumns),
       filterModel: { ...request.filterModel },
+      advancedFilterModel: cloneAdvancedFilterModel(request.advancedFilterModel),
       sourceOrder: cloneSourceOrder(request.sourceOrder),
       columnValuesById
     };
@@ -1414,6 +1449,7 @@ export function serializeFilterExecutionRequest(
     rows,
     columns: toWorkerColumns(request.columns),
     filterModel: { ...request.filterModel },
+    advancedFilterModel: cloneAdvancedFilterModel(request.advancedFilterModel),
     sourceOrder: cloneSourceOrder(request.sourceOrder)
   };
 }
@@ -1632,7 +1668,7 @@ export async function serializeFilterExecutionRequestAsync(
   request: FilterExecutionRequest,
   context?: WorkerPayloadSerializationContext
 ): Promise<FilterWorkerPayload | null> {
-  const filterColumnIds = collectFilterColumnIds(request.filterModel, request.columns);
+  const filterColumnIds = collectFilterColumnIds(request.filterModel, request.advancedFilterModel, request.columns);
   const filterColumns = collectColumnsByIds(request.columns, filterColumnIds);
   const rawColumnValuesById = usesValueGetter(filterColumns)
     ? await snapshotProjectedColumnValuesAsync(request.rowCount, request.dataProvider, request.columns, filterColumns, undefined, context)
@@ -1644,6 +1680,7 @@ export async function serializeFilterExecutionRequestAsync(
       rowCount: request.rowCount,
       columns: toWorkerColumns(filterColumns),
       filterModel: { ...request.filterModel },
+      advancedFilterModel: cloneAdvancedFilterModel(request.advancedFilterModel),
       sourceOrder: cloneSourceOrder(request.sourceOrder),
       columnValuesById
     };
@@ -1658,6 +1695,7 @@ export async function serializeFilterExecutionRequestAsync(
     rows,
     columns: toWorkerColumns(request.columns),
     filterModel: { ...request.filterModel },
+    advancedFilterModel: cloneAdvancedFilterModel(request.advancedFilterModel),
     sourceOrder: cloneSourceOrder(request.sourceOrder)
   };
 }
@@ -1838,6 +1876,7 @@ export function createFilterExecutionRequest(opId: string, payload: FilterWorker
       opId,
       rowCount: payload.rowCount,
       filterModel: payload.filterModel,
+      advancedFilterModel: payload.advancedFilterModel ?? null,
       columns: toExecutorColumns(payload.columns),
       dataProvider: createColumnValueSnapshotDataProvider(payload.rowCount, payload.columnValuesById),
       sourceOrder: payload.sourceOrder
@@ -1848,6 +1887,7 @@ export function createFilterExecutionRequest(opId: string, payload: FilterWorker
     opId,
     rowCount: payload.rows.length,
     filterModel: payload.filterModel,
+    advancedFilterModel: payload.advancedFilterModel ?? null,
     columns: toExecutorColumns(payload.columns),
     dataProvider: createSnapshotDataProvider(payload.rows),
     sourceOrder: payload.sourceOrder

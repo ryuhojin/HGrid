@@ -3,10 +3,23 @@ import type { GridEventMap, GridEventName } from './event-bus';
 import type {
   ColumnDef,
   GridColumnMenuOptions,
+  GridAdvancedFilterPreset,
   ColumnGroupDef,
   GroupAggregationDef,
+  GridColumnLayoutPreset,
   GridContextMenuOptions,
+  GridColumnLayout,
+  GridFilterRowOptions,
   GridLocaleText,
+  GridRangeHandleOptions,
+  GridRangeHandleMode,
+  GridUndoRedoOptions,
+  GridSetFilterOptions,
+  GridSideBarOptions,
+  GridStatusBarCustomItemDefinition,
+  GridStatusBarOptions,
+  GridStatusBarItemId,
+  GridToolPanelId,
   GroupModelItem,
   GroupingMode,
   PivotModelItem,
@@ -29,8 +42,13 @@ import { normalizeGridLocale } from './grid-locale-text';
 import { DomRenderer } from '../render/dom-renderer';
 import { ColumnModel, createColumnValueFormatContext, formatColumnValue, getColumnValue } from '../data/column-model';
 import type { ColumnValueFormatContext } from '../data/column-model';
-import type { ColumnFilterCondition, GridFilterModel } from '../data/filter-executor';
+import type { AdvancedFilterModel, ColumnFilterCondition, GridFilterModel } from '../data/filter-executor';
 import { CooperativeFilterExecutor, type FilterExecutor } from '../data/filter-executor';
+import {
+  cloneAdvancedFilterModel as cloneAdvancedFilterModelValue,
+  isAdvancedFilterGroup,
+  type AdvancedFilterNode
+} from '../data/filter-model';
 import type { DataProvider, GridRowData, RowKey } from '../data/data-provider';
 import { LocalDataProvider } from '../data/local-data-provider';
 import type { RowModelOptions, RowModelState, SparseRowOverride, ViewToDataMapping } from '../data/row-model';
@@ -105,8 +123,16 @@ const MIN_INDICATOR_WIDTH = 44;
 const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 108;
 const DEFAULT_LOCALE = 'en-US';
+const DEFAULT_SIDE_BAR_WIDTH = 300;
+const DEFAULT_RANGE_HANDLE_MODE: GridRangeHandleMode = 'fill';
 const DEFAULT_WORKER_TIMEOUT_MS = 15_000;
 const DEFAULT_WORKER_LARGE_DATA_THRESHOLD = 100_000;
+const DEFAULT_STATUS_BAR_ITEMS: GridStatusBarItemId[] = ['selection', 'aggregates', 'rows', 'remote'];
+const DEFAULT_STATUS_BAR_AGGREGATE_ASYNC_THRESHOLD = 4_000;
+const DEFAULT_STATUS_BAR_AGGREGATE_CHUNK_SIZE = 2_000;
+const DEFAULT_UNDO_REDO_LIMIT = 100;
+const DEFAULT_SET_FILTER_SCAN_ROWS = 5_000;
+const DEFAULT_SET_FILTER_DISTINCT_VALUES = 200;
 
 type CancelableExecutor<TExecutor> = TExecutor & {
   cancel(opId: string): void;
@@ -228,6 +254,7 @@ function cloneContextMenuOptions(contextMenu?: GridContextMenuOptions): GridCont
 
   return {
     enabled: contextMenu.enabled !== false,
+    builtInActions: Array.isArray(contextMenu.builtInActions) ? contextMenu.builtInActions.slice() : undefined,
     getItems: typeof contextMenu.getItems === 'function' ? contextMenu.getItems : undefined
   };
 }
@@ -245,6 +272,7 @@ function mergeContextMenuOptions(
 
   const base = cloneContextMenuOptions(currentOptions) ?? {
     enabled: true,
+    builtInActions: undefined,
     getItems: undefined
   };
 
@@ -252,8 +280,566 @@ function mergeContextMenuOptions(
     base.enabled = nextOptions.enabled !== false;
   }
 
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'builtInActions')) {
+    base.builtInActions = Array.isArray(nextOptions.builtInActions) ? nextOptions.builtInActions.slice() : undefined;
+  }
+
   if (Object.prototype.hasOwnProperty.call(nextOptions, 'getItems')) {
     base.getItems = typeof nextOptions.getItems === 'function' ? nextOptions.getItems : undefined;
+  }
+
+  return base;
+}
+
+function normalizeToolPanelId(panelId: GridToolPanelId | null | undefined): GridToolPanelId | null {
+  if (typeof panelId !== 'string') {
+    return null;
+  }
+
+  const normalizedPanelId = panelId.trim();
+  return normalizedPanelId.length > 0 ? normalizedPanelId : null;
+}
+
+function cloneCustomToolPanels(
+  customPanels: GridSideBarOptions['customPanels'] | undefined
+): GridSideBarOptions['customPanels'] | undefined {
+  if (!Array.isArray(customPanels) || customPanels.length === 0) {
+    return undefined;
+  }
+
+  const normalizedPanels: NonNullable<GridSideBarOptions['customPanels']> = [];
+  const seenPanelIds = new Set<string>();
+  for (let index = 0; index < customPanels.length; index += 1) {
+    const panel = customPanels[index];
+    if (!panel || typeof panel !== 'object') {
+      continue;
+    }
+
+    const panelId = normalizeToolPanelId(panel.id);
+    if (!panelId || seenPanelIds.has(panelId) || typeof panel.title !== 'string' || panel.title.trim().length === 0) {
+      continue;
+    }
+
+    if (typeof panel.render !== 'function') {
+      continue;
+    }
+
+    seenPanelIds.add(panelId);
+    normalizedPanels.push({
+      id: panelId,
+      title: panel.title,
+      render: panel.render
+    });
+  }
+
+  return normalizedPanels.length > 0 ? normalizedPanels : undefined;
+}
+
+function cloneColumnLayout(layout: GridColumnLayout | null | undefined): GridColumnLayout | null {
+  if (!layout || typeof layout !== 'object') {
+    return null;
+  }
+
+  return {
+    columnOrder: Array.isArray(layout.columnOrder) ? layout.columnOrder.filter((columnId): columnId is string => typeof columnId === 'string') : [],
+    hiddenColumnIds: Array.isArray(layout.hiddenColumnIds)
+      ? layout.hiddenColumnIds.filter((columnId): columnId is string => typeof columnId === 'string')
+      : [],
+    pinnedColumns:
+      layout.pinnedColumns && typeof layout.pinnedColumns === 'object'
+        ? { ...layout.pinnedColumns }
+        : {},
+    columnWidths:
+      layout.columnWidths && typeof layout.columnWidths === 'object'
+        ? { ...layout.columnWidths }
+        : {}
+  };
+}
+
+function cloneColumnLayoutPresets(
+  presets: GridSideBarOptions['columnLayoutPresets'] | undefined
+): GridSideBarOptions['columnLayoutPresets'] | undefined {
+  if (!Array.isArray(presets) || presets.length === 0) {
+    return undefined;
+  }
+
+  const normalizedPresets: GridColumnLayoutPreset[] = [];
+  const seenPresetIds = new Set<string>();
+  for (let index = 0; index < presets.length; index += 1) {
+    const preset = presets[index];
+    if (!preset || typeof preset !== 'object') {
+      continue;
+    }
+
+    const presetId = normalizeToolPanelId(preset.id);
+    const label = typeof preset.label === 'string' ? preset.label.trim() : '';
+    const layout = cloneColumnLayout(preset.layout);
+    if (!presetId || seenPresetIds.has(presetId) || label.length === 0 || !layout) {
+      continue;
+    }
+
+    seenPresetIds.add(presetId);
+    normalizedPresets.push({
+      id: presetId,
+      label,
+      layout
+    });
+  }
+
+  return normalizedPresets.length > 0 ? normalizedPresets : undefined;
+}
+
+function cloneCustomStatusBarItems(
+  customItems: GridStatusBarOptions['customItems'] | undefined
+): GridStatusBarOptions['customItems'] | undefined {
+  if (!Array.isArray(customItems) || customItems.length === 0) {
+    return undefined;
+  }
+
+  const normalizedItems: GridStatusBarCustomItemDefinition[] = [];
+  const seenItemIds = new Set<string>();
+  for (let index = 0; index < customItems.length; index += 1) {
+    const item = customItems[index];
+    if (!item || typeof item !== 'object' || typeof item.render !== 'function') {
+      continue;
+    }
+
+    const itemId = normalizeToolPanelId(item.id);
+    if (!itemId || seenItemIds.has(itemId)) {
+      continue;
+    }
+
+    seenItemIds.add(itemId);
+    normalizedItems.push({
+      id: itemId,
+      align: item.align === 'main' ? 'main' : item.align === 'meta' ? 'meta' : undefined,
+      render: item.render
+    });
+  }
+
+  return normalizedItems.length > 0 ? normalizedItems : undefined;
+}
+
+function normalizeSideBarPanels(panels: GridSideBarOptions['panels'] | undefined): GridToolPanelId[] {
+  if (!Array.isArray(panels)) {
+    return ['columns'];
+  }
+
+  const normalizedPanels: GridToolPanelId[] = [];
+  for (let index = 0; index < panels.length; index += 1) {
+    const panelId = normalizeToolPanelId(panels[index]);
+    if (!panelId || normalizedPanels.indexOf(panelId) !== -1) {
+      continue;
+    }
+    normalizedPanels.push(panelId);
+  }
+
+  return normalizedPanels;
+}
+
+function normalizeSideBarWidth(width: number | undefined): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) {
+    return DEFAULT_SIDE_BAR_WIDTH;
+  }
+
+  return Math.max(240, Math.min(420, Math.round(width)));
+}
+
+function normalizeSideBarInitialOpen(initialOpen: boolean | undefined): boolean {
+  return initialOpen !== false;
+}
+
+function normalizeStatusBarItems(
+  items: GridStatusBarOptions['items'] | undefined,
+  customItems?: GridStatusBarOptions['customItems']
+): GridStatusBarItemId[] {
+  const customItemIds = new Set<string>((customItems ?? []).map((item) => item.id));
+  if (!Array.isArray(items)) {
+    return DEFAULT_STATUS_BAR_ITEMS.concat(Array.from(customItemIds));
+  }
+
+  const normalizedItems: GridStatusBarItemId[] = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = typeof items[index] === 'string' ? items[index].trim() : '';
+    if (item.length === 0) {
+      continue;
+    }
+
+    const isBuiltIn = item === 'selection' || item === 'aggregates' || item === 'rows' || item === 'remote';
+    if (!isBuiltIn && !customItemIds.has(item)) {
+      continue;
+    }
+
+    if (normalizedItems.indexOf(item) === -1) {
+      normalizedItems.push(item);
+    }
+  }
+
+  return normalizedItems.length > 0 ? normalizedItems : DEFAULT_STATUS_BAR_ITEMS.concat(Array.from(customItemIds));
+}
+
+function normalizeRangeHandleMode(mode: GridRangeHandleOptions['mode'] | undefined): GridRangeHandleMode {
+  return mode === 'copy' ? 'copy' : DEFAULT_RANGE_HANDLE_MODE;
+}
+
+function cloneSideBarOptions(sideBar?: GridSideBarOptions): GridSideBarOptions | undefined {
+  if (!sideBar) {
+    return undefined;
+  }
+
+  const panels = normalizeSideBarPanels(sideBar.panels);
+  const defaultPanel = normalizeToolPanelId(sideBar.defaultPanel);
+  const customPanels = cloneCustomToolPanels(sideBar.customPanels);
+
+  return {
+    enabled: sideBar.enabled === true,
+    panels,
+    defaultPanel: defaultPanel && panels.indexOf(defaultPanel) !== -1 ? defaultPanel : null,
+    initialOpen: normalizeSideBarInitialOpen(sideBar.initialOpen),
+    width: normalizeSideBarWidth(sideBar.width),
+    customPanels,
+    columnLayoutPresets: cloneColumnLayoutPresets(sideBar.columnLayoutPresets)
+  };
+}
+
+function cloneRangeHandleOptions(rangeHandle?: GridRangeHandleOptions): GridRangeHandleOptions | undefined {
+  if (!rangeHandle) {
+    return undefined;
+  }
+
+  return {
+    enabled: rangeHandle.enabled !== false,
+    mode: normalizeRangeHandleMode(rangeHandle.mode)
+  };
+}
+
+function cloneUndoRedoOptions(undoRedo?: GridUndoRedoOptions): GridUndoRedoOptions | undefined {
+  if (!undoRedo) {
+    return undefined;
+  }
+
+  return {
+    enabled: undoRedo.enabled === true,
+    limit: normalizeSetFilterLimit(undoRedo.limit, DEFAULT_UNDO_REDO_LIMIT)
+  };
+}
+
+function cloneStatusBarOptions(statusBar?: GridStatusBarOptions): GridStatusBarOptions | undefined {
+  if (!statusBar) {
+    return undefined;
+  }
+
+  const customItems = cloneCustomStatusBarItems(statusBar.customItems);
+
+  return {
+    enabled: statusBar.enabled === true,
+    customItems,
+    items: normalizeStatusBarItems(statusBar.items, customItems),
+    aggregateAsyncThreshold: normalizeSetFilterLimit(
+      statusBar.aggregateAsyncThreshold,
+      DEFAULT_STATUS_BAR_AGGREGATE_ASYNC_THRESHOLD
+    ),
+    aggregateChunkSize: normalizeSetFilterLimit(statusBar.aggregateChunkSize, DEFAULT_STATUS_BAR_AGGREGATE_CHUNK_SIZE)
+  };
+}
+
+function cloneFilterRowOptions(filterRow?: GridFilterRowOptions): GridFilterRowOptions | undefined {
+  if (!filterRow) {
+    return undefined;
+  }
+
+  return {
+    enabled: filterRow.enabled === true
+  };
+}
+
+function normalizeSetFilterValueSource(value: GridSetFilterOptions['valueSource']): NonNullable<GridSetFilterOptions['valueSource']> {
+  return value === 'full' ? 'full' : 'sampled';
+}
+
+function normalizeSetFilterLimit(value: number | undefined, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.floor(value));
+}
+
+function cloneSetFilterOptions(setFilter?: GridSetFilterOptions): GridSetFilterOptions | undefined {
+  if (!setFilter) {
+    return undefined;
+  }
+
+  return {
+    valueSource: normalizeSetFilterValueSource(setFilter.valueSource),
+    maxScanRows: normalizeSetFilterLimit(setFilter.maxScanRows, DEFAULT_SET_FILTER_SCAN_ROWS),
+    maxDistinctValues: normalizeSetFilterLimit(setFilter.maxDistinctValues, DEFAULT_SET_FILTER_DISTINCT_VALUES),
+    getValues: setFilter.getValues
+  };
+}
+
+function mergeRangeHandleOptions(
+  currentOptions: GridOptions['rangeHandle'],
+  nextOptions: GridConfig['rangeHandle']
+): GridOptions['rangeHandle'] {
+  if (!nextOptions) {
+    return cloneRangeHandleOptions(currentOptions) ?? {
+      enabled: true,
+      mode: DEFAULT_RANGE_HANDLE_MODE
+    };
+  }
+
+  const base = cloneRangeHandleOptions(currentOptions) ?? {
+    enabled: true,
+    mode: DEFAULT_RANGE_HANDLE_MODE
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'enabled')) {
+    base.enabled = nextOptions.enabled !== false;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'mode')) {
+    base.mode = normalizeRangeHandleMode(nextOptions.mode);
+  }
+
+  return base;
+}
+
+function mergeUndoRedoOptions(
+  currentOptions: GridOptions['undoRedo'],
+  nextOptions: GridConfig['undoRedo']
+): GridOptions['undoRedo'] {
+  if (!nextOptions) {
+    return cloneUndoRedoOptions(currentOptions) ?? {
+      enabled: false,
+      limit: DEFAULT_UNDO_REDO_LIMIT
+    };
+  }
+
+  const base = cloneUndoRedoOptions(currentOptions) ?? {
+    enabled: false,
+    limit: DEFAULT_UNDO_REDO_LIMIT
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'enabled')) {
+    base.enabled = nextOptions.enabled === true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'limit')) {
+    base.limit = normalizeSetFilterLimit(nextOptions.limit, DEFAULT_UNDO_REDO_LIMIT);
+  }
+
+  return base;
+}
+
+function normalizeAdvancedFilterPresetId(value: string | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeAdvancedFilterPresetLabel(value: string | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function cloneAdvancedFilterPreset(preset: GridAdvancedFilterPreset | null | undefined): GridAdvancedFilterPreset | null {
+  if (!preset || typeof preset !== 'object') {
+    return null;
+  }
+
+  const id = normalizeAdvancedFilterPresetId(preset.id);
+  const label = normalizeAdvancedFilterPresetLabel(preset.label);
+  const advancedFilterModel = cloneAdvancedFilterModelValue(preset.advancedFilterModel);
+  if (!id || !label || !advancedFilterModel) {
+    return null;
+  }
+
+  return {
+    id,
+    label,
+    advancedFilterModel
+  };
+}
+
+function cloneAdvancedFilterPresets(
+  presets: ReadonlyArray<GridAdvancedFilterPreset> | null | undefined
+): GridAdvancedFilterPreset[] | undefined {
+  if (!Array.isArray(presets)) {
+    return undefined;
+  }
+
+  const nextPresets: GridAdvancedFilterPreset[] = [];
+  const seenIds = new Set<string>();
+  for (let index = 0; index < presets.length; index += 1) {
+    const clonedPreset = cloneAdvancedFilterPreset(presets[index]);
+    if (!clonedPreset || seenIds.has(clonedPreset.id)) {
+      continue;
+    }
+    seenIds.add(clonedPreset.id);
+    nextPresets.push(clonedPreset);
+  }
+
+  return nextPresets;
+}
+
+function mergeStatusBarOptions(
+  currentOptions: GridOptions['statusBar'],
+  nextOptions: GridConfig['statusBar']
+): GridOptions['statusBar'] {
+  if (!nextOptions) {
+    return cloneStatusBarOptions(currentOptions);
+  }
+
+  const base = cloneStatusBarOptions(currentOptions) ?? {
+    enabled: false,
+    items: DEFAULT_STATUS_BAR_ITEMS.slice(),
+    customItems: undefined,
+    aggregateAsyncThreshold: DEFAULT_STATUS_BAR_AGGREGATE_ASYNC_THRESHOLD,
+    aggregateChunkSize: DEFAULT_STATUS_BAR_AGGREGATE_CHUNK_SIZE
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'enabled')) {
+    base.enabled = nextOptions.enabled === true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'customItems')) {
+    base.customItems = cloneCustomStatusBarItems(nextOptions.customItems);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'items')) {
+    base.items = normalizeStatusBarItems(nextOptions.items, base.customItems);
+  } else {
+    base.items = normalizeStatusBarItems(base.items, base.customItems);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'aggregateAsyncThreshold')) {
+    base.aggregateAsyncThreshold = normalizeSetFilterLimit(
+      nextOptions.aggregateAsyncThreshold,
+      DEFAULT_STATUS_BAR_AGGREGATE_ASYNC_THRESHOLD
+    );
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'aggregateChunkSize')) {
+    base.aggregateChunkSize = normalizeSetFilterLimit(nextOptions.aggregateChunkSize, DEFAULT_STATUS_BAR_AGGREGATE_CHUNK_SIZE);
+  }
+
+  return base;
+}
+
+function mergeFilterRowOptions(
+  currentOptions: GridOptions['filterRow'],
+  nextOptions: GridConfig['filterRow']
+): GridOptions['filterRow'] {
+  if (!nextOptions) {
+    return cloneFilterRowOptions(currentOptions);
+  }
+
+  const base = cloneFilterRowOptions(currentOptions) ?? {
+    enabled: false
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'enabled')) {
+    base.enabled = nextOptions.enabled === true;
+  }
+
+  return base;
+}
+
+function mergeSetFilterOptions(
+  currentOptions: GridOptions['setFilter'],
+  nextOptions: GridConfig['setFilter']
+): GridOptions['setFilter'] {
+  if (!nextOptions) {
+    return cloneSetFilterOptions(currentOptions) ?? {
+      valueSource: 'sampled',
+      maxScanRows: DEFAULT_SET_FILTER_SCAN_ROWS,
+      maxDistinctValues: DEFAULT_SET_FILTER_DISTINCT_VALUES,
+      getValues: undefined
+    };
+  }
+
+  const base = cloneSetFilterOptions(currentOptions) ?? {
+    valueSource: 'sampled' as const,
+    maxScanRows: DEFAULT_SET_FILTER_SCAN_ROWS,
+    maxDistinctValues: DEFAULT_SET_FILTER_DISTINCT_VALUES,
+    getValues: undefined
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'valueSource')) {
+    base.valueSource = normalizeSetFilterValueSource(nextOptions.valueSource);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'maxScanRows')) {
+    base.maxScanRows = normalizeSetFilterLimit(nextOptions.maxScanRows, DEFAULT_SET_FILTER_SCAN_ROWS);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'maxDistinctValues')) {
+    base.maxDistinctValues = normalizeSetFilterLimit(nextOptions.maxDistinctValues, DEFAULT_SET_FILTER_DISTINCT_VALUES);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'getValues')) {
+    base.getValues = nextOptions.getValues;
+  }
+
+  return base;
+}
+
+function mergeSideBarOptions(
+  currentOptions: GridOptions['sideBar'],
+  nextOptions: GridConfig['sideBar']
+): GridOptions['sideBar'] {
+  if (!nextOptions) {
+    return cloneSideBarOptions(currentOptions);
+  }
+
+  const base = cloneSideBarOptions(currentOptions) ?? {
+    enabled: true,
+    panels: ['columns'] as GridToolPanelId[],
+    defaultPanel: null,
+    initialOpen: true,
+    width: DEFAULT_SIDE_BAR_WIDTH
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'enabled')) {
+    base.enabled = nextOptions.enabled === true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'panels')) {
+    base.panels = normalizeSideBarPanels(nextOptions.panels);
+  }
+
+  const normalizedPanels = Array.isArray(base.panels) ? base.panels : (['columns'] as GridToolPanelId[]);
+  base.panels = normalizedPanels;
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'defaultPanel')) {
+    const nextDefaultPanel = normalizeToolPanelId(nextOptions.defaultPanel);
+    base.defaultPanel = nextDefaultPanel && normalizedPanels.indexOf(nextDefaultPanel) !== -1 ? nextDefaultPanel : null;
+  } else if (base.defaultPanel && normalizedPanels.indexOf(base.defaultPanel) === -1) {
+    base.defaultPanel = null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'initialOpen')) {
+    base.initialOpen = normalizeSideBarInitialOpen(nextOptions.initialOpen);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'width')) {
+    base.width = normalizeSideBarWidth(nextOptions.width);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'customPanels')) {
+    base.customPanels = cloneCustomToolPanels(nextOptions.customPanels);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'columnLayoutPresets')) {
+    base.columnLayoutPresets = cloneColumnLayoutPresets(nextOptions.columnLayoutPresets);
   }
 
   return base;
@@ -795,6 +1381,13 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     columnGroups: cloneColumnGroups(config?.columnGroups),
     columnMenu: mergeColumnMenuOptions(undefined, config?.columnMenu),
     contextMenu: mergeContextMenuOptions(undefined, config?.contextMenu),
+    sideBar: mergeSideBarOptions(undefined, config?.sideBar),
+    rangeHandle: mergeRangeHandleOptions(undefined, config?.rangeHandle),
+    undoRedo: mergeUndoRedoOptions(undefined, config?.undoRedo),
+    statusBar: mergeStatusBarOptions(undefined, config?.statusBar),
+    filterRow: mergeFilterRowOptions(undefined, config?.filterRow),
+    setFilter: mergeSetFilterOptions(undefined, config?.setFilter),
+    advancedFilterPresets: cloneAdvancedFilterPresets(config?.advancedFilterPresets),
     grouping: mergeGroupingOptions(undefined, config?.grouping),
     pivoting: mergePivotingOptions(undefined, config?.pivoting),
     treeData: mergeTreeDataOptions(undefined, config?.treeData),
@@ -859,6 +1452,7 @@ export class Grid {
   private readonly remoteQueryService = new GridRemoteQueryService();
   private sortModel: SortModelItem[] = [];
   private filterModel: GridFilterModel = {};
+  private advancedFilterModel: AdvancedFilterModel | null = null;
   private groupModel: GroupModelItem[] = [];
   private groupAggregations: GroupAggregationDef[] = [];
   private groupingMode: GroupingMode = 'client';
@@ -919,9 +1513,23 @@ export class Grid {
       setColumnPin: (columnId, pinned) => {
         this.columnModel.setColumnPin(columnId, pinned);
       },
+      setColumnLayout: (layout) => {
+        this.setColumnLayout(layout);
+      },
       syncColumnsToRenderer: () => {
         this.syncColumnsToRenderer();
       },
+      getFilterModel: () => this.getFilterModel(),
+      setFilterModel: (filterModel) => this.setFilterModel(filterModel),
+      clearFilterModel: () => this.clearFilterModel(),
+      getAdvancedFilterModel: () => this.getAdvancedFilterModel(),
+      setAdvancedFilterModel: (advancedFilterModel) => this.setAdvancedFilterModel(advancedFilterModel),
+      getAdvancedFilterPresets: () => this.getAdvancedFilterPresets(),
+      saveAdvancedFilterPreset: (presetId, label) => this.saveAdvancedFilterPreset(presetId, label),
+      applyAdvancedFilterPreset: (presetId) => this.applyAdvancedFilterPreset(presetId),
+      deleteAdvancedFilterPreset: (presetId) => this.deleteAdvancedFilterPreset(presetId),
+      applyGroupingPanelState: (nextState) => this.applyGroupingPanelState(nextState),
+      applyPivotPanelState: (nextState) => this.applyPivotPanelState(nextState),
       setSortModel: (sortModel) => this.setSortModel(sortModel),
       clearSortModel: () => this.clearSortModel(),
       isTreeDataActive: () => this.hasActiveTreeData(),
@@ -1025,7 +1633,18 @@ export class Grid {
     this.pivotingMode = this.options.pivoting?.mode === 'server' ? 'server' : 'client';
     this.treeDataOptions = this.normalizeTreeDataOptions(mergeTreeDataOptions(undefined, this.options.treeData));
     this.treeMode = this.treeDataOptions.mode === 'server' ? 'server' : 'client';
-    this.renderer = new DomRenderer(container, this.getRendererOptions(), this.eventBus);
+    this.options.advancedFilterPresets = this.normalizeAdvancedFilterPresets(this.options.advancedFilterPresets);
+    this.renderer = new DomRenderer(container, this.getRendererOptions(), this.eventBus, {
+      getFilterModel: () => this.getFilterModel(),
+      setFilterModel: (filterModel) => this.setFilterModel(filterModel),
+      clearFilterModel: () => this.clearFilterModel(),
+      getAdvancedFilterModel: () => this.getAdvancedFilterModel(),
+      setAdvancedFilterModel: (advancedFilterModel) => this.setAdvancedFilterModel(advancedFilterModel),
+      setColumnLayout: (layout) => this.setColumnLayout(layout)
+    });
+    this.renderer.setColumnCatalog(this.columnModel.getColumns());
+    this.renderer.setFilterModel(this.filterModel);
+    this.renderer.setAdvancedFilterModel(this.advancedFilterModel);
     this.prewarmWorkerExecutors();
     this.dataProviderUnsubscribe = this.providerLifecycleService.rebindRowsChangedListener({
       dataProvider: this.sourceDataProvider,
@@ -1052,8 +1671,14 @@ export class Grid {
     this.pivotModel = this.normalizePivotModel(this.pivotModel);
     this.pivotValues = this.normalizePivotValues(this.pivotValues);
     this.treeDataOptions = this.normalizeTreeDataOptions(this.treeDataOptions);
+    this.filterModel = this.normalizeFilterModel(this.filterModel);
+    this.advancedFilterModel = this.normalizeAdvancedFilterModel(this.advancedFilterModel);
+    const normalizedAdvancedFilterPresets = this.normalizeAdvancedFilterPresets(this.options.advancedFilterPresets);
+    this.renderer.setFilterModel(this.filterModel);
+    this.renderer.setAdvancedFilterModel(this.advancedFilterModel);
     this.options = {
       ...this.options,
+      advancedFilterPresets: normalizedAdvancedFilterPresets,
       pivoting: {
         mode: this.pivotingMode,
         pivotModel: clonePivotModel(this.pivotModel),
@@ -1069,6 +1694,15 @@ export class Grid {
     const nextStateColumn = mergeStateColumnOptions(this.options.stateColumn, options.stateColumn);
     const nextColumnMenu = mergeColumnMenuOptions(this.options.columnMenu, options.columnMenu);
     const nextContextMenu = mergeContextMenuOptions(this.options.contextMenu, options.contextMenu);
+    const nextSideBar = mergeSideBarOptions(this.options.sideBar, options.sideBar);
+    const nextRangeHandle = mergeRangeHandleOptions(this.options.rangeHandle, options.rangeHandle);
+    const nextUndoRedo = mergeUndoRedoOptions(this.options.undoRedo, options.undoRedo);
+    const nextStatusBar = mergeStatusBarOptions(this.options.statusBar, options.statusBar);
+    const nextFilterRow = mergeFilterRowOptions(this.options.filterRow, options.filterRow);
+    const nextSetFilter = mergeSetFilterOptions(this.options.setFilter, options.setFilter);
+    const nextAdvancedFilterPresets = Object.prototype.hasOwnProperty.call(options, 'advancedFilterPresets')
+      ? cloneAdvancedFilterPresets(options.advancedFilterPresets)
+      : cloneAdvancedFilterPresets(this.options.advancedFilterPresets);
     const nextGrouping = mergeGroupingOptions(this.options.grouping, options.grouping);
     const nextPivoting = mergePivotingOptions(this.options.pivoting, options.pivoting);
     const nextWorkerRuntime = mergeWorkerRuntimeOptions(this.options.workerRuntime, options.workerRuntime);
@@ -1165,6 +1799,9 @@ export class Grid {
     this.pivotValues = this.normalizePivotValues(nextPivoting?.values ?? this.pivotValues);
     this.treeDataOptions = this.normalizeTreeDataOptions(mergedTreeData);
     this.treeMode = this.treeDataOptions.mode === 'server' ? 'server' : 'client';
+    this.filterModel = this.normalizeFilterModel(this.filterModel);
+    this.advancedFilterModel = this.normalizeAdvancedFilterModel(this.advancedFilterModel);
+    const normalizedAdvancedFilterPresets = this.normalizeAdvancedFilterPresets(nextAdvancedFilterPresets);
 
     this.options = {
       ...this.options,
@@ -1189,6 +1826,13 @@ export class Grid {
       stateColumn: nextStateColumn,
       columnMenu: nextColumnMenu,
       contextMenu: nextContextMenu,
+      sideBar: nextSideBar,
+      rangeHandle: nextRangeHandle,
+      undoRedo: nextUndoRedo,
+      statusBar: nextStatusBar,
+      filterRow: nextFilterRow,
+      setFilter: nextSetFilter,
+      advancedFilterPresets: normalizedAdvancedFilterPresets,
       columnGroups: options.columnGroups ? cloneColumnGroups(options.columnGroups) : this.options.columnGroups,
       grouping: nextGrouping,
       pivoting: {
@@ -1203,6 +1847,8 @@ export class Grid {
       columns: this.columnModel.getColumns()
     };
     this.rebuildColumnValueFormatContext();
+    this.renderer.setFilterModel(this.filterModel);
+    this.renderer.setAdvancedFilterModel(this.advancedFilterModel);
     this.prewarmWorkerExecutors();
 
     void this.rebuildDerivedView();
@@ -1225,12 +1871,12 @@ export class Grid {
 
   public setSparseRowOverrides(overrides: SparseRowOverride[]): void {
     this.rowModel.setBaseSparseOverrides(overrides);
-    this.renderer.setOptions(this.getRendererOptions());
+    this.syncRendererOptions();
   }
 
   public clearSparseRowOverrides(): void {
     this.rowModel.clearBaseSparseOverrides();
-    this.renderer.setOptions(this.getRendererOptions());
+    this.syncRendererOptions();
   }
 
   public setRowModelOptions(options: RowModelOptions): void {
@@ -1335,6 +1981,7 @@ export class Grid {
 
   public async setFilterModel(filterModel: GridFilterModel): Promise<void> {
     this.filterModel = this.normalizeFilterModel(filterModel);
+    this.renderer.setFilterModel(this.filterModel);
     if (this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)) {
       this.sortMapping = null;
       this.filterMapping = null;
@@ -1353,6 +2000,109 @@ export class Grid {
 
   public async clearFilterModel(): Promise<void> {
     await this.setFilterModel({});
+  }
+
+  public getAdvancedFilterModel(): AdvancedFilterModel | null {
+    return this.cloneAdvancedFilterModel(this.advancedFilterModel);
+  }
+
+  public async setAdvancedFilterModel(advancedFilterModel: AdvancedFilterModel | null): Promise<void> {
+    this.advancedFilterModel = this.normalizeAdvancedFilterModel(advancedFilterModel);
+    this.renderer.setAdvancedFilterModel(this.advancedFilterModel);
+    if (this.remoteQueryService.isRemoteDataProvider(this.sourceDataProvider)) {
+      this.sortMapping = null;
+      this.filterMapping = null;
+      this.sortOperationToken += 1;
+      this.filterOperationToken += 1;
+      this.groupOperationToken += 1;
+      this.pivotOperationToken += 1;
+      this.syncRemoteProviderQueryState();
+      this.clearDerivedViewArtifacts();
+      this.applyRemoteServerSideView();
+      return;
+    }
+
+    await this.applyFilterModelInternal();
+  }
+
+  public async clearAdvancedFilterModel(): Promise<void> {
+    await this.setAdvancedFilterModel(null);
+  }
+
+  public getAdvancedFilterPresets(): GridAdvancedFilterPreset[] {
+    return cloneAdvancedFilterPresets(this.options.advancedFilterPresets) ?? [];
+  }
+
+  public setAdvancedFilterPresets(presets: GridAdvancedFilterPreset[]): void {
+    const normalizedPresets = this.normalizeAdvancedFilterPresets(presets);
+    this.options = {
+      ...this.options,
+      advancedFilterPresets: normalizedPresets
+    };
+    this.syncRendererOptions();
+  }
+
+  public saveAdvancedFilterPreset(presetId: string, label?: string): boolean {
+    const normalizedId = normalizeAdvancedFilterPresetId(presetId);
+    const normalizedLabel = normalizeAdvancedFilterPresetLabel(label ?? presetId);
+    const advancedFilterModel = this.getAdvancedFilterModel();
+    if (!normalizedId || !normalizedLabel || !advancedFilterModel) {
+      return false;
+    }
+
+    const nextPresets = this.getAdvancedFilterPresets();
+    const nextPreset: GridAdvancedFilterPreset = {
+      id: normalizedId,
+      label: normalizedLabel,
+      advancedFilterModel
+    };
+    const existingIndex = nextPresets.findIndex((preset) => preset.id === normalizedId);
+    if (existingIndex >= 0) {
+      nextPresets[existingIndex] = nextPreset;
+    } else {
+      nextPresets.push(nextPreset);
+    }
+
+    this.options = {
+      ...this.options,
+      advancedFilterPresets: this.normalizeAdvancedFilterPresets(nextPresets)
+    };
+    this.syncRendererOptions();
+    return true;
+  }
+
+  public async applyAdvancedFilterPreset(presetId: string): Promise<boolean> {
+    const normalizedId = normalizeAdvancedFilterPresetId(presetId);
+    if (!normalizedId) {
+      return false;
+    }
+
+    const preset = (this.options.advancedFilterPresets ?? []).find((candidate) => candidate.id === normalizedId);
+    if (!preset) {
+      return false;
+    }
+
+    await this.setAdvancedFilterModel(preset.advancedFilterModel);
+    return true;
+  }
+
+  public deleteAdvancedFilterPreset(presetId: string): boolean {
+    const normalizedId = normalizeAdvancedFilterPresetId(presetId);
+    if (!normalizedId) {
+      return false;
+    }
+
+    const nextPresets = this.getAdvancedFilterPresets().filter((preset) => preset.id !== normalizedId);
+    if (nextPresets.length === (this.options.advancedFilterPresets ?? []).length) {
+      return false;
+    }
+
+    this.options = {
+      ...this.options,
+      advancedFilterPresets: nextPresets
+    };
+    this.syncRendererOptions();
+    return true;
   }
 
   public getGroupModel(): GroupModelItem[] {
@@ -1544,6 +2294,56 @@ export class Grid {
     await this.rebuildDerivedView();
   }
 
+  private async applyGroupingPanelState(nextState: {
+    mode: GroupingMode;
+    groupModel: GroupModelItem[];
+    aggregations: GroupAggregationDef[];
+  }): Promise<void> {
+    const nextMode: GroupingMode = nextState.mode === 'server' ? 'server' : 'client';
+    const nextGroupModel = this.normalizeGroupModel(nextState.groupModel);
+    const nextAggregations = this.normalizeGroupAggregations(nextState.aggregations);
+
+    this.groupingMode = nextMode;
+    this.groupModel = nextGroupModel;
+    this.groupAggregations = nextAggregations;
+    this.groupExpansionState = {};
+    this.options = {
+      ...this.options,
+      grouping: {
+        ...(this.options.grouping ?? {}),
+        mode: this.groupingMode,
+        groupModel: cloneGroupModel(this.groupModel),
+        aggregations: cloneGroupAggregations(this.groupAggregations),
+        defaultExpanded: this.groupDefaultExpanded
+      }
+    };
+    await this.rebuildDerivedView();
+  }
+
+  private async applyPivotPanelState(nextState: {
+    mode: PivotingMode;
+    pivotModel: PivotModelItem[];
+    values: PivotValueDef[];
+  }): Promise<void> {
+    const nextMode: PivotingMode = nextState.mode === 'server' ? 'server' : 'client';
+    const nextPivotModel = this.normalizePivotModel(nextState.pivotModel);
+    const nextPivotValues = this.normalizePivotValues(nextState.values);
+
+    this.pivotingMode = nextMode;
+    this.pivotModel = nextPivotModel;
+    this.pivotValues = nextPivotValues;
+    this.options = {
+      ...this.options,
+      pivoting: {
+        ...(this.options.pivoting ?? {}),
+        mode: this.pivotingMode,
+        pivotModel: clonePivotModel(this.pivotModel),
+        values: clonePivotValues(this.pivotValues)
+      }
+    };
+    await this.rebuildDerivedView();
+  }
+
   public getGroupedRowsSnapshot(): GroupViewRow[] {
     const snapshot = new Array<GroupViewRow>(this.groupRows.length);
     for (let index = 0; index < this.groupRows.length; index += 1) {
@@ -1673,6 +2473,21 @@ export class Grid {
     this.syncColumnsToRenderer();
   }
 
+  public getColumnLayout(): GridColumnLayout {
+    return this.stateService.createColumnLayout({
+      columns: this.columnModel.getColumns(),
+      columnOrder: this.getColumnOrder()
+    });
+  }
+
+  public setColumnLayout(layout: GridColumnLayout): void {
+    this.stateService.applyColumnLayout({
+      layout,
+      columnModel: this.columnModel,
+      syncColumnsToRenderer: () => this.syncColumnsToRenderer()
+    });
+  }
+
   public setTheme(themeTokens: GridTheme): void {
     this.renderer.setTheme(themeTokens);
   }
@@ -1739,6 +2554,22 @@ export class Grid {
     this.renderer.clearSelection();
   }
 
+  public undo(): boolean {
+    return this.renderer.undoLastEdit();
+  }
+
+  public redo(): boolean {
+    return this.renderer.redoLastEdit();
+  }
+
+  public canUndo(): boolean {
+    return this.renderer.canUndoEdit();
+  }
+
+  public canRedo(): boolean {
+    return this.renderer.canRedoEdit();
+  }
+
   public getColumns(): ColumnDef[] {
     return this.columnModel.getColumns().map((column) => ({ ...column }));
   }
@@ -1764,7 +2595,7 @@ export class Grid {
   }
 
   public refresh(): void {
-    this.renderer.setOptions(this.getRendererOptions());
+    this.syncRendererOptions();
   }
 
   public async exportCsv(options: GridExportOptions = {}): Promise<GridExportResult> {
@@ -1873,6 +2704,7 @@ export class Grid {
       rowModel: this.rowModel,
       sortModel: this.sortModel,
       filterModel: this.filterModel,
+      advancedFilterModel: this.advancedFilterModel,
       groupModel: this.groupModel,
       pivotModel: this.pivotModel,
       pivotValues: this.pivotValues,
@@ -1921,7 +2753,7 @@ export class Grid {
           filterMapping: null
         })
       );
-      this.renderer.setOptions(this.getRendererOptions());
+      this.syncRendererOptions();
       return;
     }
 
@@ -1934,7 +2766,7 @@ export class Grid {
         treeColumnId: this.treeDataOptions.treeColumnId ?? ''
       })
     );
-    this.renderer.setOptions(this.getRendererOptions());
+    this.syncRendererOptions();
   }
 
   private getDataPipelineState(): GridDataPipelineState {
@@ -1977,6 +2809,7 @@ export class Grid {
       ...this.options,
       columns: this.columnModel.getColumns()
     };
+    this.renderer.setColumnCatalog(this.columnModel.getColumns());
     this.renderer.setColumns(this.columnModel.getVisibleColumns());
   }
 
@@ -2113,7 +2946,7 @@ export class Grid {
         ...this.options,
         dataProvider: this.sourceDataProvider
       };
-      this.renderer.setOptions(this.getRendererOptions());
+      this.syncRendererOptions();
     }
   };
 
@@ -2127,6 +2960,11 @@ export class Grid {
       rowModel: this.rowModel,
       columns: this.columnModel.getVisibleColumns()
     };
+  }
+
+  private syncRendererOptions(): void {
+    this.renderer.setOptions(this.getRendererOptions());
+    this.renderer.setColumnCatalog(this.columnModel.getColumns());
   }
 
   private rebuildColumnValueFormatContext(): void {
@@ -2148,7 +2986,7 @@ export class Grid {
   }
 
   private hasActiveFilterModel(): boolean {
-    return Object.keys(this.filterModel).length > 0;
+    return Object.keys(this.filterModel).length > 0 || this.advancedFilterModel !== null;
   }
 
   private hasActiveGroupModel(): boolean {
@@ -2431,6 +3269,121 @@ export class Grid {
     return this.normalizeFilterModel(filterModel);
   }
 
+  private normalizeAdvancedFilterNode(
+    node: AdvancedFilterNode,
+    knownColumnIds: Set<string>
+  ): AdvancedFilterNode | null {
+    if (!node || typeof node !== 'object') {
+      return null;
+    }
+
+    if (isAdvancedFilterGroup(node)) {
+      const normalizedRules = node.rules
+        .map((childNode) => this.normalizeAdvancedFilterNode(childNode, knownColumnIds))
+        .filter((childNode): childNode is AdvancedFilterNode => childNode !== null);
+      if (normalizedRules.length === 0) {
+        return null;
+      }
+
+      return {
+        kind: 'group',
+        operator: node.operator === 'or' ? 'or' : 'and',
+        rules: normalizedRules
+      };
+    }
+
+    if (
+      typeof node.columnId !== 'string' ||
+      node.columnId.length === 0 ||
+      !knownColumnIds.has(node.columnId) ||
+      !node.condition ||
+      typeof node.condition !== 'object' ||
+      !this.isAdvancedFilterConditionValid(node.condition as ColumnFilterCondition)
+    ) {
+      return null;
+    }
+
+    return {
+      kind: node.kind === 'rule' ? 'rule' : undefined,
+      columnId: node.columnId,
+      condition: { ...node.condition }
+    };
+  }
+
+  private normalizeAdvancedFilterModel(advancedFilterModel: AdvancedFilterModel | null): AdvancedFilterModel | null {
+    if (!advancedFilterModel || !Array.isArray(advancedFilterModel.rules)) {
+      return null;
+    }
+
+    const knownColumnIds = new Set(this.columnModel.getColumns().map((column) => column.id));
+    const normalizedRules = advancedFilterModel.rules
+      .map((rule) => this.normalizeAdvancedFilterNode(rule, knownColumnIds))
+      .filter((rule): rule is AdvancedFilterNode => rule !== null);
+
+    if (normalizedRules.length === 0) {
+      return null;
+    }
+
+    return {
+      operator: advancedFilterModel.operator === 'or' ? 'or' : 'and',
+      rules: normalizedRules
+    };
+  }
+
+  private normalizeAdvancedFilterPresets(
+    presets: ReadonlyArray<GridAdvancedFilterPreset> | null | undefined
+  ): GridAdvancedFilterPreset[] | undefined {
+    const clonedPresets = cloneAdvancedFilterPresets(presets);
+    if (!clonedPresets || clonedPresets.length === 0) {
+      return clonedPresets;
+    }
+
+    const normalizedPresets: GridAdvancedFilterPreset[] = [];
+    for (let index = 0; index < clonedPresets.length; index += 1) {
+      const preset = clonedPresets[index];
+      const normalizedModel = this.normalizeAdvancedFilterModel(preset.advancedFilterModel);
+      if (!normalizedModel) {
+        continue;
+      }
+      normalizedPresets.push({
+        id: preset.id,
+        label: preset.label,
+        advancedFilterModel: normalizedModel
+      });
+    }
+    return normalizedPresets;
+  }
+
+  private cloneAdvancedFilterModel(advancedFilterModel: AdvancedFilterModel | null): AdvancedFilterModel | null {
+    return cloneAdvancedFilterModelValue(advancedFilterModel);
+  }
+
+  private isAdvancedFilterConditionValid(condition: ColumnFilterCondition): boolean {
+    if (condition.kind === 'text') {
+      return typeof condition.value === 'string' && condition.value.length > 0;
+    }
+
+    if (condition.kind === 'set') {
+      return condition.includeNull === true || (Array.isArray(condition.values) && condition.values.length > 0);
+    }
+
+    if (condition.kind === 'number') {
+      if (condition.operator === 'between') {
+        return Number.isFinite(condition.min) && Number.isFinite(condition.max);
+      }
+      return Number.isFinite(condition.value);
+    }
+
+    if (condition.kind === 'date') {
+      if (condition.operator === 'between') {
+        return condition.min !== undefined && condition.max !== undefined;
+      }
+      return condition.value !== undefined;
+    }
+
+    return false;
+  }
+
   private async applyFilterModelInternal(): Promise<void> {
     const rowCount = this.sourceDataProvider.getRowCount();
     const operationToken = ++this.filterOperationToken;
@@ -2451,6 +3404,7 @@ export class Grid {
         opId,
         rowCount,
         filterModel: this.filterModel,
+        advancedFilterModel: this.advancedFilterModel,
         columns: this.getSchemaColumnsForModelNormalization(),
         dataProvider: this.sourceDataProvider,
         sourceOrder: this.sortMapping ?? undefined
@@ -2536,6 +3490,7 @@ export class Grid {
           opId: `filter-${operationToken}`,
           rowCount: sourceRowCount,
           filterModel: this.filterModel,
+          advancedFilterModel: this.advancedFilterModel,
           columns: this.getSchemaColumnsForModelNormalization(),
           dataProvider: this.sourceDataProvider,
           sourceOrder: this.sortMapping ?? createIdentityMapping(sourceRowCount)
@@ -2596,7 +3551,7 @@ export class Grid {
         filterMapping: this.filterMapping
       })
     );
-    this.renderer.setOptions(this.getRendererOptions());
+    this.syncRendererOptions();
   }
 
   private async applyPivotViewInternal(): Promise<void> {
@@ -2637,7 +3592,7 @@ export class Grid {
     }
 
     this.applyPivotResult(this.hydrateCustomPivotValues(response.result));
-    this.renderer.setOptions(this.getRendererOptions());
+    this.syncRendererOptions();
   }
 
   private applyPivotResult(result: PivotExecutionResult): void {
@@ -2778,7 +3733,7 @@ export class Grid {
     }
 
     this.applyGroupingResult(this.hydrateCustomGroupingValues(response.result));
-    this.renderer.setOptions(this.getRendererOptions());
+    this.syncRendererOptions();
   }
 
   private applyGroupingResult(result: GroupExecutionResult): void {
@@ -2934,7 +3889,7 @@ export class Grid {
     }
 
     this.applyTreeResult(this.hydrateTreeLazyRows(response.result));
-    this.renderer.setOptions(this.getRendererOptions());
+    this.syncRendererOptions();
   }
 
   private applyTreeResult(result: TreeExecutionResult): void {

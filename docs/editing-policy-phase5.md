@@ -22,7 +22,7 @@
 
 ## Events
 - `editStart`: `{rowIndex, dataIndex, columnId, value}`
-- `editCommit`: `{rowIndex, dataIndex, columnId, previousValue, value}`
+- `editCommit`: `{rowIndex, dataIndex, rowKey, columnId, previousValue, value, source, commitId, timestampMs, timestamp, rowCount, cellCount, changes[]}`
 - `editCancel`: `{rowIndex, dataIndex, columnId, value, reason}`
 
 ## Validation Coverage

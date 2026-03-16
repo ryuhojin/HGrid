@@ -1,9 +1,13 @@
 import type { DataProvider, GridRowData, RowKey } from '../data/data-provider';
+import type { GridFilterModel } from '../data/filter-executor';
+import type { AdvancedFilterModel } from '../data/filter-model';
 import type { RowModel } from '../data/row-model';
 import type { RowModelOptions } from '../data/row-model';
 import type { EditCommitAuditLogger } from './edit-events';
+import type { GridSelection } from '../interaction/selection-model';
 
 export type CellValueType = 'text' | 'number' | 'date' | 'boolean';
+export type ColumnFilterMode = 'auto' | 'text' | 'set';
 export type ColumnPinPosition = 'left' | 'right';
 export type ScrollbarVisibility = 'auto' | 'always' | 'hidden';
 export type RowHeightMode = 'fixed' | 'estimated' | 'measured';
@@ -26,6 +30,12 @@ export type GridBuiltInColumnMenuActionId =
   | 'autoSizeColumn'
   | 'resetColumnWidth'
   | 'hideColumn';
+export type GridBuiltInBodyMenuActionId =
+  | 'copyCell'
+  | 'copyRow'
+  | 'copySelection'
+  | 'filterByValue'
+  | 'clearColumnFilter';
 
 export type ColumnFormatter = (value: unknown, row: GridRowData) => string;
 export type ColumnComparator = (a: unknown, b: unknown) => number;
@@ -52,6 +62,79 @@ export interface GridLocaleText {
   columnMenuAutoSizeColumn: string;
   columnMenuResetColumnWidth: string;
   columnMenuHideColumn: string;
+  columnMenuOpenFilter: string;
+  contextMenuCopyCell: string;
+  contextMenuCopyRow: string;
+  contextMenuCopySelection: string;
+  contextMenuFilterByValue: string;
+  contextMenuClearColumnFilter: string;
+  filterPanelTitle: string;
+  filterPanelQuickMode: string;
+  filterPanelBuilderMode: string;
+  filterPanelOperator: string;
+  filterPanelValue: string;
+  filterPanelMin: string;
+  filterPanelMax: string;
+  filterPanelSearch: string;
+  filterPanelConditionOne: string;
+  filterPanelConditionTwo: string;
+  filterPanelAnd: string;
+  filterPanelTextMode: string;
+  filterPanelSetMode: string;
+  filterPanelColumn: string;
+  filterPanelMatch: string;
+  filterPanelAddRule: string;
+  filterPanelAddGroup: string;
+  filterPanelGroup: string;
+  filterPanelRemoveRule: string;
+  filterPanelNoRules: string;
+  filterPanelApply: string;
+  filterPanelClear: string;
+  filterPanelCancel: string;
+  filterPanelConditionKind: string;
+  filterPanelPresetsTitle: string;
+  filterPanelPresetName: string;
+  filterPanelPresetSave: string;
+  filterPanelPresetApply: string;
+  filterPanelPresetDelete: string;
+  filterPanelPresetEmpty: string;
+  filterRowPlaceholderText: string;
+  filterRowPlaceholderNumber: string;
+  filterRowPlaceholderDate: string;
+  filterRowBooleanAny: string;
+  filterRowBooleanTrue: string;
+  filterRowBooleanFalse: string;
+  filterRowBooleanBlank: string;
+  filterRowSetAny: string;
+  filterRowSetBlank: string;
+  toolPanelColumnsTitle: string;
+  toolPanelFiltersTitle: string;
+  toolPanelGroupingTitle: string;
+  toolPanelPivotTitle: string;
+  toolPanelToggle: string;
+  toolPanelClose: string;
+  toolPanelSearchColumns: string;
+  toolPanelNoColumns: string;
+  toolPanelMoveColumnUp: string;
+  toolPanelMoveColumnDown: string;
+  toolPanelLayoutPresets: string;
+  toolPanelApplyLayoutPreset: string;
+  toolPanelNoLayoutPresets: string;
+  statusBarSelectionCells: string;
+  statusBarSelectionRows: string;
+  statusBarVisibleRows: string;
+  statusBarRows: string;
+  statusBarFilteredRows: string;
+  statusBarAggregatesCalculating: string;
+  statusBarSum: string;
+  statusBarAvg: string;
+  statusBarMin: string;
+  statusBarMax: string;
+  statusBarRemoteSynced: string;
+  statusBarRemoteLoading: string;
+  statusBarRemoteRefreshing: string;
+  statusBarRemoteError: string;
+  statusBarRemotePending: string;
   scopeAll: string;
   scopeFiltered: string;
   scopeViewport: string;
@@ -188,6 +271,7 @@ export interface ColumnDef {
   minWidth?: number;
   maxWidth?: number;
   type: CellValueType;
+  filterMode?: ColumnFilterMode;
   editable?: boolean;
   visible?: boolean;
   pinned?: ColumnPinPosition;
@@ -205,6 +289,16 @@ export interface GridColumnMenuContext {
   source: GridMenuOpenSource;
 }
 
+export interface GridContextMenuContext extends GridColumnMenuContext {
+  kind?: 'header' | 'cell';
+  rowIndex?: number;
+  dataIndex?: number;
+  rowKey?: RowKey | null;
+  row?: GridRowData | null;
+  value?: unknown;
+  selection?: GridSelection;
+}
+
 export interface GridMenuItem {
   id: string;
   label: string;
@@ -212,7 +306,7 @@ export interface GridMenuItem {
   checked?: boolean;
   danger?: boolean;
   separator?: boolean;
-  onSelect?: (context: GridColumnMenuContext) => void;
+  onSelect?: (context: GridContextMenuContext) => void;
 }
 
 export interface GridColumnMenuOptions {
@@ -223,7 +317,197 @@ export interface GridColumnMenuOptions {
 
 export interface GridContextMenuOptions {
   enabled?: boolean;
-  getItems?: (context: GridColumnMenuContext) => GridMenuItem[];
+  builtInActions?: GridBuiltInBodyMenuActionId[];
+  getItems?: (context: GridContextMenuContext) => GridMenuItem[];
+}
+
+export type GridBuiltInToolPanelId = 'columns' | 'filters' | 'grouping' | 'pivot';
+export type GridToolPanelId = GridBuiltInToolPanelId | string;
+
+export interface GridToolPanelRenderState {
+  columns: ColumnDef[];
+  visibleColumns: ColumnDef[];
+  filterModel: GridFilterModel;
+  groupModel: GroupModelItem[];
+  groupAggregations: GroupAggregationDef[];
+  groupingMode: GroupingMode;
+  pivotModel: PivotModelItem[];
+  pivotValues: PivotValueDef[];
+  pivotingMode: PivotingMode;
+}
+
+export interface GridToolPanelActions {
+  closePanel(): void;
+  setFilterModel(filterModel: GridFilterModel): Promise<void> | void;
+  clearFilterModel(): Promise<void> | void;
+  setAdvancedFilterModel(advancedFilterModel: AdvancedFilterModel | null): Promise<void> | void;
+  setColumnLayout(layout: GridColumnLayout): void;
+}
+
+export interface GridCustomToolPanelRenderContext {
+  container: HTMLElement;
+  state: GridToolPanelRenderState;
+  actions: GridToolPanelActions;
+}
+
+export interface GridCustomToolPanelDefinition {
+  id: string;
+  title: string;
+  render(context: GridCustomToolPanelRenderContext): void;
+}
+
+export interface GridColumnLayout {
+  columnOrder: string[];
+  hiddenColumnIds: string[];
+  pinnedColumns: Record<string, ColumnPinPosition>;
+  columnWidths: Record<string, number>;
+}
+
+export interface GridColumnLayoutPreset {
+  id: string;
+  label: string;
+  layout: GridColumnLayout;
+}
+
+export interface GridSideBarOptions {
+  enabled?: boolean;
+  panels?: GridToolPanelId[];
+  defaultPanel?: GridToolPanelId | null;
+  initialOpen?: boolean;
+  width?: number;
+  customPanels?: GridCustomToolPanelDefinition[];
+  columnLayoutPresets?: GridColumnLayoutPreset[];
+}
+
+export type GridRangeHandleMode = 'fill' | 'copy';
+
+export interface GridRangeHandleOptions {
+  enabled?: boolean;
+  mode?: GridRangeHandleMode;
+}
+
+export interface GridUndoRedoOptions {
+  enabled?: boolean;
+  limit?: number;
+}
+
+export type GridBuiltInStatusBarItemId = 'selection' | 'aggregates' | 'rows' | 'remote';
+export type GridStatusBarItemId = GridBuiltInStatusBarItemId | string;
+
+export type GridStatusBarItemTone = 'default' | 'active' | 'danger';
+export type GridStatusBarItemAlign = 'main' | 'meta';
+
+export interface GridStatusBarSelectionSummary {
+  kind: 'none' | 'cells' | 'rows';
+  selectedCellCount: number;
+  selectedRowCount: number;
+}
+
+export interface GridStatusBarAggregateSummary {
+  count: number;
+  sum: number;
+  avg: number;
+  min: number;
+  max: number;
+  isComputing?: boolean;
+  processedCellCount?: number;
+  totalCellCount?: number;
+}
+
+export interface GridStatusBarRowsSummary {
+  visibleRowCount: number;
+  viewRowCount: number;
+  sourceRowCount: number;
+  isFiltered: boolean;
+}
+
+export interface GridStatusBarRemoteSummary {
+  loadingCount: number;
+  refreshingCount: number;
+  errorCount: number;
+  inFlightCount: number;
+  pendingRowCount: number;
+  pendingCellCount: number;
+  isBusy: boolean;
+  hasError: boolean;
+  isPending: boolean;
+}
+
+export interface GridStatusBarCustomItemState {
+  selection: GridStatusBarSelectionSummary;
+  aggregates: GridStatusBarAggregateSummary | null;
+  rows: GridStatusBarRowsSummary;
+  remote: GridStatusBarRemoteSummary | null;
+  filterModel: GridFilterModel;
+  advancedFilterModel: AdvancedFilterModel | null;
+  columnLayout: GridColumnLayout;
+  visibleColumnCount: number;
+  totalColumnCount: number;
+}
+
+export interface GridStatusBarCustomItemRenderContext {
+  state: GridStatusBarCustomItemState;
+}
+
+export interface GridStatusBarCustomItemRenderResult {
+  text: string;
+  tone?: GridStatusBarItemTone;
+  align?: GridStatusBarItemAlign;
+}
+
+export type GridStatusBarCustomItemRenderer = (
+  context: GridStatusBarCustomItemRenderContext
+) => string | GridStatusBarCustomItemRenderResult | null | undefined;
+
+export interface GridStatusBarCustomItemDefinition {
+  id: string;
+  align?: GridStatusBarItemAlign;
+  render: GridStatusBarCustomItemRenderer;
+}
+
+export interface GridStatusBarOptions {
+  enabled?: boolean;
+  items?: GridStatusBarItemId[];
+  customItems?: GridStatusBarCustomItemDefinition[];
+  aggregateAsyncThreshold?: number;
+  aggregateChunkSize?: number;
+}
+
+export interface GridFilterRowOptions {
+  enabled?: boolean;
+}
+
+export type GridSetFilterValueSource = 'sampled' | 'full';
+export type GridSetFilterReason = 'panel' | 'builder' | 'filterRow';
+
+export interface GridSetFilterValueOption {
+  value: unknown;
+  label?: string;
+}
+
+export interface GridSetFilterValuesContext {
+  column: ColumnDef;
+  dataProvider: DataProvider;
+  locale: string;
+  reason: GridSetFilterReason;
+  sampledOptions: GridSetFilterValueOption[];
+}
+
+export type GridSetFilterValuesGetter = (
+  context: GridSetFilterValuesContext
+) => ReadonlyArray<GridSetFilterValueOption | unknown>;
+
+export interface GridSetFilterOptions {
+  valueSource?: GridSetFilterValueSource;
+  maxScanRows?: number;
+  maxDistinctValues?: number;
+  getValues?: GridSetFilterValuesGetter;
+}
+
+export interface GridAdvancedFilterPreset {
+  id: string;
+  label: string;
+  advancedFilterModel: AdvancedFilterModel;
 }
 
 export interface UnsafeHtmlSanitizeContext {
@@ -266,6 +550,13 @@ export interface GridOptions {
   columnGroups?: ColumnGroupDef[];
   columnMenu?: GridColumnMenuOptions;
   contextMenu?: GridContextMenuOptions;
+  sideBar?: GridSideBarOptions;
+  rangeHandle?: GridRangeHandleOptions;
+  undoRedo?: GridUndoRedoOptions;
+  statusBar?: GridStatusBarOptions;
+  filterRow?: GridFilterRowOptions;
+  setFilter?: GridSetFilterOptions;
+  advancedFilterPresets?: GridAdvancedFilterPreset[];
   grouping?: GroupingOptions;
   pivoting?: PivotingOptions;
   treeData?: TreeDataOptions;

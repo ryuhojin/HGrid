@@ -23,6 +23,22 @@ export interface UpdateCellTransaction {
   value: unknown;
 }
 
+export interface HistoryCellUpdate {
+  rowKey: RowKey;
+  dataIndexHint: number;
+  columnId: string;
+  currentValue: unknown;
+  nextValue: unknown;
+}
+
+export interface AppliedHistoryCellUpdate {
+  rowKey: RowKey;
+  dataIndex: number;
+  columnId: string;
+  previousValue: unknown;
+  value: unknown;
+}
+
 export interface RemoveRowsTransaction {
   type: 'remove';
   index: number;
@@ -36,6 +52,9 @@ export interface DataProvider {
   setValue(dataIndex: number, columnId: string, value: unknown): void;
   applyTransactions(transactions: DataTransaction[]): void;
   getRow?(dataIndex: number): GridRowData | undefined;
+  peekRow?(dataIndex: number): GridRowData | undefined;
+  getDataIndexByRowKey?(rowKey: RowKey, dataIndexHint?: number): number;
+  applyHistoryUpdates?(updates: HistoryCellUpdate[]): AppliedHistoryCellUpdate[];
   onRowsChanged?(listener: RowsChangedListener): () => void;
   isRowLoading?(dataIndex: number): boolean;
 }

@@ -1,4 +1,11 @@
-import type { DataProvider, DataTransaction, GridRowData, RowKey } from './data-provider';
+import type {
+  AppliedHistoryCellUpdate,
+  DataProvider,
+  DataTransaction,
+  GridRowData,
+  HistoryCellUpdate,
+  RowKey
+} from './data-provider';
 import {
   GROUP_ROW_COLUMN_ID_FIELD,
   GROUP_ROW_EXPANDED_FIELD,
@@ -64,6 +71,10 @@ export class RemoteServerSideViewDataProvider implements DataProvider {
     this.viewMode = viewMode;
     this.treeColumnId = typeof treeColumnId === 'string' ? treeColumnId : '';
     this.rowCache = new Array<GridRowData | null>(this.sourceDataProvider.getRowCount());
+  }
+
+  public getSourceDataProvider(): RemoteDataProvider {
+    return this.sourceDataProvider;
   }
 
   public getRowCount(): number {
@@ -191,6 +202,19 @@ export class RemoteServerSideViewDataProvider implements DataProvider {
     return row;
   }
 
+  public peekRow(dataIndex: number): GridRowData | undefined {
+    if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= this.getRowCount()) {
+      return undefined;
+    }
+
+    const sourceRow = this.sourceDataProvider.peekRow?.(dataIndex);
+    if (!sourceRow) {
+      return undefined;
+    }
+
+    return this.getRow(dataIndex);
+  }
+
   public setValue(dataIndex: number, columnId: string, value: unknown): void {
     const metadata = this.getRowMetadata(dataIndex);
     if (this.viewMode === 'grouping' && isGroupLikeRow(metadata)) {
@@ -205,7 +229,36 @@ export class RemoteServerSideViewDataProvider implements DataProvider {
   }
 
   public applyTransactions(transactions: DataTransaction[]): void {
-    this.sourceDataProvider.applyTransactions(transactions);
+    const passthroughTransactions: DataTransaction[] = [];
+    for (let index = 0; index < transactions.length; index += 1) {
+      const transaction = transactions[index];
+      if (transaction.type === 'updateCell') {
+        this.setValue(transaction.index, transaction.columnId, transaction.value);
+        continue;
+      }
+
+      passthroughTransactions.push(transaction);
+    }
+
+    if (passthroughTransactions.length > 0) {
+      this.sourceDataProvider.applyTransactions(passthroughTransactions);
+    }
+  }
+
+  public applyHistoryUpdates(updates: HistoryCellUpdate[]): AppliedHistoryCellUpdate[] {
+    if (typeof this.sourceDataProvider.applyHistoryUpdates !== 'function') {
+      return [];
+    }
+
+    return this.sourceDataProvider.applyHistoryUpdates(updates);
+  }
+
+  public getDataIndexByRowKey(rowKey: RowKey, dataIndexHint?: number): number {
+    if (typeof this.sourceDataProvider.getDataIndexByRowKey === 'function') {
+      return this.sourceDataProvider.getDataIndexByRowKey(rowKey, dataIndexHint);
+    }
+
+    return -1;
   }
 
   public isRowLoading(dataIndex: number): boolean {

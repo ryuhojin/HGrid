@@ -1,5 +1,6 @@
 import type {
   ColumnDef,
+  GridColumnLayout,
   ColumnPinPosition,
   GridOptions,
   GridState,
@@ -27,6 +28,17 @@ export interface GridStateSnapshotParams {
   pivotModel: PivotModelItem[];
   groupExpansionState: Record<string, boolean>;
   treeExpansionState: Record<string, boolean>;
+}
+
+export interface GridColumnLayoutSnapshotParams {
+  columns: ColumnDef[];
+  columnOrder: string[];
+}
+
+export interface GridColumnLayoutApplyParams {
+  layout: GridColumnLayout;
+  columnModel: GridColumnStatePort;
+  syncColumnsToRenderer: () => void;
 }
 
 export interface GridStateApplyParams {
@@ -71,26 +83,42 @@ function hasSameColumnModel(left: Array<{ columnId: string }>, right: Array<{ co
   return true;
 }
 
+function createColumnLayoutSnapshot(params: GridColumnLayoutSnapshotParams): GridColumnLayout {
+  const hiddenColumnIds: string[] = [];
+  const pinnedColumns: Record<string, ColumnPinPosition> = {};
+  const columnWidths: Record<string, number> = {};
+
+  for (let columnIndex = 0; columnIndex < params.columns.length; columnIndex += 1) {
+    const column = params.columns[columnIndex];
+    columnWidths[column.id] = column.width;
+    if (column.visible === false) {
+      hiddenColumnIds.push(column.id);
+    }
+    if (column.pinned) {
+      pinnedColumns[column.id] = column.pinned;
+    }
+  }
+
+  return {
+    columnOrder: params.columnOrder.slice(),
+    hiddenColumnIds,
+    pinnedColumns,
+    columnWidths
+  };
+}
+
 export class GridStateService {
   public createState(params: GridStateSnapshotParams): GridState {
-    const hiddenColumnIds: string[] = [];
-    const pinnedColumns: Record<string, ColumnPinPosition> = {};
-
-    for (let columnIndex = 0; columnIndex < params.columns.length; columnIndex += 1) {
-      const column = params.columns[columnIndex];
-      if (column.visible === false) {
-        hiddenColumnIds.push(column.id);
-      }
-      if (column.pinned) {
-        pinnedColumns[column.id] = column.pinned;
-      }
-    }
+    const columnLayout = createColumnLayoutSnapshot({
+      columns: params.columns,
+      columnOrder: params.columnOrder
+    });
 
     return {
       scrollTop: params.scrollTop,
-      columnOrder: params.columnOrder.slice(),
-      hiddenColumnIds,
-      pinnedColumns,
+      columnOrder: columnLayout.columnOrder,
+      hiddenColumnIds: columnLayout.hiddenColumnIds,
+      pinnedColumns: columnLayout.pinnedColumns,
       groupModel: cloneGroupModel(params.groupModel),
       pivotModel: clonePivotModel(params.pivotModel),
       groupExpansionState: cloneGroupExpansionState(params.groupExpansionState),
@@ -98,22 +126,20 @@ export class GridStateService {
     };
   }
 
-  public applyState(params: GridStateApplyParams): GridStateApplyResult {
-    let shouldSyncColumns = false;
-    let shouldRefreshDerivedView = false;
-    let nextOptions = params.options;
-    let nextGroupModel = cloneGroupModel(params.groupModel);
-    let nextPivotModel = clonePivotModel(params.pivotModel);
-    let nextGroupExpansionState = cloneGroupExpansionState(params.groupExpansionState);
-    let nextTreeExpansionState = cloneGroupExpansionState(params.treeExpansionState);
+  public createColumnLayout(params: GridColumnLayoutSnapshotParams): GridColumnLayout {
+    return createColumnLayoutSnapshot(params);
+  }
 
-    if (Array.isArray(params.state.columnOrder) && params.state.columnOrder.length > 0) {
-      params.columnModel.setColumnOrder(params.state.columnOrder);
+  public applyColumnLayout(params: GridColumnLayoutApplyParams): void {
+    let shouldSyncColumns = false;
+
+    if (Array.isArray(params.layout.columnOrder) && params.layout.columnOrder.length > 0) {
+      params.columnModel.setColumnOrder(params.layout.columnOrder);
       shouldSyncColumns = true;
     }
 
-    if (Array.isArray(params.state.hiddenColumnIds)) {
-      const hiddenColumnIdSet = new Set<string>(params.state.hiddenColumnIds);
+    if (Array.isArray(params.layout.hiddenColumnIds)) {
+      const hiddenColumnIdSet = new Set<string>(params.layout.hiddenColumnIds);
       const columns = params.columnModel.getColumns();
       for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
         const column = columns[columnIndex];
@@ -122,18 +148,57 @@ export class GridStateService {
       shouldSyncColumns = true;
     }
 
-    if (params.state.pinnedColumns && typeof params.state.pinnedColumns === 'object') {
+    if (params.layout.pinnedColumns && typeof params.layout.pinnedColumns === 'object') {
       const columns = params.columnModel.getColumns();
       for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
         const column = columns[columnIndex];
-        const pinned = params.state.pinnedColumns[column.id];
+        const pinned = params.layout.pinnedColumns[column.id];
         params.columnModel.setColumnPin(column.id, pinned === 'left' || pinned === 'right' ? pinned : undefined);
       }
       shouldSyncColumns = true;
     }
 
+    if (params.layout.columnWidths && typeof params.layout.columnWidths === 'object') {
+      const columns = params.columnModel.getColumns();
+      for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+        const column = columns[columnIndex];
+        const width = params.layout.columnWidths[column.id];
+        if (typeof width === 'number' && Number.isFinite(width)) {
+          params.columnModel.setColumnWidth(column.id, width);
+          shouldSyncColumns = true;
+        }
+      }
+    }
+
     if (shouldSyncColumns) {
       params.syncColumnsToRenderer();
+    }
+  }
+
+  public applyState(params: GridStateApplyParams): GridStateApplyResult {
+    let shouldRefreshDerivedView = false;
+    let nextOptions = params.options;
+    let nextGroupModel = cloneGroupModel(params.groupModel);
+    let nextPivotModel = clonePivotModel(params.pivotModel);
+    let nextGroupExpansionState = cloneGroupExpansionState(params.groupExpansionState);
+    let nextTreeExpansionState = cloneGroupExpansionState(params.treeExpansionState);
+
+    if (
+      Array.isArray(params.state.columnOrder) ||
+      Array.isArray(params.state.hiddenColumnIds) ||
+      (params.state.pinnedColumns && typeof params.state.pinnedColumns === 'object')
+    ) {
+      this.applyColumnLayout({
+        layout: {
+          columnOrder: Array.isArray(params.state.columnOrder) ? params.state.columnOrder : [],
+          hiddenColumnIds: Array.isArray(params.state.hiddenColumnIds) ? params.state.hiddenColumnIds : [],
+          pinnedColumns:
+            params.state.pinnedColumns && typeof params.state.pinnedColumns === 'object' ? params.state.pinnedColumns : {},
+          columnWidths: {}
+        },
+        columnModel: params.columnModel,
+        syncColumnsToRenderer: params.syncColumnsToRenderer
+      });
     }
 
     if (Array.isArray(params.state.groupModel)) {

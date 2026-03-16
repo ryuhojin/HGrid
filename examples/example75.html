@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 75 - Columns Tool Panel Search and Reorder</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+        color: #172033;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      .page {
+        max-width: 1360px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+
+      .hero-card,
+      .meta-card {
+        padding: 20px 22px;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+        backdrop-filter: blur(10px);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+        line-height: 1.12;
+      }
+
+      .lead {
+        margin: 0;
+        color: #475569;
+        font-size: 15px;
+        line-height: 1.6;
+      }
+
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .meta-chip {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: #f8fafc;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+      }
+
+      .meta-chip strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 18px;
+        align-items: start;
+      }
+
+      .grid-card,
+      .snapshot-card {
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 16px 18px;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+        background: rgba(248, 250, 252, 0.92);
+      }
+
+      button {
+        appearance: none;
+        border: 1px solid rgba(37, 99, 235, 0.16);
+        border-radius: 999px;
+        background: white;
+        color: #172033;
+        font: inherit;
+        padding: 9px 16px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: rgba(37, 99, 235, 0.36);
+        box-shadow: 0 8px 18px rgba(37, 99, 235, 0.1);
+      }
+
+      #grid {
+        width: 100%;
+        height: 520px;
+      }
+
+      .snapshot-card {
+        padding: 18px;
+      }
+
+      .snapshot-card h2 {
+        margin: 0 0 12px;
+        font-size: 15px;
+      }
+
+      .snapshot-card p {
+        margin: 0 0 14px;
+        color: #475569;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      pre {
+        margin: 0;
+        padding: 14px;
+        border-radius: 16px;
+        background: #0f172a;
+        color: #dbeafe;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <div class="hero-card">
+          <h1>Columns Tool Panel Search and Reorder</h1>
+          <p class="lead">
+            side bar의 <strong>Columns</strong> panel 안에서 열 검색, 순서 재배치, visibility, pin 상태를 한 번에
+            조정하는 E3.3 후속 UX입니다. 검색은 header/id 기준으로 동작하고, 재배치는 panel 안의 up/down
+            control로 즉시 grid column order에 반영됩니다.
+          </p>
+        </div>
+        <div class="meta-card">
+          <div class="meta-grid">
+            <div class="meta-chip">
+              <strong>Search</strong>
+              header + column id
+            </div>
+            <div class="meta-chip">
+              <strong>Reorder</strong>
+              tool panel order controls
+            </div>
+            <div class="meta-chip">
+              <strong>Docked</strong>
+              grid width reflow
+            </div>
+            <div class="meta-chip">
+              <strong>Snapshot</strong>
+              visible / hidden / order
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div class="grid-card">
+          <div class="toolbar">
+            <button id="seedSearch">Seed search: “st”</button>
+            <button id="clearSearch">Clear search</button>
+            <button id="moveRegionDown">Move “Region” down</button>
+            <button id="restoreDefault">Restore default</button>
+          </div>
+          <div id="grid"></div>
+        </div>
+
+        <aside class="snapshot-card">
+          <h2>Panel Snapshot</h2>
+          <p>
+            우측 도킹 panel의 검색과 재배치 결과를 스냅샷으로 노출합니다. e2e smoke는 이 값을 기준으로 검증합니다.
+          </p>
+          <pre id="snapshot"></pre>
+        </aside>
+      </section>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const initialColumns = [
+        { id: 'id', header: 'ID', width: 96, type: 'number' },
+        { id: 'name', header: 'Name', width: 180, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'status', header: 'Status', width: 140, type: 'text' },
+        { id: 'score', header: 'Score', width: 120, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 200, type: 'date' }
+      ];
+
+      const rowData = [
+        { id: 1, name: 'Alpha Prime', region: 'APAC', status: 'active', score: 12, updatedAt: '2026-03-10T09:00:00.000Z' },
+        { id: 2, name: 'Beta North', region: 'EMEA', status: 'idle', score: 32, updatedAt: '2026-03-10T11:30:00.000Z' },
+        { id: 3, name: 'Gamma Delta', region: 'APAC', status: 'review', score: 48, updatedAt: '2026-03-11T07:20:00.000Z' },
+        { id: 4, name: 'Delta Coast', region: 'AMER', status: 'active', score: 64, updatedAt: '2026-03-11T13:45:00.000Z' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: initialColumns.map((column) => ({ ...column })),
+        rowData,
+        height: 520,
+        rowHeight: 28,
+        overscan: 8,
+        sideBar: {
+          enabled: true,
+          panels: ['columns'],
+          defaultPanel: 'columns',
+          initialOpen: true,
+          width: 328
+        }
+      });
+
+      const snapshotElement = document.getElementById('snapshot');
+
+      function getSearchInput() {
+        return document.querySelector('[data-tool-panel-columns-search="true"]');
+      }
+
+      function getSnapshot() {
+        const columns = grid.getColumns();
+        const visibleColumns = grid.getVisibleColumns().map((column) => column.id);
+        const hiddenColumns = columns.filter((column) => column.visible === false).map((column) => column.id);
+        const searchInput = getSearchInput();
+        const panelRows = Array.from(document.querySelectorAll('.hgrid__tool-panel-column-row'));
+        return {
+          panelOpen: document.querySelector('.hgrid__tool-panel--open') !== null,
+          search: searchInput instanceof HTMLInputElement ? searchInput.value : '',
+          panelRows: panelRows.map((row) => {
+            const title = row.querySelector('.hgrid__tool-panel-column-title');
+            return title ? title.textContent : null;
+          }),
+          columnOrder: columns.map((column) => column.id),
+          visibleColumns,
+          hiddenColumns
+        };
+      }
+
+      function renderSnapshot() {
+        snapshotElement.textContent = JSON.stringify(getSnapshot(), null, 2);
+      }
+
+      function seedSearch() {
+        const input = getSearchInput();
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        input.value = 'st';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      function clearSearch() {
+        const input = getSearchInput();
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      function moveRegionDown() {
+        const button = document.querySelector(
+          '[data-tool-panel-order-kind="columns"][data-tool-panel-order-column-id="region"][data-tool-panel-order-direction="down"]'
+        );
+        if (button instanceof HTMLButtonElement) {
+          button.click();
+        }
+      }
+
+      renderSnapshot();
+
+      const observer = new MutationObserver(() => renderSnapshot());
+      observer.observe(document.getElementById('grid'), {
+        subtree: true,
+        attributes: true,
+        childList: true,
+        attributeFilter: ['class', 'style', 'checked', 'aria-selected']
+      });
+
+      document.getElementById('seedSearch').addEventListener('click', () => {
+        seedSearch();
+        renderSnapshot();
+      });
+
+      document.getElementById('clearSearch').addEventListener('click', () => {
+        clearSearch();
+        renderSnapshot();
+      });
+
+      document.getElementById('moveRegionDown').addEventListener('click', () => {
+        moveRegionDown();
+        renderSnapshot();
+      });
+
+      document.getElementById('restoreDefault').addEventListener('click', () => {
+        grid.setColumns(initialColumns.map((column) => ({ ...column })));
+        clearSearch();
+        renderSnapshot();
+      });
+
+      window.__example75 = {
+        getSnapshot,
+        seedSearch,
+        clearSearch,
+        moveRegionDown
+      };
+    </script>
+  </body>
+</html>

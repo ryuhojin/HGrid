@@ -1,6 +1,18 @@
 import type { SelectionChangeEvent } from '../interaction/selection-model';
 import type { EditCommitEventPayload } from './edit-events';
-import type { GridBuiltInColumnMenuActionId, GridMenuOpenSource } from './grid-options';
+import type {
+  ColumnPinPosition,
+  GridBuiltInColumnMenuActionId,
+  GridColumnLayout,
+  GridMenuOpenSource,
+  GroupAggregationDef,
+  GroupModelItem,
+  GroupingMode,
+  PivotModelItem,
+  PivotValueDef,
+  PivotingMode
+} from './grid-options';
+import type { AdvancedFilterModel, ColumnFilterInput } from '../data/filter-executor';
 
 export type GridEventName =
   | 'cellClick'
@@ -10,7 +22,15 @@ export type GridEventName =
   | 'editCancel'
   | 'columnResize'
   | 'columnReorder'
-  | 'columnMenuAction';
+  | 'columnMenuAction'
+  | 'filterUiApply'
+  | 'advancedFilterUiApply'
+  | 'advancedFilterPresetUiAction'
+  | 'columnLayoutPresetUiApply'
+  | 'columnVisibilityChange'
+  | 'columnPinChange'
+  | 'groupingUiApply'
+  | 'pivotUiApply';
 
 export interface CellClickEvent {
   rowIndex: number;
@@ -28,6 +48,14 @@ export interface GridEventMap {
   columnResize: ColumnResizeEvent;
   columnReorder: ColumnReorderEvent;
   columnMenuAction: ColumnMenuActionEvent;
+  filterUiApply: FilterUiApplyEvent;
+  advancedFilterUiApply: AdvancedFilterUiApplyEvent;
+  advancedFilterPresetUiAction: AdvancedFilterPresetUiActionEvent;
+  columnLayoutPresetUiApply: ColumnLayoutPresetUiApplyEvent;
+  columnVisibilityChange: ColumnVisibilityChangeEvent;
+  columnPinChange: ColumnPinChangeEvent;
+  groupingUiApply: GroupingUiApplyEvent;
+  pivotUiApply: PivotUiApplyEvent;
 }
 
 export interface EditStartEvent {
@@ -65,6 +93,48 @@ export interface ColumnMenuActionEvent {
   columnId: string;
   actionId: GridBuiltInColumnMenuActionId;
   source: GridMenuOpenSource;
+}
+
+export interface FilterUiApplyEvent {
+  columnId: string;
+  filterInput: ColumnFilterInput | null;
+}
+
+export interface AdvancedFilterUiApplyEvent {
+  advancedFilterModel: AdvancedFilterModel | null;
+}
+
+export interface AdvancedFilterPresetUiActionEvent {
+  action: 'save' | 'apply' | 'delete';
+  presetId: string;
+  label?: string;
+}
+
+export interface ColumnLayoutPresetUiApplyEvent {
+  presetId: string;
+  layout: GridColumnLayout;
+}
+
+export interface ColumnVisibilityChangeEvent {
+  columnId: string;
+  isVisible: boolean;
+}
+
+export interface ColumnPinChangeEvent {
+  columnId: string;
+  pinned?: ColumnPinPosition;
+}
+
+export interface GroupingUiApplyEvent {
+  mode: GroupingMode;
+  groupModel: GroupModelItem[];
+  aggregations: GroupAggregationDef[];
+}
+
+export interface PivotUiApplyEvent {
+  mode: PivotingMode;
+  pivotModel: PivotModelItem[];
+  values: PivotValueDef[];
 }
 
 type EventHandler<T> = (payload: T) => void;

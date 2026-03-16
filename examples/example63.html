@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 63 - Body Cell Context Menu</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        background:
+          linear-gradient(135deg, rgba(11, 95, 102, 0.12), transparent 40%),
+          linear-gradient(180deg, #f6f8fb 0%, #e8eef3 100%);
+        color: #102535;
+      }
+
+      .page {
+        max-width: 1140px;
+        margin: 0 auto;
+        padding: 28px 24px 42px;
+      }
+
+      .intro,
+      .workspace {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(16, 37, 53, 0.08);
+        border-radius: 20px;
+        box-shadow: 0 18px 42px rgba(16, 37, 53, 0.08);
+      }
+
+      .intro {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+        gap: 20px;
+        padding: 24px;
+        margin-bottom: 18px;
+      }
+
+      .kicker {
+        display: inline-flex;
+        margin-bottom: 12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(8, 145, 178, 0.12);
+        color: #0f5a7a;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+        line-height: 1.08;
+      }
+
+      p,
+      li {
+        color: #48616f;
+        line-height: 1.58;
+      }
+
+      .intro ul {
+        margin: 14px 0 0;
+        padding-left: 18px;
+      }
+
+      .policy-card {
+        padding: 18px 20px;
+        border-radius: 16px;
+        background: #0f2432;
+        color: #d8edf6;
+      }
+
+      .policy-card h2 {
+        margin: 0 0 10px;
+        font-size: 15px;
+      }
+
+      .policy-card code {
+        display: block;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        color: #d5eef8;
+        font-size: 12px;
+        overflow: auto;
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: #0f5a7a;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #dce7ef;
+        color: #123349;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 16px;
+      }
+
+      #grid {
+        min-width: 0;
+      }
+
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        padding: 12px;
+        border-radius: 14px;
+        background: #eef4f8;
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #617c8a;
+      }
+
+      .metric span {
+        display: block;
+        margin-top: 6px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      #payload,
+      #log {
+        margin: 0;
+        padding: 14px;
+        border-radius: 14px;
+        background: #10212d;
+        color: #d8eef9;
+        font-size: 12px;
+        line-height: 1.52;
+        overflow: auto;
+      }
+
+      @media (max-width: 960px) {
+        .intro,
+        .content {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="intro">
+        <div>
+          <div class="kicker">Phase E3.1.2</div>
+          <h1>Body Cell Context Menu</h1>
+          <p>
+            데이터 셀에서 우클릭하면 body-scoped context menu가 열립니다. menu payload는 현재 cell, row, rowKey,
+            value, selection snapshot까지 포함합니다.
+          </p>
+          <ul>
+            <li>우클릭한 셀이 선택되어 있지 않으면 해당 셀을 single selection으로 승격합니다.</li>
+            <li>이미 선택된 셀을 우클릭하면 기존 range는 유지하고 active cell만 target으로 맞춥니다.</li>
+            <li>편집 중에는 body context menu를 열지 않습니다.</li>
+          </ul>
+        </div>
+        <aside class="policy-card">
+          <h2>Payload 요약</h2>
+          <code>
+context.kind === 'cell'<br />
+context.rowIndex / dataIndex / rowKey<br />
+context.row / value / selection
+          </code>
+        </aside>
+      </section>
+
+      <section class="workspace">
+        <div class="toolbar">
+          <button id="resetRows">Reset Rows</button>
+          <button id="clearLog" class="secondary">Clear Log</button>
+        </div>
+
+        <div class="content">
+          <div id="grid"></div>
+
+          <aside class="side">
+            <div class="metric-grid">
+              <div class="metric">
+                <strong>Last Kind</strong>
+                <span id="lastKind">none</span>
+              </div>
+              <div class="metric">
+                <strong>Active Cell</strong>
+                <span id="activeCell">none</span>
+              </div>
+            </div>
+
+            <pre id="payload"></pre>
+            <pre id="log"></pre>
+          </aside>
+        </div>
+      </section>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const BASE_ROWS = Array.from({ length: 120 }, (_, index) => ({
+        id: index + 1,
+        name: 'Order-' + String(index + 1).padStart(3, '0'),
+        status: ['new', 'queued', 'review', 'done'][index % 4],
+        amount: 90 + ((index * 37) % 600),
+        owner: ['Kim', 'Seo', 'Park', 'Lee'][index % 4]
+      }));
+
+      const payloadElement = document.getElementById('payload');
+      const logElement = document.getElementById('log');
+      const lastKindElement = document.getElementById('lastKind');
+      const activeCellElement = document.getElementById('activeCell');
+
+      function cloneRows() {
+        return BASE_ROWS.map((row) => ({ ...row }));
+      }
+
+      function appendLog(message, payload) {
+        const line =
+          '[' +
+          new Date().toLocaleTimeString('ko-KR', { hour12: false }) +
+          '] ' +
+          message +
+          (payload ? '\n' + JSON.stringify(payload, null, 2) : '');
+        logElement.textContent = line + '\n\n' + logElement.textContent.trim();
+      }
+
+      let currentRows = cloneRows();
+      let grid;
+      let lastPayload = null;
+
+      function syncSelectionSummary() {
+        const activeCell = grid.getSelection().activeCell;
+        activeCellElement.textContent = activeCell ? activeCell.rowIndex + ',' + activeCell.colIndex : 'none';
+      }
+
+      function renderPayload(payload) {
+        lastPayload = payload;
+        lastKindElement.textContent = payload ? payload.kind : 'none';
+        payloadElement.textContent = payload ? JSON.stringify(payload, null, 2) : 'No payload yet';
+        syncSelectionSummary();
+      }
+
+      function buildGrid() {
+        return new HGrid.Grid(document.getElementById('grid'), {
+          columns: [
+            { id: 'id', header: 'ID', width: 92, type: 'number' },
+            { id: 'name', header: 'Name', width: 200, type: 'text' },
+            { id: 'status', header: 'Status', width: 132, type: 'text', editable: true },
+            { id: 'amount', header: 'Amount', width: 120, type: 'number' },
+            { id: 'owner', header: 'Owner', width: 130, type: 'text' }
+          ],
+          rowData: currentRows,
+          height: 520,
+          rowHeight: 30,
+          overscan: 8,
+          contextMenu: {
+            enabled: true,
+            getItems(context) {
+              if (context.kind !== 'cell') {
+                return [];
+              }
+
+              return [
+                {
+                  id: 'inspect-cell-context',
+                  label: 'Inspect cell context',
+                  onSelect(menuContext) {
+                    const payload = {
+                      kind: menuContext.kind,
+                      rowIndex: menuContext.rowIndex,
+                      dataIndex: menuContext.dataIndex,
+                      rowKey: menuContext.rowKey,
+                      columnId: menuContext.column.id,
+                      value: menuContext.value,
+                      row: menuContext.row,
+                      selection: menuContext.selection
+                    };
+                    renderPayload(payload);
+                    appendLog('inspect-cell-context', payload);
+                  }
+                },
+                {
+                  id: 'mark-row-reviewed',
+                  label: 'Mark row reviewed',
+                  onSelect(menuContext) {
+                    if (typeof menuContext.dataIndex !== 'number') {
+                      return;
+                    }
+
+                    grid.getDataProvider().setValue(menuContext.dataIndex, 'status', 'reviewed');
+                    grid.refresh();
+                    const payload = {
+                      action: 'mark-row-reviewed',
+                      rowKey: menuContext.rowKey,
+                      rowIndex: menuContext.rowIndex,
+                      activeCell: grid.getSelection().activeCell
+                    };
+                    renderPayload({
+                      ...payload,
+                      kind: menuContext.kind,
+                      columnId: menuContext.column.id
+                    });
+                    appendLog('mark-row-reviewed', payload);
+                  }
+                }
+              ];
+            }
+          }
+        });
+      }
+
+      grid = buildGrid();
+      renderPayload(null);
+      appendLog('Ready', { hint: 'Right-click a body cell to open the menu.' });
+
+      document.getElementById('resetRows').addEventListener('click', () => {
+        currentRows = cloneRows();
+        grid.destroy();
+        document.getElementById('grid').innerHTML = '';
+        grid = buildGrid();
+        renderPayload(null);
+        appendLog('Rows reset');
+      });
+
+      document.getElementById('clearLog').addEventListener('click', () => {
+        logElement.textContent = '';
+      });
+
+      window.__example63 = {
+        getLastPayload() {
+          return lastPayload;
+        },
+        getSelection() {
+          return grid.getSelection();
+        },
+        getStatusByRowIndex(rowIndex) {
+          return grid.getDataProvider().getValue(rowIndex, 'status');
+        }
+      };
+    </script>
+  </body>
+</html>

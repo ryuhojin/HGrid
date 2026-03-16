@@ -122,4 +122,48 @@ describe('GridStateService', () => {
     expect(result.shouldRefreshDerivedView).toBe(true);
     expect(result.scrollTop).toBe(420);
   });
+
+  it('creates and applies a column layout with width, visibility, order, and pin state', () => {
+    const service = new GridStateService();
+    const columnModel = new ColumnModel([
+      { id: 'id', header: 'ID', width: 80, type: 'number' },
+      { id: 'name', header: 'Name', width: 140, type: 'text', pinned: 'left' },
+      { id: 'region', header: 'Region', width: 160, type: 'text', visible: false }
+    ]);
+    const syncColumnsToRenderer = vi.fn();
+
+    const layout = service.createColumnLayout({
+      columns: columnModel.getColumns(),
+      columnOrder: ['id', 'name', 'region']
+    });
+
+    expect(layout).toEqual({
+      columnOrder: ['id', 'name', 'region'],
+      hiddenColumnIds: ['region'],
+      pinnedColumns: { name: 'left' },
+      columnWidths: {
+        id: 80,
+        name: 140,
+        region: 160
+      }
+    });
+
+    service.applyColumnLayout({
+      layout: {
+        columnOrder: ['region', 'name', 'id'],
+        hiddenColumnIds: ['id'],
+        pinnedColumns: { region: 'right' },
+        columnWidths: { region: 220, name: 180 }
+      },
+      columnModel,
+      syncColumnsToRenderer
+    });
+
+    expect(syncColumnsToRenderer).toHaveBeenCalledTimes(1);
+    expect(columnModel.getColumns().map((column) => column.id)).toEqual(['region', 'name', 'id']);
+    expect(columnModel.getColumns().find((column) => column.id === 'id')?.visible).toBe(false);
+    expect(columnModel.getColumns().find((column) => column.id === 'region')?.pinned).toBe('right');
+    expect(columnModel.getColumns().find((column) => column.id === 'region')?.width).toBe(220);
+    expect(columnModel.getColumns().find((column) => column.id === 'name')?.width).toBe(180);
+  });
 });

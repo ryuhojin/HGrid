@@ -43,11 +43,12 @@
 - 필드:
   - `rowIndex`, `dataIndex`, `rowKey`
   - `columnId`, `previousValue`, `value`
-  - `source: 'editor' | 'clipboard'`
+  - `source: 'editor' | 'clipboard' | 'fillHandle' | 'undo' | 'redo'`
   - `commitId`, `timestampMs`, `timestamp`
+  - `rowCount`, `cellCount`, `changes[]`
 - 엔터프라이즈 감사 훅:
   - `GridOptions.onAuditLog?: EditCommitAuditLogger`
-  - payload: `EditCommitAuditPayload` (`eventName: 'editCommit'` 포함)
+  - payload: `EditCommitAuditPayload` (`eventName: 'editCommit'`, `changeIndex?` 포함)
 
 ## 테스트
 

@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 85 - Undo Redo Transaction Semantics</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f4f7fb;
+        color: #172033;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0;
+        color: #51607a;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(760px, 1fr) 360px;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .surface {
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        border-radius: 999px;
+        background: white;
+        color: #0f172a;
+        font: inherit;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      #grid {
+        width: 100%;
+        min-width: 760px;
+      }
+
+      .panel {
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .metric {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: #f8fafc;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+      }
+
+      .metric strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: #475569;
+      }
+
+      .metric code,
+      .metric pre {
+        display: block;
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        color: #0f172a;
+      }
+
+      .metric pre {
+        max-height: 240px;
+        overflow: auto;
+      }
+
+      .note {
+        font-size: 13px;
+        line-height: 1.6;
+        color: #475569;
+      }
+
+      @media (max-width: 1180px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        #grid {
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 85 - Undo Redo Transaction Semantics</h1>
+    <p>editor/clipboard undo-redo를 transaction id, root transaction id, audit relation 기준으로 보는 E4.2 smoke</p>
+
+    <div class="layout">
+      <section class="surface workspace">
+        <div class="toolbar">
+          <button id="resetRows">Reset Data</button>
+          <button id="editFirstName">Edit First Name</button>
+          <button id="pasteStatusBlock">Paste Status Block</button>
+          <button id="undoAction">Undo</button>
+          <button id="redoAction">Redo</button>
+        </div>
+        <div id="grid"></div>
+      </section>
+
+      <aside class="surface panel">
+        <div class="metric">
+          <strong>History</strong>
+          <code id="historyText">-</code>
+        </div>
+        <div class="metric">
+          <strong>Last Edit Transaction</strong>
+          <pre id="lastEditText">-</pre>
+        </div>
+        <div class="metric">
+          <strong>Audit Tail</strong>
+          <pre id="auditText">-</pre>
+        </div>
+        <div class="metric">
+          <strong>Rows</strong>
+          <pre id="rowsText">-</pre>
+        </div>
+        <div class="note">
+          원칙:
+          <br />
+          원본 commit은 `transactionStep = apply`
+          <br />
+          undo/redo는 새 `transactionId`를 가지되 `rootTransactionId`는 원본 transaction을 가리킨다.
+        </div>
+      </aside>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      let grid = null;
+      let lastEdit = null;
+      let auditLogs = [];
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 84, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text', editable: true },
+        { id: 'note', header: 'Note', width: 220, type: 'text', editable: true }
+      ];
+
+      function buildRows() {
+        return [
+          { id: 1, name: 'Customer-1', status: 'draft', note: 'queued' },
+          { id: 2, name: 'Customer-2', status: 'review', note: 'awaiting' },
+          { id: 3, name: 'Customer-3', status: 'draft', note: '' }
+        ];
+      }
+
+      function waitFrames(count) {
+        return new Promise((resolve) => {
+          let remaining = Math.max(1, count);
+          const tick = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+      }
+
+      function createClipboardEvent(type, initialData) {
+        const store = new Map();
+        Object.keys(initialData || {}).forEach((mimeType) => {
+          store.set(mimeType, initialData[mimeType]);
+        });
+
+        const event = new Event(type, {
+          bubbles: true,
+          cancelable: true
+        });
+        Object.defineProperty(event, 'clipboardData', {
+          configurable: true,
+          value: {
+            getData(mimeType) {
+              return store.get(mimeType) || '';
+            },
+            setData(mimeType, value) {
+              store.set(mimeType, value);
+            }
+          }
+        });
+        return event;
+      }
+
+      function getRootElement() {
+        return document.querySelector('.hgrid');
+      }
+
+      function getRowsSnapshot() {
+        const provider = grid.getDataProvider();
+        const rows = [];
+        for (let dataIndex = 0; dataIndex < 3; dataIndex += 1) {
+          const row = provider.getRow ? provider.getRow(dataIndex) : null;
+          rows.push(row ? { id: row.id, name: row.name, status: row.status, note: row.note } : null);
+        }
+        return rows;
+      }
+
+      function renderSnapshot() {
+        document.getElementById('historyText').textContent = JSON.stringify(
+          {
+            canUndo: grid.canUndo(),
+            canRedo: grid.canRedo()
+          },
+          null,
+          2
+        );
+        document.getElementById('lastEditText').textContent = lastEdit ? JSON.stringify(lastEdit, null, 2) : '-';
+        document.getElementById('auditText').textContent = auditLogs.length > 0 ? JSON.stringify(auditLogs.slice(0, 4), null, 2) : '-';
+        document.getElementById('rowsText').textContent = JSON.stringify(getRowsSnapshot(), null, 2);
+        document.getElementById('undoAction').disabled = !grid.canUndo();
+        document.getElementById('redoAction').disabled = !grid.canRedo();
+      }
+
+      function mountGrid() {
+        if (grid) {
+          grid.destroy();
+        }
+
+        lastEdit = null;
+        auditLogs = [];
+        grid = new HGrid.Grid(document.getElementById('grid'), {
+          columns,
+          rowData: buildRows(),
+          height: 220,
+          rowHeight: 28,
+          overscan: 4,
+          undoRedo: {
+            enabled: true
+          },
+          onAuditLog(payload) {
+            auditLogs.unshift({
+              source: payload.source,
+              transactionId: payload.transactionId,
+              rootTransactionId: payload.rootTransactionId,
+              transactionKind: payload.transactionKind,
+              transactionStep: payload.transactionStep,
+              changeIndex: payload.changeIndex,
+              columnId: payload.columnId,
+              rowKey: payload.rowKey
+            });
+            auditLogs = auditLogs.slice(0, 8);
+            renderSnapshot();
+          }
+        });
+
+        grid.on('editCommit', (event) => {
+          lastEdit = {
+            source: event.source,
+            transactionId: event.transactionId,
+            rootTransactionId: event.rootTransactionId,
+            transactionKind: event.transactionKind,
+            transactionStep: event.transactionStep,
+            rowCount: event.rowCount,
+            cellCount: event.cellCount,
+            commitId: event.commitId
+          };
+          renderSnapshot();
+        });
+
+        renderSnapshot();
+      }
+
+      async function editFirstName() {
+        grid.setSelection({
+          activeCell: { rowIndex: 0, colIndex: 1 },
+          cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+          rowRanges: []
+        });
+        await waitFrames(2);
+
+        const root = getRootElement();
+        root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        await waitFrames(2);
+
+        const renderer = grid.renderer;
+        renderer.editorInputElement.value = 'Customer-1-Edited';
+        renderer.editorInputElement.dispatchEvent(new Event('input', { bubbles: true }));
+        renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        await waitFrames(4);
+        renderSnapshot();
+      }
+
+      async function pasteStatusBlock() {
+        grid.setSelection({
+          activeCell: { rowIndex: 0, colIndex: 2 },
+          cellRanges: [{ r1: 0, c1: 2, r2: 1, c2: 3 }],
+          rowRanges: []
+        });
+        await waitFrames(2);
+
+        const root = getRootElement();
+        root.dispatchEvent(
+          createClipboardEvent('paste', {
+            'text/plain': 'active\tcopied\nhold\tmanual'
+          })
+        );
+        await waitFrames(4);
+        renderSnapshot();
+      }
+
+      async function undoAction() {
+        grid.undo();
+        await waitFrames(3);
+        renderSnapshot();
+      }
+
+      async function redoAction() {
+        grid.redo();
+        await waitFrames(3);
+        renderSnapshot();
+      }
+
+      document.getElementById('resetRows').addEventListener('click', () => {
+        mountGrid();
+      });
+      document.getElementById('editFirstName').addEventListener('click', () => {
+        void editFirstName();
+      });
+      document.getElementById('pasteStatusBlock').addEventListener('click', () => {
+        void pasteStatusBlock();
+      });
+      document.getElementById('undoAction').addEventListener('click', () => {
+        void undoAction();
+      });
+      document.getElementById('redoAction').addEventListener('click', () => {
+        void redoAction();
+      });
+
+      mountGrid();
+
+      window.__example85 = {
+        getSnapshot() {
+          return {
+            canUndo: grid.canUndo(),
+            canRedo: grid.canRedo(),
+            rows: getRowsSnapshot(),
+            lastEdit,
+            auditLogs
+          };
+        },
+        editFirstName,
+        pasteStatusBlock,
+        undoAction,
+        redoAction,
+        mountGrid
+      };
+    </script>
+  </body>
+</html>

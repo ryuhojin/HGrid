@@ -5,7 +5,7 @@ import { RemoteDataProvider } from '../src/data/remote-data-provider';
 import type { DataProvider, DataTransaction, GridRowData } from '../src/data/data-provider';
 import type { RemoteQueryModel } from '../src/data/remote-data-provider';
 import { WORKER_TREE_LAZY_ROW_REF_FIELD } from '../src/data/worker-operation-payloads';
-import type { EditCommitAuditPayload, GridEventMap } from '../src';
+import type { ColumnDef, EditCommitAuditPayload, GridEventMap } from '../src';
 
 function getVerticalScrollElement(container: HTMLElement): HTMLDivElement {
   const verticalScrollElement = container.querySelector('.hgrid__v-scroll') as HTMLDivElement | null;
@@ -216,7 +216,7 @@ describe('Grid DOM pooling', () => {
     const container = document.createElement('div');
     document.body.append(container);
 
-    const columns = [
+    const columns: ColumnDef[] = [
       { id: 'id', header: 'ID', width: 120, type: 'number' as const },
       { id: 'name', header: 'Name', width: 180, type: 'text' as const }
     ];
@@ -3410,6 +3410,61 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
+  it('ignores html-only clipboard payloads outside edit mode and prevents html injection', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 140, type: 'text', editable: true }
+      ],
+      rowData: [
+        { id: 1, name: 'User-1', status: 'idle' },
+        { id: 2, name: 'User-2', status: 'idle' }
+      ],
+      height: 180,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 2 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    const clipboard = createClipboardEvent('paste', {
+      'text/html': '<table><tr><td><b>Unsafe</b></td><td>active</td></tr></table>'
+    });
+    const dispatchResult = root.dispatchEvent(clipboard.event);
+    await waitForFrame();
+
+    expect(dispatchResult).toBe(false);
+    expect(clipboard.event.defaultPrevented).toBe(true);
+
+    const firstNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    const firstStatusCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="status"]'
+    ) as HTMLDivElement;
+    const secondNameCell = container.querySelector(
+      '.hgrid__row[data-row-index="1"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+
+    expect(firstNameCell.textContent).toBe('User-1');
+    expect(firstNameCell.querySelector('b')).toBeNull();
+    expect(firstStatusCell.textContent).toBe('idle');
+    expect(secondNameCell.textContent).toBe('User-2');
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('undos and redoes editor commits with keyboard shortcuts', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -3481,6 +3536,15 @@ describe('Grid DOM pooling', () => {
       (container.querySelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]') as HTMLDivElement).textContent
     ).toBe('Beta');
     expect(editCommitEvents.map((event) => event.source)).toEqual(['editor', 'undo', 'redo']);
+    expect(editCommitEvents[0].transactionKind).toBe('singleCell');
+    expect(editCommitEvents[0].transactionStep).toBe('apply');
+    expect(editCommitEvents[0].rootTransactionId).toBe(editCommitEvents[0].transactionId);
+    expect(editCommitEvents[1].transactionKind).toBe('historyReplay');
+    expect(editCommitEvents[1].transactionStep).toBe('undo');
+    expect(editCommitEvents[1].rootTransactionId).toBe(editCommitEvents[0].transactionId);
+    expect(editCommitEvents[2].transactionKind).toBe('historyReplay');
+    expect(editCommitEvents[2].transactionStep).toBe('redo');
+    expect(editCommitEvents[2].rootTransactionId).toBe(editCommitEvents[0].transactionId);
 
     grid.destroy();
     container.remove();
@@ -3558,7 +3622,15 @@ describe('Grid DOM pooling', () => {
     expect(editCommitEvents[0].cellCount).toBe(4);
     expect(editCommitEvents[0].rowCount).toBe(2);
     expect(editCommitEvents[0].changes).toHaveLength(4);
+    expect(editCommitEvents[0].transactionKind).toBe('clipboardRange');
+    expect(editCommitEvents[0].transactionStep).toBe('apply');
+    expect(editCommitEvents[1].transactionKind).toBe('historyReplay');
+    expect(editCommitEvents[1].transactionStep).toBe('undo');
+    expect(editCommitEvents[1].rootTransactionId).toBe(editCommitEvents[0].transactionId);
     expect(editCommitEvents[1].cellCount).toBe(4);
+    expect(editCommitEvents[2].transactionKind).toBe('historyReplay');
+    expect(editCommitEvents[2].transactionStep).toBe('redo');
+    expect(editCommitEvents[2].rootTransactionId).toBe(editCommitEvents[0].transactionId);
     expect(editCommitEvents[2].cellCount).toBe(4);
 
     grid.destroy();
@@ -3705,7 +3777,9 @@ describe('Grid DOM pooling', () => {
       rowIndex: 2,
       columnId: 'qty',
       value: 30,
-      source: 'fillHandle'
+      source: 'fillHandle',
+      transactionKind: 'fillRange',
+      transactionStep: 'apply'
     });
     expect(editCommitEvents[0].cellCount).toBe(2);
     expect(editCommitEvents[0].rowCount).toBe(2);
@@ -3723,7 +3797,13 @@ describe('Grid DOM pooling', () => {
     expect(thirdQtyCell.textContent).toBe('30');
     expect(fourthQtyCell.textContent).toBe('40');
     expect(editCommitEvents.map((event) => event.source)).toEqual(['fillHandle', 'undo', 'redo']);
+    expect(editCommitEvents[1].transactionKind).toBe('historyReplay');
+    expect(editCommitEvents[1].transactionStep).toBe('undo');
+    expect(editCommitEvents[1].rootTransactionId).toBe(editCommitEvents[0].transactionId);
     expect(editCommitEvents[1].cellCount).toBe(2);
+    expect(editCommitEvents[2].transactionKind).toBe('historyReplay');
+    expect(editCommitEvents[2].transactionStep).toBe('redo');
+    expect(editCommitEvents[2].rootTransactionId).toBe(editCommitEvents[0].transactionId);
     expect(editCommitEvents[2].cellCount).toBe(2);
 
     grid.destroy();
@@ -5252,9 +5332,13 @@ describe('Grid DOM pooling', () => {
       rowKey: 1,
       columnId: 'name',
       value: 'User-1-Edited',
-      source: 'editor'
+      source: 'editor',
+      transactionKind: 'singleCell',
+      transactionStep: 'apply'
     });
     expect(typeof editCommitEvents[0].commitId).toBe('string');
+    expect(typeof editCommitEvents[0].transactionId).toBe('string');
+    expect(editCommitEvents[0].rootTransactionId).toBe(editCommitEvents[0].transactionId);
     expect(typeof editCommitEvents[0].timestamp).toBe('string');
     expect(typeof editCommitEvents[0].timestampMs).toBe('number');
     expect(auditLogs.length).toBe(1);
@@ -5264,7 +5348,10 @@ describe('Grid DOM pooling', () => {
       rowKey: 1,
       columnId: 'name',
       source: 'editor',
-      value: 'User-1-Edited'
+      value: 'User-1-Edited',
+      transactionKind: 'singleCell',
+      transactionStep: 'apply',
+      rootTransactionId: editCommitEvents[0].transactionId
     });
     const editedNameCell = container.querySelector(
       '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
@@ -5427,6 +5514,188 @@ describe('Grid DOM pooling', () => {
 
     renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await waitForFrame();
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('supports select, masked, and date editors with dirty tracking state', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const columns = [
+      { id: '__state', header: 'State', width: 108, type: 'text' as const, editable: false },
+      {
+        id: 'status',
+        header: 'Status',
+        width: 160,
+        type: 'text' as const,
+        editable: true,
+        editor: {
+          type: 'select' as const,
+          options: [
+            { value: 'draft', label: 'Draft' },
+            { value: 'active', label: 'Active' }
+          ]
+        }
+      },
+      {
+        id: 'dueDate',
+        header: 'Due Date',
+        width: 180,
+        type: 'date' as const,
+        editable: true,
+        editor: {
+          type: 'date' as const
+        }
+      }
+    ];
+    const rowData = [{ id: 1, status: 'draft', dueDate: '2026-03-05' }];
+
+    const grid = new Grid(container, {
+      columns,
+      rowData,
+      height: 160,
+      rowHeight: 28,
+      overscan: 2,
+      editPolicy: {
+        dirtyTracking: {
+          enabled: true
+        }
+      }
+    });
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          startEditingAtCell: (rowIndex: number, colIndex: number) => boolean;
+          editorInputElement: HTMLInputElement;
+          editorSelectElement: HTMLSelectElement;
+        };
+      }
+    ).renderer;
+    const queryVisibleCell = (selector: string): HTMLDivElement => {
+      const matches = Array.from(container.querySelectorAll(selector)) as HTMLDivElement[];
+      const visibleCell = matches.find((cell) => {
+        const rowElement = cell.closest('.hgrid__row') as HTMLDivElement | null;
+        return rowElement?.style.display !== 'none';
+      });
+      if (!visibleCell) {
+        throw new Error(`Missing visible cell for selector: ${selector}`);
+      }
+      return visibleCell;
+    };
+
+    expect(grid.hasDirtyChanges()).toBe(false);
+
+    expect(renderer.startEditingAtCell(0, 1)).toBe(true);
+    expect(renderer.editorSelectElement.style.display).toBe('');
+    renderer.editorSelectElement.value = '1';
+    renderer.editorSelectElement.dispatchEvent(new Event('change', { bubbles: true }));
+    renderer.editorSelectElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(grid.hasDirtyChanges()).toBe(true);
+    expect(grid.getDirtyChangeSummary()).toEqual({
+      rowCount: 1,
+      cellCount: 1,
+      rowKeys: [1]
+    });
+    expect(grid.getDirtyChanges()).toEqual([
+      {
+        rowKey: 1,
+        dataIndexHint: 0,
+        changes: [
+          {
+            columnId: 'status',
+            originalValue: 'draft',
+            value: 'active'
+          }
+        ]
+      }
+    ]);
+
+    const dirtyStateCell = queryVisibleCell('.hgrid__row--left[data-row-index="0"] .hgrid__cell[data-column-id="__state"]');
+    expect(dirtyStateCell.textContent?.trim()).toBe('dirty');
+
+    expect(renderer.startEditingAtCell(0, 2)).toBe(true);
+    expect(renderer.editorInputElement.type).toBe('date');
+    expect(renderer.editorInputElement.value).toBe('2026-03-05');
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(grid.getDirtyChangeSummary()).toEqual({
+      rowCount: 1,
+      cellCount: 1,
+      rowKeys: [1]
+    });
+
+    grid.acceptDirtyChanges();
+    await waitForFrame();
+
+    expect(grid.hasDirtyChanges()).toBe(false);
+    expect(grid.getDirtyChanges()).toEqual([]);
+    const committedStateCell = queryVisibleCell('.hgrid__row--left[data-row-index="0"] .hgrid__cell[data-column-id="__state"]');
+    expect(committedStateCell.textContent?.trim()).toBe('commit');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('reverts local dirty changes through discardDirtyChanges', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: '__state', header: 'State', width: 108, type: 'text' as const, editable: false },
+        { id: 'name', header: 'Name', width: 200, type: 'text' as const, editable: true },
+        { id: 'status', header: 'Status', width: 160, type: 'text' as const, editable: true }
+      ],
+      rowData: [{ id: 1, name: 'Ahn', status: 'draft' }],
+      height: 160,
+      rowHeight: 28,
+      overscan: 2,
+      editPolicy: {
+        dirtyTracking: {
+          enabled: true
+        }
+      }
+    });
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          startEditingAtCell: (rowIndex: number, colIndex: number) => boolean;
+          editorInputElement: HTMLInputElement;
+        };
+      }
+    ).renderer;
+
+    expect(renderer.startEditingAtCell(0, 1)).toBe(true);
+    renderer.editorInputElement.value = 'Ahn Edited';
+    renderer.editorInputElement.dispatchEvent(new Event('input', { bubbles: true }));
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(grid.hasDirtyChanges()).toBe(true);
+    expect(grid.getDirtyChangeSummary()).toEqual({
+      rowCount: 1,
+      cellCount: 1,
+      rowKeys: [1]
+    });
+    expect(grid.getDataProvider().getValue(0, 'name')).toBe('Ahn Edited');
+
+    grid.discardDirtyChanges();
+    await waitForFrame();
+
+    expect(grid.hasDirtyChanges()).toBe(false);
+    expect(grid.getDirtyChanges()).toEqual([]);
+    expect(grid.getDataProvider().getValue(0, 'name')).toBe('Ahn');
+
+    const stateCell = Array.from(
+      container.querySelectorAll('.hgrid__row--left[data-row-index="0"] .hgrid__cell[data-column-id="__state"]')
+    ).find((cell) => (cell.closest('.hgrid__row') as HTMLDivElement | null)?.style.display !== 'none') as HTMLDivElement | undefined;
+    expect(stateCell?.textContent?.trim() ?? '').toBe('');
 
     grid.destroy();
     container.remove();

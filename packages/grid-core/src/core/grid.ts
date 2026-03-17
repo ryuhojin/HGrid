@@ -9,6 +9,12 @@ import type {
   GridColumnLayoutPreset,
   GridContextMenuOptions,
   GridColumnLayout,
+  GridDirtyChangeOptions,
+  GridDirtyChangeSummary,
+  GridDirtyRowChange,
+  GridEditActionBarActionContext,
+  GridEditActionBarActionResult,
+  GridEditPolicyOptions,
   GridFilterRowOptions,
   GridLocaleText,
   GridRangeHandleOptions,
@@ -49,7 +55,7 @@ import {
   isAdvancedFilterGroup,
   type AdvancedFilterNode
 } from '../data/filter-model';
-import type { DataProvider, GridRowData, RowKey } from '../data/data-provider';
+import type { DataProvider, DataTransaction, GridRowData, RowKey } from '../data/data-provider';
 import { LocalDataProvider } from '../data/local-data-provider';
 import type { RowModelOptions, RowModelState, SparseRowOverride, ViewToDataMapping } from '../data/row-model';
 import { RowModel } from '../data/row-model';
@@ -62,7 +68,7 @@ import { GroupedDataProvider } from '../data/grouped-data-provider';
 import { CooperativeTreeExecutor, toTreeNodeKeyToken, type TreeExecutionResult, type TreeExecutor } from '../data/tree-executor';
 import { TreeDataProvider } from '../data/tree-data-provider';
 import type { EditCommitAuditLogger } from './edit-events';
-import type { GridRendererPort } from './grid-internal-contracts';
+import type { GridRendererPort, GridRendererRuntimeOptions } from './grid-internal-contracts';
 import { GridCommandEventService } from './grid-command-event-service';
 import {
   GridDataPipelineService,
@@ -86,6 +92,7 @@ import {
 import { GridProviderLifecycleService } from './grid-provider-lifecycle-service';
 import { GridRemoteQueryService } from './grid-remote-query-service';
 import { GridStateService } from './grid-state-service';
+import { GridEditPolicyService } from './grid-edit-policy-service';
 import { WorkerOperationDispatcher } from '../data/worker-operation-dispatcher';
 import {
   WORKER_TREE_LAZY_ROW_REF_FIELD,
@@ -524,6 +531,27 @@ function cloneUndoRedoOptions(undoRedo?: GridUndoRedoOptions): GridUndoRedoOptio
   };
 }
 
+function cloneEditPolicyOptions(editPolicy?: GridEditPolicyOptions): GridEditPolicyOptions | undefined {
+  if (!editPolicy) {
+    return undefined;
+  }
+
+  return {
+    dirtyTracking: editPolicy.dirtyTracking
+      ? {
+          enabled: editPolicy.dirtyTracking.enabled === true
+        }
+      : undefined,
+    actionBar: editPolicy.actionBar
+      ? {
+          enabled: editPolicy.actionBar.enabled !== false,
+          onSave: editPolicy.actionBar.onSave,
+          onDiscard: editPolicy.actionBar.onDiscard
+        }
+      : undefined
+  };
+}
+
 function cloneStatusBarOptions(statusBar?: GridStatusBarOptions): GridStatusBarOptions | undefined {
   if (!statusBar) {
     return undefined;
@@ -627,6 +655,37 @@ function mergeUndoRedoOptions(
 
   if (Object.prototype.hasOwnProperty.call(nextOptions, 'limit')) {
     base.limit = normalizeSetFilterLimit(nextOptions.limit, DEFAULT_UNDO_REDO_LIMIT);
+  }
+
+  return base;
+}
+
+function mergeEditPolicyOptions(
+  currentOptions: GridOptions['editPolicy'],
+  nextOptions: GridConfig['editPolicy']
+): GridOptions['editPolicy'] {
+  if (!nextOptions) {
+    return cloneEditPolicyOptions(currentOptions);
+  }
+
+  const base = cloneEditPolicyOptions(currentOptions) ?? {};
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'dirtyTracking')) {
+    base.dirtyTracking = nextOptions.dirtyTracking
+      ? {
+          enabled: nextOptions.dirtyTracking.enabled === true
+        }
+      : undefined;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'actionBar')) {
+    base.actionBar = nextOptions.actionBar
+      ? {
+          enabled: nextOptions.actionBar.enabled !== false,
+          onSave: nextOptions.actionBar.onSave,
+          onDiscard: nextOptions.actionBar.onDiscard
+        }
+      : undefined;
   }
 
   return base;
@@ -1384,6 +1443,7 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     sideBar: mergeSideBarOptions(undefined, config?.sideBar),
     rangeHandle: mergeRangeHandleOptions(undefined, config?.rangeHandle),
     undoRedo: mergeUndoRedoOptions(undefined, config?.undoRedo),
+    editPolicy: mergeEditPolicyOptions(undefined, config?.editPolicy),
     statusBar: mergeStatusBarOptions(undefined, config?.statusBar),
     filterRow: mergeFilterRowOptions(undefined, config?.filterRow),
     setFilter: mergeSetFilterOptions(undefined, config?.setFilter),
@@ -1445,6 +1505,7 @@ export class Grid {
   private readonly pivotExecutor: WorkerBackedExecutor<PivotExecutor>;
   private readonly treeExecutor: WorkerBackedExecutor<TreeExecutor>;
   private readonly commandEventService = new GridCommandEventService();
+  private readonly editPolicyService = new GridEditPolicyService();
   private readonly dataPipelineService = new GridDataPipelineService();
   private readonly exportService = new GridExportService();
   private readonly providerLifecycleService = new GridProviderLifecycleService();
@@ -1484,6 +1545,7 @@ export class Grid {
   private filterMapping: Int32Array | null = null;
   private dataProviderUnsubscribe: (() => void) | null = null;
   private commandEventUnsubscribe: (() => void) | null = null;
+  private editPolicyUnsubscribe: (() => void) | null = null;
   private columnValueFormatContext: ColumnValueFormatContext | null = null;
   private readonly workerProjectionCache = new WorkerProjectionCache();
 
@@ -1498,6 +1560,10 @@ export class Grid {
     };
     this.rebuildColumnValueFormatContext();
     this.eventBus = new EventBus();
+    this.editPolicyUnsubscribe = this.editPolicyService.register({
+      eventBus: this.eventBus,
+      isDirtyTrackingEnabled: () => this.options.editPolicy?.dirtyTracking?.enabled === true
+    });
     this.commandEventUnsubscribe = this.commandEventService.register({
       eventBus: this.eventBus,
       hasColumn: (columnId) => this.columnModel.getColumns().some((column) => column.id === columnId),
@@ -1697,6 +1763,7 @@ export class Grid {
     const nextSideBar = mergeSideBarOptions(this.options.sideBar, options.sideBar);
     const nextRangeHandle = mergeRangeHandleOptions(this.options.rangeHandle, options.rangeHandle);
     const nextUndoRedo = mergeUndoRedoOptions(this.options.undoRedo, options.undoRedo);
+    const nextEditPolicy = mergeEditPolicyOptions(this.options.editPolicy, options.editPolicy);
     const nextStatusBar = mergeStatusBarOptions(this.options.statusBar, options.statusBar);
     const nextFilterRow = mergeFilterRowOptions(this.options.filterRow, options.filterRow);
     const nextSetFilter = mergeSetFilterOptions(this.options.setFilter, options.setFilter);
@@ -1750,6 +1817,7 @@ export class Grid {
 
     if (hasProviderOption) {
       this.invalidateWorkerProjectionCache();
+      this.editPolicyService.reset();
       const providerReplacement = this.providerLifecycleService.replaceDataProvider(
         this.sourceDataProvider,
         nextDataProvider
@@ -1802,6 +1870,9 @@ export class Grid {
     this.filterModel = this.normalizeFilterModel(this.filterModel);
     this.advancedFilterModel = this.normalizeAdvancedFilterModel(this.advancedFilterModel);
     const normalizedAdvancedFilterPresets = this.normalizeAdvancedFilterPresets(nextAdvancedFilterPresets);
+    if (nextEditPolicy?.dirtyTracking?.enabled !== true && this.options.editPolicy?.dirtyTracking?.enabled === true) {
+      this.editPolicyService.reset();
+    }
 
     this.options = {
       ...this.options,
@@ -1829,6 +1900,7 @@ export class Grid {
       sideBar: nextSideBar,
       rangeHandle: nextRangeHandle,
       undoRedo: nextUndoRedo,
+      editPolicy: nextEditPolicy,
       statusBar: nextStatusBar,
       filterRow: nextFilterRow,
       setFilter: nextSetFilter,
@@ -2570,6 +2642,54 @@ export class Grid {
     return this.renderer.canRedoEdit();
   }
 
+  public hasDirtyChanges(): boolean {
+    return this.editPolicyService.hasDirtyChanges();
+  }
+
+  public getDirtyChanges(): GridDirtyRowChange[] {
+    return this.editPolicyService.getDirtyChanges();
+  }
+
+  public getDirtyChangeSummary(): GridDirtyChangeSummary {
+    return this.editPolicyService.getDirtyChangeSummary();
+  }
+
+  public acceptDirtyChanges(options?: GridDirtyChangeOptions): void {
+    this.editPolicyService.acceptDirtyChanges(options);
+    const dirtyProvider = this.resolveDirtyTrackingProvider();
+    if (dirtyProvider && typeof dirtyProvider.acceptPendingChanges === 'function') {
+      dirtyProvider.acceptPendingChanges(options);
+    }
+    this.renderer.refreshDataView();
+  }
+
+  public discardDirtyChanges(options?: GridDirtyChangeOptions): void {
+    const dirtyChanges = this.editPolicyService.getDirtyChanges();
+    if (dirtyChanges.length === 0) {
+      return;
+    }
+
+    const targetDirtyChanges = this.filterDirtyChangesByOptions(dirtyChanges, options);
+    if (targetDirtyChanges.length === 0) {
+      return;
+    }
+
+    const dirtyProvider = this.resolveDirtyTrackingProvider();
+    if (dirtyProvider && typeof dirtyProvider.discardPendingChanges === 'function') {
+      dirtyProvider.discardPendingChanges(options);
+      this.editPolicyService.discardDirtyChanges(options);
+      this.renderer.refreshDataView();
+      return;
+    }
+
+    const transactions = this.buildDirtyDiscardTransactions(this.sourceDataProvider, targetDirtyChanges);
+    if (transactions.length > 0) {
+      this.sourceDataProvider.applyTransactions(transactions);
+    }
+    this.editPolicyService.discardDirtyChanges(options);
+    this.renderer.refreshDataView();
+  }
+
   public getColumns(): ColumnDef[] {
     return this.columnModel.getColumns().map((column) => ({ ...column }));
   }
@@ -2622,6 +2742,8 @@ export class Grid {
     this.dataProviderUnsubscribe = this.providerLifecycleService.disconnectRowsChangedListener(this.dataProviderUnsubscribe);
     this.commandEventUnsubscribe?.();
     this.commandEventUnsubscribe = null;
+    this.editPolicyUnsubscribe?.();
+    this.editPolicyUnsubscribe = null;
     this.invalidateWorkerProjectionCache();
     this.sortExecutor.destroy();
     this.filterExecutor.destroy();
@@ -2955,10 +3077,207 @@ export class Grid {
   }
 
   private getRendererOptions(): GridOptions {
-    return {
+    const rendererOptions: GridOptions & GridRendererRuntimeOptions = {
       ...this.options,
+      rowIndicator: this.resolveRendererRowIndicatorOptions(),
       rowModel: this.rowModel,
       columns: this.columnModel.getVisibleColumns()
+    };
+    if (this.options.editPolicy?.actionBar?.enabled === true) {
+      rendererOptions.__editActionBarRuntime = {
+        getState: () => ({
+          hasDirtyChanges: this.hasDirtyChanges(),
+          summary: this.getDirtyChangeSummary(),
+          changes: this.getDirtyChanges()
+        }),
+        onSave: (context) => this.handleEditActionBarSave(context),
+        onDiscard: (context) => this.handleEditActionBarDiscard(context)
+      };
+    }
+
+    return rendererOptions;
+  }
+
+  private resolveRendererRowIndicatorOptions(): RowIndicatorOptions | undefined {
+    const baseOptions = this.options.rowIndicator;
+    if (this.options.editPolicy?.dirtyTracking?.enabled !== true) {
+      return baseOptions;
+    }
+
+    return {
+      ...baseOptions,
+      getRowStatus: (context) => {
+        const baseStatus = baseOptions?.getRowStatus?.(context);
+        if (baseStatus) {
+          return baseStatus;
+        }
+
+        const rowKey = this.resolveRendererRowKey(context.dataIndex);
+        if (rowKey === null) {
+          return undefined;
+        }
+
+        if (this.editPolicyService.isRowDirty(rowKey)) {
+          return 'updated';
+        }
+
+        if (this.editPolicyService.isRowCommitted(rowKey)) {
+          return 'clean';
+        }
+
+        return undefined;
+      }
+    };
+  }
+
+  private resolveRendererRowKey(dataIndex: number): RowKey | null {
+    if (!Number.isInteger(dataIndex) || dataIndex < 0) {
+      return null;
+    }
+
+    const dataProvider = this.options.dataProvider;
+    if (!dataProvider || dataIndex >= dataProvider.getRowCount()) {
+      return null;
+    }
+
+    return dataProvider.getRowKey(dataIndex);
+  }
+
+  private resolveDirtyTrackingProvider():
+    | {
+        acceptPendingChanges?: (options?: GridDirtyChangeOptions) => void;
+        discardPendingChanges?: (options?: GridDirtyChangeOptions) => void;
+      }
+    | null {
+    const rendererDataProvider = this.options.dataProvider as {
+      acceptPendingChanges?: (options?: GridDirtyChangeOptions) => void;
+      discardPendingChanges?: (options?: GridDirtyChangeOptions) => void;
+    } | null;
+    if (
+      rendererDataProvider &&
+      (typeof rendererDataProvider.acceptPendingChanges === 'function' ||
+        typeof rendererDataProvider.discardPendingChanges === 'function')
+    ) {
+      return rendererDataProvider;
+    }
+
+    const sourceDataProvider = this.sourceDataProvider as {
+      acceptPendingChanges?: (options?: GridDirtyChangeOptions) => void;
+      discardPendingChanges?: (options?: GridDirtyChangeOptions) => void;
+    } | null;
+    if (
+      sourceDataProvider &&
+      (typeof sourceDataProvider.acceptPendingChanges === 'function' ||
+        typeof sourceDataProvider.discardPendingChanges === 'function')
+    ) {
+      return sourceDataProvider;
+    }
+
+    return null;
+  }
+
+  private filterDirtyChangesByOptions(
+    dirtyChanges: GridDirtyRowChange[],
+    options?: GridDirtyChangeOptions
+  ): GridDirtyRowChange[] {
+    if (!Array.isArray(options?.rowKeys) || options.rowKeys.length === 0) {
+      return dirtyChanges;
+    }
+
+    const allowedRowKeys = new Set(options.rowKeys);
+    return dirtyChanges.filter((rowChange) => allowedRowKeys.has(rowChange.rowKey));
+  }
+
+  private resolveDataIndexForDirtyRow(dataProvider: DataProvider, rowChange: GridDirtyRowChange): number {
+    if (typeof dataProvider.getDataIndexByRowKey === 'function') {
+      const resolvedIndex = dataProvider.getDataIndexByRowKey(rowChange.rowKey, rowChange.dataIndexHint);
+      if (resolvedIndex >= 0) {
+        return resolvedIndex;
+      }
+    }
+
+    if (
+      Number.isInteger(rowChange.dataIndexHint) &&
+      rowChange.dataIndexHint >= 0 &&
+      rowChange.dataIndexHint < dataProvider.getRowCount() &&
+      dataProvider.getRowKey(rowChange.dataIndexHint) === rowChange.rowKey
+    ) {
+      return rowChange.dataIndexHint;
+    }
+
+    return -1;
+  }
+
+  private buildDirtyDiscardTransactions(dataProvider: DataProvider, dirtyChanges: GridDirtyRowChange[]): DataTransaction[] {
+    const transactions: DataTransaction[] = [];
+    for (let rowIndex = 0; rowIndex < dirtyChanges.length; rowIndex += 1) {
+      const rowChange = dirtyChanges[rowIndex];
+      const dataIndex = this.resolveDataIndexForDirtyRow(dataProvider, rowChange);
+      if (dataIndex < 0) {
+        continue;
+      }
+
+      for (let cellIndex = 0; cellIndex < rowChange.changes.length; cellIndex += 1) {
+        const cellChange = rowChange.changes[cellIndex];
+        transactions.push({
+          type: 'updateCell',
+          index: dataIndex,
+          columnId: cellChange.columnId,
+          value: cellChange.originalValue
+        });
+      }
+    }
+
+    return transactions;
+  }
+
+  private async handleEditActionBarSave(
+    context: GridEditActionBarActionContext
+  ): Promise<boolean | void | GridEditActionBarActionResult> {
+    const onSave = this.options.editPolicy?.actionBar?.onSave;
+    if (typeof onSave === 'function') {
+      const result = await onSave(context);
+      const shouldComplete =
+        result === false
+          ? false
+          : typeof result === 'object' && result !== null && Object.prototype.hasOwnProperty.call(result, 'completed')
+            ? result.completed !== false
+            : true;
+      if (shouldComplete) {
+        this.acceptDirtyChanges();
+      }
+      return result;
+    }
+
+    this.acceptDirtyChanges();
+    return {
+      completed: true,
+      tone: 'active'
+    };
+  }
+
+  private async handleEditActionBarDiscard(
+    context: GridEditActionBarActionContext
+  ): Promise<boolean | void | GridEditActionBarActionResult> {
+    const onDiscard = this.options.editPolicy?.actionBar?.onDiscard;
+    if (typeof onDiscard === 'function') {
+      const result = await onDiscard(context);
+      const shouldComplete =
+        result === false
+          ? false
+          : typeof result === 'object' && result !== null && Object.prototype.hasOwnProperty.call(result, 'completed')
+            ? result.completed !== false
+            : true;
+      if (shouldComplete) {
+        this.discardDirtyChanges();
+      }
+      return result;
+    }
+
+    this.discardDirtyChanges();
+    return {
+      completed: true,
+      tone: 'active'
     };
   }
 

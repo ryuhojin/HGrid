@@ -14,6 +14,11 @@ Both methods return `Promise<GridExportResult>`.
 - `signal?: AbortSignal`
 - `onProgress?(event: GridExportProgressEvent)`
 
+## Shared Export Contract
+- CSV/TSV export의 `scope`, `includeHeaders`, `signal`, `onProgress` 의미는 Excel plugin export와 동일하다.
+- 제품 문서/예제에서는 이 4개를 format 공통 계약으로 설명한다.
+- xlsx 전용 옵션(`sheetName`, `dateFormat`, `numberFormat`, `maxClientRows`, `serverExportHook`)은 Excel plugin 문서에서 별도로 다룬다.
+
 ## `GridExportProgressEvent`
 - `operationId: string`
 - `format: "csv" | "tsv"`

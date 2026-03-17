@@ -272,31 +272,33 @@
 > 편집 기능이 존재하는 것과 현업이 신뢰할 수 있는 편집 제품인 것은 다르다.
 
 ## E4.1 편집 정책 고도화
-- [ ] cell editor type 확장 전략 정의
-- [ ] select/date/number/masked editor 정책 정의
-- [ ] validation error UX 표준화
-- [ ] batch edit / dirty tracking 정책 정의
+- [x] cell editor type 확장 전략 정의
+- [x] select/date/number/masked editor 정책 정의
+- [x] validation error UX 표준화
+- [x] batch edit / dirty tracking 정책 정의
+- [x] `discardDirtyChanges()` API 추가
+- [x] save/discard action bar 추가
 
 ## E4.2 Undo/Redo / Transaction UX
-- [ ] transaction-grade edit undo/redo semantics 고도화
-- [ ] clipboard paste undo 범위 정의
-- [ ] transaction rollback 정책 정의
-- [ ] audit log와 undo/redo 관계 문서화
+- [x] transaction-grade edit undo/redo semantics 고도화
+- [x] clipboard paste undo 범위 정의
+- [x] transaction rollback 정책 정의
+- [x] audit log와 undo/redo 관계 문서화
 
 ## E4.3 Clipboard / Import / Export 강화
-- [ ] clipboard security regression 추가
-- [ ] CSV/TSV/Excel export 옵션 일관화
-- [ ] Excel import conflict UX 정의
-- [ ] 대용량 export server delegation UX 문서화
+- [x] clipboard security regression 추가
+- [x] CSV/TSV/Excel export 옵션 일관화
+- [x] Excel import conflict UX 정의
+- [x] 대용량 export server delegation UX 문서화
 
 ## E4.4 Formula / Derived Value 전략
-- [ ] formula 지원 여부 결정
-- [ ] 지원 시 plugin 분리 설계
-- [ ] 계산 dependency / cycle 정책 정의
-- [ ] 미지원 시 명확한 제품 범위 선언
+- [x] formula 지원 여부 결정
+- [x] 지원 시 plugin 분리 설계
+- [x] 계산 dependency / cycle 정책 정의
+- [x] 미지원 시 명확한 제품 범위 선언
 
 ### 수용 기준
-- [ ] 현업 편집 워크플로우에서 “입력-검증-오류-복구-감사” 흐름이 닫힌다.
+- [x] 현업 편집 워크플로우에서 “입력-검증-오류-복구-감사” 흐름이 닫힌다.
 
 ---
 
@@ -523,7 +525,7 @@
 - [x] Step 3: `3. Phase E1 — Actual Worker Runtime`
 - [ ] Step 4: `4. Phase E2 — Enterprise Server-Side Data Model`
 - [x] Step 5: `5. Phase E3 — Enterprise Product Surface`
-- [ ] Step 6: `6. Phase E4 — Data Workflow / Editing Productization`
+- [x] Step 6: `6. Phase E4 — Data Workflow / Editing Productization`
 - [ ] Step 7: `7. Phase E5 — Security / CSP / Compliance`
 - [ ] Step 8: `8. Phase E6 — Accessibility / i18n / RTL`
 - [ ] Step 9: `9. Phase E7 — Framework Packages Productization`

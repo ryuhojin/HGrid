@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 88 - Edit Workflow Action Bar</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #1f2937;
+        background: #f3f6fb;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0;
+        color: #475569;
+      }
+
+      .page {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 1180px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .toolbar button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        color: inherit;
+        font: inherit;
+        font-weight: 600;
+        padding: 9px 14px;
+        cursor: pointer;
+      }
+
+      .toolbar button[data-active='true'] {
+        border-color: #dc2626;
+        background: rgba(254, 226, 226, 0.96);
+        color: #991b1b;
+      }
+
+      .toolbar button:hover,
+      .toolbar button:focus-visible {
+        outline: 0;
+        background: rgba(219, 234, 254, 0.9);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .card {
+        border: 1px solid #dbe3ee;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      .meta {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .meta-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .meta-title {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+      }
+
+      .meta-kpis {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .meta-kpi {
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        background: #f8fafc;
+        padding: 10px 12px;
+      }
+
+      .meta-kpi strong {
+        display: block;
+        font-size: 20px;
+      }
+
+      pre {
+        margin: 0;
+        padding: 12px;
+        border-radius: 14px;
+        background: #0f172a;
+        color: #dbeafe;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div>
+        <h1>Example 88 - Edit Workflow Action Bar</h1>
+        <p>Dirty tracking, save/discard action bar, simulated save failure, audit snapshot.</p>
+      </div>
+
+      <div class="toolbar">
+        <button id="edit-budget" type="button">Edit Row 1 Budget</button>
+        <button id="edit-status" type="button">Edit Row 2 Status</button>
+        <button id="fail-next-save" type="button" data-active="false">Fail Next Save</button>
+      </div>
+
+      <div class="layout">
+        <div class="card">
+          <div id="grid"></div>
+        </div>
+
+        <div class="card meta">
+          <div class="meta-section">
+            <div class="meta-title">Workflow Summary</div>
+            <div class="meta-kpis">
+              <div class="meta-kpi">
+                <span>Dirty Rows</span>
+                <strong id="dirty-rows">0</strong>
+              </div>
+              <div class="meta-kpi">
+                <span>Dirty Cells</span>
+                <strong id="dirty-cells">0</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="meta-section">
+            <div class="meta-title">Action Bar</div>
+            <pre id="action-bar-json"></pre>
+          </div>
+
+          <div class="meta-section">
+            <div class="meta-title">Last Save Payload</div>
+            <pre id="save-json"></pre>
+          </div>
+
+          <div class="meta-section">
+            <div class="meta-title">Last Audit Event</div>
+            <pre id="audit-json"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: 'id', header: 'ID', width: 86, type: 'number' },
+        { id: 'account', header: 'Account', width: 220, type: 'text' },
+        {
+          id: 'status',
+          header: 'Status',
+          width: 160,
+          type: 'text',
+          editable: true,
+          editor: {
+            type: 'select',
+            options: [
+              { value: 'draft', label: 'Draft' },
+              { value: 'review', label: 'Review' },
+              { value: 'active', label: 'Active' }
+            ]
+          }
+        },
+        {
+          id: 'budget',
+          header: 'Budget',
+          width: 150,
+          type: 'number',
+          editable: true,
+          editor: {
+            type: 'number',
+            min: 0,
+            max: 100000,
+            step: 10
+          }
+        },
+        {
+          id: 'renewalDate',
+          header: 'Renewal Date',
+          width: 180,
+          type: 'date',
+          editable: true,
+          editor: {
+            type: 'date'
+          }
+        }
+      ];
+
+      const baseRows = [
+        { id: 1, account: 'Northwind', status: 'draft', budget: 1200, renewalDate: '2026-03-18' },
+        { id: 2, account: 'Contoso', status: 'review', budget: 840, renewalDate: '2026-03-24' },
+        { id: 3, account: 'Fabrikam', status: 'active', budget: 1660, renewalDate: '2026-04-02' }
+      ];
+
+      function cloneRows(rows) {
+        return rows.map((row) => ({ ...row }));
+      }
+
+      function nextFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      const dirtyRowsElement = document.getElementById('dirty-rows');
+      const dirtyCellsElement = document.getElementById('dirty-cells');
+      const actionBarJsonElement = document.getElementById('action-bar-json');
+      const saveJsonElement = document.getElementById('save-json');
+      const auditJsonElement = document.getElementById('audit-json');
+      const failNextSaveButton = document.getElementById('fail-next-save');
+
+      let failNextSave = false;
+      let lastSavePayload = null;
+      let lastAudit = null;
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: cloneRows(baseRows),
+        height: 420,
+        rowHeight: 28,
+        overscan: 6,
+        editPolicy: {
+          dirtyTracking: {
+            enabled: true
+          },
+          actionBar: {
+            enabled: true,
+            async onSave(context) {
+              await new Promise((resolve) => setTimeout(resolve, 80));
+              if (failNextSave) {
+                failNextSave = false;
+                renderMeta();
+                return {
+                  completed: false,
+                  message: 'Server rejected changes. Review and retry.',
+                  tone: 'danger'
+                };
+              }
+
+              lastSavePayload = {
+                summary: context.summary,
+                dirtyChanges: context.dirtyChanges
+              };
+              renderMeta();
+              return {
+                completed: true,
+                message: 'Changes saved to workflow queue.',
+                tone: 'active'
+              };
+            }
+          }
+        },
+        validateEdit(context) {
+          if (context.column.id === 'budget' && (typeof context.value !== 'number' || context.value < 0)) {
+            return { message: 'Budget must be zero or higher', code: 'budget_min' };
+          }
+          return null;
+        },
+        onAuditLog(payload) {
+          lastAudit = {
+            source: payload.source,
+            rowKey: payload.rowKey,
+            columnId: payload.columnId,
+            cellCount: payload.cellCount,
+            transactionKind: payload.transactionKind,
+            transactionStep: payload.transactionStep
+          };
+          renderMeta();
+        }
+      });
+
+      const renderer = grid.renderer;
+
+      async function applyCellChange(rowIndex, columnId, value) {
+        const columnIndex = columns.findIndex((column) => column.id === columnId);
+        if (columnIndex < 0) {
+          throw new Error('Unknown column: ' + columnId);
+        }
+
+        renderer.startEditingAtCell(rowIndex, columnIndex);
+        await nextFrame();
+
+        if (renderer.editorSelectElement.style.display !== 'none') {
+          const editorOptions = columns[columnIndex].editor?.options ?? [];
+          const optionIndex = editorOptions.findIndex((option) => String(option.value) === String(value));
+          renderer.editorSelectElement.value = String(Math.max(0, optionIndex));
+          renderer.editorSelectElement.dispatchEvent(new Event('change', { bubbles: true }));
+          renderer.editorSelectElement.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+          );
+          await nextFrame();
+          await nextFrame();
+          renderMeta();
+          return;
+        }
+
+        renderer.editorInputElement.value = String(value);
+        renderer.editorInputElement.dispatchEvent(new Event('input', { bubbles: true }));
+        renderer.editorInputElement.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+        await nextFrame();
+        await nextFrame();
+        renderMeta();
+      }
+
+      function readActionBarSnapshot() {
+        const bar = document.querySelector('.hgrid__edit-action-bar');
+        const saveButton = document.querySelector('[data-edit-action-bar-action="save"]');
+        const discardButton = document.querySelector('[data-edit-action-bar-action="discard"]');
+        const message = document.querySelector('.hgrid__edit-action-bar-message');
+        return {
+          visible: Boolean(bar) && getComputedStyle(bar).display !== 'none',
+          text: bar ? bar.textContent.trim().replace(/\s+/g, ' ') : '',
+          message: message ? message.textContent.trim() : '',
+          saveDisabled: saveButton ? saveButton.disabled : true,
+          discardDisabled: discardButton ? discardButton.disabled : true
+        };
+      }
+
+      function getSnapshot() {
+        const summary = grid.getDirtyChangeSummary();
+        return {
+          dirtySummary: summary,
+          hasDirtyChanges: grid.hasDirtyChanges(),
+          actionBar: readActionBarSnapshot(),
+          lastSavePayload,
+          lastAudit,
+          rows: cloneRows(
+            Array.from({ length: grid.getDataProvider().getRowCount() }, (_, index) => ({
+              id: grid.getDataProvider().getValue(index, 'id'),
+              account: grid.getDataProvider().getValue(index, 'account'),
+              status: grid.getDataProvider().getValue(index, 'status'),
+              budget: grid.getDataProvider().getValue(index, 'budget'),
+              renewalDate: grid.getDataProvider().getValue(index, 'renewalDate')
+            }))
+          ),
+          failNextSave
+        };
+      }
+
+      function renderMeta() {
+        const snapshot = getSnapshot();
+        dirtyRowsElement.textContent = String(snapshot.dirtySummary.rowCount);
+        dirtyCellsElement.textContent = String(snapshot.dirtySummary.cellCount);
+        actionBarJsonElement.textContent = JSON.stringify(snapshot.actionBar, null, 2);
+        saveJsonElement.textContent = JSON.stringify(snapshot.lastSavePayload, null, 2);
+        auditJsonElement.textContent = JSON.stringify(snapshot.lastAudit, null, 2);
+        failNextSaveButton.dataset.active = snapshot.failNextSave ? 'true' : 'false';
+      }
+
+      document.getElementById('edit-budget').addEventListener('click', () => {
+        void applyCellChange(0, 'budget', 1500);
+      });
+      document.getElementById('edit-status').addEventListener('click', () => {
+        void applyCellChange(1, 'status', 'active');
+      });
+      failNextSaveButton.addEventListener('click', () => {
+        failNextSave = !failNextSave;
+        renderMeta();
+      });
+
+      grid.on('dirtyChange', () => {
+        renderMeta();
+      });
+
+      renderMeta();
+      window.__example88 = {
+        grid,
+        applyCellChange,
+        setFailNextSave(value) {
+          failNextSave = Boolean(value);
+          renderMeta();
+        },
+        getSnapshot,
+        renderMeta
+      };
+    </script>
+  </body>
+</html>

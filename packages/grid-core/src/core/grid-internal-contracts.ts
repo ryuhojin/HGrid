@@ -3,6 +3,10 @@ import type {
   ColumnDef,
   GridColumnLayout,
   ColumnPinPosition,
+  GridEditActionBarActionContext,
+  GridEditActionBarActionResult,
+  GridDirtyChangeSummary,
+  GridDirtyRowChange,
   GridOptions,
   GroupAggregationDef,
   GroupModelItem,
@@ -19,6 +23,26 @@ import type { GridAdvancedFilterPreset } from './grid-options';
 
 export interface GridRendererState {
   scrollTop: number;
+}
+
+export interface GridEditActionBarRuntimeState {
+  hasDirtyChanges: boolean;
+  summary: GridDirtyChangeSummary;
+  changes: GridDirtyRowChange[];
+}
+
+export interface GridEditActionBarRuntimeOptions {
+  getState: () => GridEditActionBarRuntimeState;
+  onSave: (
+    context: GridEditActionBarActionContext
+  ) => Promise<boolean | void | GridEditActionBarActionResult> | boolean | void | GridEditActionBarActionResult;
+  onDiscard: (
+    context: GridEditActionBarActionContext
+  ) => Promise<boolean | void | GridEditActionBarActionResult> | boolean | void | GridEditActionBarActionResult;
+}
+
+export interface GridRendererRuntimeOptions {
+  __editActionBarRuntime?: GridEditActionBarRuntimeOptions;
 }
 
 export interface GridVisibleRowRange {

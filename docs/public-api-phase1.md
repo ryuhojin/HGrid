@@ -29,6 +29,11 @@
 - `getSelection()`
 - `setSelection(selection)`
 - `clearSelection()`
+- `hasDirtyChanges()`
+- `getDirtyChanges()`
+- `getDirtyChangeSummary()`
+- `acceptDirtyChanges(options?)`
+- `discardDirtyChanges(options?)`
 - `getColumns()`
 - `getVisibleColumns()`
 - `getDataProvider()`
@@ -48,6 +53,21 @@
   - `scope: "visible" | "selection" | "all"`
   - `signal: AbortSignal` cancel 지원
   - `onProgress(event)` progress callback
+- Excel plugin export/import (Phase E4.3):
+  - `ExcelExportOptions`는 `scope/includeHeaders/signal/onProgress`를 core CSV/TSV와 공유한다
+  - xlsx 전용 export 옵션:
+    - `sheetName`
+    - `dateFormat`
+    - `numberFormat`
+    - `maxClientRows`
+    - `serverExportHook`
+  - xlsx import 옵션:
+    - `conflictMode: "overwrite" | "skipConflicts" | "reportOnly"`
+    - `resolveConflict(context)`
+  - result:
+    - `conflictRows`
+    - `conflicts[]`
+    - `issues[]`
 - `GridState`: serializable view state.
   - `scrollTop` is logical (virtual) vertical offset, not raw native scrollbar offset.
   - `columnOrder?` stores ordered column ids for state restore.
@@ -55,6 +75,13 @@
   - `pinnedColumns?` stores per-column pin state (`left`/`right`).
 - `ColumnDef`: includes formatter/comparator/valueGetter/valueSetter hooks.
   - `filterMode?: "auto" | "text" | "set"`
+  - `editor?: GridCellEditorOptions`
+  - E4.4 current scope:
+    - derived value = `valueGetter`
+    - edit write-back hook = `valueSetter`
+    - formula/expression authoring language is not part of `grid-core`
+- `GridOptions.editPolicy?` (Phase E4.1):
+  - `dirtyTracking.enabled?: boolean`
 - `GridColumnLayout` (Phase E3.6):
   - `columnOrder: string[]`
   - `hiddenColumnIds: string[]`
@@ -68,6 +95,25 @@
   - current builder scope:
     - nested cross-column rule tree
     - text / number / date rules
+- editing productization (Phase E4.1):
+  - `GridCellEditorOptions`
+    - `type?: "auto" | "text" | "number" | "date" | "boolean" | "select" | "masked"`
+    - `min?`, `max?`, `step?`
+    - `placeholder?`
+    - `options?: Array<{ value, label }>`
+    - `maskMode?: "digits" | "alphanumeric" | "uppercase" | "lowercase"`
+    - `pattern?`
+  - dirty tracking result types:
+    - `GridDirtyCellChange`: `{ columnId, originalValue, value }`
+    - `GridDirtyRowChange`: `{ rowKey, changes[] }`
+    - `GridDirtyChangeSummary`: `{ rowCount, cellCount, rowKeys }`
+    - `GridDirtyChangeOptions`: `{ rowKeys?: Array<string | number> }`
+  - action bar types:
+    - `GridEditActionBarOptions`
+    - `GridEditActionBarActionContext`
+    - `GridEditActionBarActionResult`
+  - validation issue:
+    - `EditValidationIssue = string | { message: string; code?: string }`
 - `ColumnGroupDef`:
   - `groupId: string`
   - `header: string`
@@ -291,6 +337,37 @@
     - keyboard shortcut: `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, `Ctrl/Cmd+Y`
     - selection은 undo/redo 시 실제 적용된 cell range로 다시 맞춘다
     - dataProvider 교체 시 history는 clear된다
+    - E4.2 transaction metadata:
+      - original edit: `transactionKind = "singleCell" | "clipboardRange" | "fillRange"`, `transactionStep = "apply"`
+      - undo/redo replay: `transactionKind = "historyReplay"`, `transactionStep = "undo" | "redo"`
+      - replay event는 새 `transactionId`를 가지지만 `rootTransactionId`는 원본 편집 transaction을 유지한다
+- `editPolicy` (Phase E4.1):
+  - `editPolicy.dirtyTracking.enabled?`
+  - `editPolicy.actionBar.enabled?`
+  - `editPolicy.actionBar.onSave?(context)`
+  - `editPolicy.actionBar.onDiscard?(context)`
+  - current scope:
+    - single editor commit + clipboard paste + fill handle + undo/redo를 동일 dirty tracking surface로 집계
+    - `dirtyChange` event를 통해 summary 갱신
+    - `acceptDirtyChanges()`는 grid-owned dirty tracking을 clear하고, provider가 `acceptPendingChanges()`를 지원하면 같이 위임
+    - `discardDirtyChanges()`는 grid-owned dirty tracking을 revert/clear하고, provider가 `discardPendingChanges()`를 지원하면 같이 위임
+    - built-in action bar는 dirty summary + remote pending/error summary + save/discard action을 묶어 보여준다
+    - state column row indicator는 dirty row를 `dirty`, accepted row를 `commit` tone으로 반영
+
+## Editing Events
+- `editStart`: `{ rowIndex, dataIndex, columnId, value }`
+- `editCommit`:
+  - `{ rowIndex, dataIndex, rowKey, columnId, previousValue, value, source, commitId, transactionId, rootTransactionId, transactionKind, transactionStep, timestampMs, timestamp, rowCount, cellCount, changes[] }`
+  - `source`: `"editor" | "clipboard" | "fillHandle" | "undo" | "redo"`
+- transaction metadata (Phase E4.2):
+  - `transactionId: string`
+  - `rootTransactionId: string`
+  - `transactionKind: "singleCell" | "clipboardRange" | "fillRange" | "historyReplay"`
+  - `transactionStep: "apply" | "undo" | "redo"`
+- `editCancel`: `{ rowIndex, dataIndex, columnId, value, reason }`
+- `dirtyChange`:
+  - `{ hasDirtyChanges, summary }`
+  - `summary`: `GridDirtyChangeSummary`
 
 ## Wrapper Contract
 `@hgrid/grid-react` and `@hgrid/grid-vue` expose thin adapters with the same control API:
@@ -299,6 +376,7 @@
 - `setColumnPin`
 - `setRowOrder`, `setFilteredRowOrder`, `resetRowOrder`, `setRowModelOptions`, `getRowModelState`, `resetRowHeights`
 - `setTheme`, `getState`, `setState`, `getSelection`, `setSelection`, `clearSelection`
+- `hasDirtyChanges`, `getDirtyChanges`, `getDirtyChangeSummary`, `acceptDirtyChanges`, `discardDirtyChanges`
 - `undo`, `redo`, `canUndo`, `canRedo`
 - `getColumnLayout`, `setColumnLayout`
 - `getAdvancedFilterPresets`, `setAdvancedFilterPresets`

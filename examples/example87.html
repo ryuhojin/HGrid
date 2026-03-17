@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 87 - Derived Value Strategy</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .shell {
+        display: grid;
+        gap: 12px;
+      }
+
+      .panel {
+        padding: 12px 14px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      .controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 8px 12px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #grid {
+        width: 1080px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 87 - Derived Value Strategy</h1>
+    <div class="shell">
+      <div id="policy" class="panel"></div>
+      <div class="controls">
+        <button id="reset" type="button">reset rows</button>
+        <button id="inspect" type="button">inspect</button>
+      </div>
+      <pre id="log" class="panel">Ready</pre>
+      <div id="grid"></div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function cloneRows(rows) {
+        return rows.map((row) => ({ ...row }));
+      }
+
+      function formatMoney(value) {
+        return Number(value || 0).toFixed(2);
+      }
+
+      const policy = {
+        formulaSupport: 'plugin-only',
+        derivedValueMode: 'valueGetter',
+        cyclePolicy: 'reject',
+        crossRowFormula: 'unsupported',
+        crossSheetFormula: 'unsupported'
+      };
+
+      const baseRows = [
+        { item: 'Starter Plan', quantity: 2, unitPrice: 120, taxRate: 0.1 },
+        { item: 'Business Plan', quantity: 3, unitPrice: 80, taxRate: 0.08 },
+        { item: 'Support Pack', quantity: 1, unitPrice: 55, taxRate: 0.05 }
+      ];
+
+      const columns = [
+        { id: 'item', header: 'Item', width: 220, type: 'text' },
+        { id: 'quantity', header: 'Qty', width: 100, type: 'number', editable: true },
+        { id: 'unitPrice', header: 'Unit Price', width: 140, type: 'number', editable: true },
+        {
+          id: 'subtotal',
+          header: 'Subtotal',
+          width: 140,
+          type: 'number',
+          valueGetter(row) {
+            return Number(row.quantity || 0) * Number(row.unitPrice || 0);
+          },
+          formatter(value) {
+            return formatMoney(value);
+          }
+        },
+        {
+          id: 'taxAmount',
+          header: 'Tax',
+          width: 120,
+          type: 'number',
+          valueGetter(row) {
+            return Number(row.quantity || 0) * Number(row.unitPrice || 0) * Number(row.taxRate || 0);
+          },
+          formatter(value) {
+            return formatMoney(value);
+          }
+        },
+        {
+          id: 'grandTotal',
+          header: 'Grand Total',
+          width: 160,
+          type: 'number',
+          valueGetter(row) {
+            const subtotal = Number(row.quantity || 0) * Number(row.unitPrice || 0);
+            return subtotal + subtotal * Number(row.taxRate || 0);
+          },
+          formatter(value) {
+            return formatMoney(value);
+          }
+        }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: cloneRows(baseRows),
+        height: 220,
+        rowHeight: 28,
+        overscan: 4,
+        overscanCols: 2
+      });
+
+      const policyElement = document.getElementById('policy');
+      const logElement = document.getElementById('log');
+      policyElement.textContent = JSON.stringify(
+        {
+          title: 'Core formula policy',
+          policy,
+          currentRecommendation: 'Use valueGetter for row-local derived values. Formula authoring/expression engine is not supported in core.'
+        },
+        null,
+        2
+      );
+
+      function readCell(rowIndex, columnId) {
+        const selector = '.hgrid__row[data-row-index="' + rowIndex + '"] .hgrid__cell[data-column-id="' + columnId + '"]';
+        const cell = document.querySelector(selector);
+        return cell && typeof cell.textContent === 'string' ? cell.textContent.trim() : '';
+      }
+
+      function getSnapshot() {
+        return {
+          policy,
+          row0: {
+            quantity: readCell(0, 'quantity'),
+            unitPrice: readCell(0, 'unitPrice'),
+            subtotal: readCell(0, 'subtotal'),
+            taxAmount: readCell(0, 'taxAmount'),
+            grandTotal: readCell(0, 'grandTotal')
+          },
+          row1: {
+            quantity: readCell(1, 'quantity'),
+            unitPrice: readCell(1, 'unitPrice'),
+            subtotal: readCell(1, 'subtotal'),
+            taxAmount: readCell(1, 'taxAmount'),
+            grandTotal: readCell(1, 'grandTotal')
+          }
+        };
+      }
+
+      function writeLog(label) {
+        logElement.textContent = JSON.stringify(
+          {
+            label,
+            snapshot: getSnapshot()
+          },
+          null,
+          2
+        );
+      }
+
+      async function resetRows() {
+        grid.setOptions({
+          rowData: cloneRows(baseRows)
+        });
+        await waitFrame();
+        await waitFrame();
+        writeLog('reset');
+      }
+
+      async function applyBaseValue(rowIndex, columnId, value) {
+        const dataIndex = grid.getDataIndex(rowIndex);
+        if (dataIndex < 0) {
+          return getSnapshot();
+        }
+
+        grid.getDataProvider().setValue(dataIndex, columnId, value);
+        grid.refresh();
+        await waitFrame();
+        await waitFrame();
+        writeLog('apply-base-value');
+        return getSnapshot();
+      }
+
+      document.getElementById('reset').addEventListener('click', () => {
+        void resetRows();
+      });
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect');
+      });
+
+      writeLog('ready');
+
+      window.__example87 = {
+        grid,
+        getSnapshot,
+        resetRows,
+        applyBaseValue
+      };
+    </script>
+  </body>
+</html>

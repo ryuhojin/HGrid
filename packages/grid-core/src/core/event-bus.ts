@@ -2,6 +2,7 @@ import type { SelectionChangeEvent } from '../interaction/selection-model';
 import type { EditCommitEventPayload } from './edit-events';
 import type {
   ColumnPinPosition,
+  GridDirtyChangeSummary,
   GridBuiltInColumnMenuActionId,
   GridColumnLayout,
   GridMenuOpenSource,
@@ -20,6 +21,7 @@ export type GridEventName =
   | 'editStart'
   | 'editCommit'
   | 'editCancel'
+  | 'dirtyChange'
   | 'columnResize'
   | 'columnReorder'
   | 'columnMenuAction'
@@ -45,6 +47,7 @@ export interface GridEventMap {
   editStart: EditStartEvent;
   editCommit: EditCommitEvent;
   editCancel: EditCancelEvent;
+  dirtyChange: DirtyChangeEvent;
   columnResize: ColumnResizeEvent;
   columnReorder: ColumnReorderEvent;
   columnMenuAction: ColumnMenuActionEvent;
@@ -73,6 +76,11 @@ export interface EditCancelEvent {
   columnId: string;
   value: unknown;
   reason: 'escape' | 'reconcile' | 'detached';
+}
+
+export interface DirtyChangeEvent {
+  hasDirtyChanges: boolean;
+  summary: GridDirtyChangeSummary;
 }
 
 export interface ColumnResizeEvent {

@@ -1,8 +1,9 @@
 import { EventBus } from '../core/event-bus';
-import type { GridCustomToolPanelActionPort, GridRendererPort } from '../core/grid-internal-contracts';
+import type { GridCustomToolPanelActionPort, GridRendererPort, GridRendererRuntimeOptions } from '../core/grid-internal-contracts';
 import type {
   ColumnGroupDef,
   ColumnDef,
+  EditValidationIssue,
   GroupAggregationDef,
   GroupAggregationType,
   GridBuiltInBodyMenuActionId,
@@ -12,6 +13,8 @@ import type {
   ColumnPinPosition,
   GridCustomToolPanelDefinition,
   GridBuiltInColumnMenuActionId,
+  GridEditActionBarActionContext,
+  GridEditActionBarActionResult,
   GridColumnMenuContext,
   GridContextMenuContext,
   GridBuiltInStatusBarItemId,
@@ -85,7 +88,12 @@ import {
   mapVirtualToPhysicalScrollTop
 } from '../virtualization/scroll-scaling';
 import { RowHeightMap } from '../virtualization/row-height-map';
-import type { EditCommitEventPayload, EditCommitSource } from '../core/edit-events';
+import type {
+  EditCommitEventPayload,
+  EditCommitSource,
+  EditTransactionKind,
+  EditTransactionStep
+} from '../core/edit-events';
 import type {
   AdvancedFilterModel,
   ColumnFilterCondition,
@@ -146,10 +154,15 @@ import {
   createInvalidEditorOverlayState,
   createOpenEditorOverlayState,
   createPendingEditorOverlayState,
+  formatEditorInputValue,
   normalizeEditorInputValue,
+  resolveColumnEditor,
+  resolveEditValidationMessage,
   resolveEditorOverlayRect,
+  sanitizeEditorInputValue,
   shouldRefocusEditorAfterValidationFailure,
   type EditSession,
+  type ResolvedColumnEditor,
   type EditorOverlayState
 } from './dom-renderer-editor-overlay';
 import {
@@ -645,8 +658,19 @@ interface EditHistoryUpdate {
 }
 
 interface EditHistoryEntry {
+  transactionId: string;
+  rootTransactionId: string;
+  transactionKind: Exclude<EditTransactionKind, 'historyReplay'>;
   source: Exclude<EditCommitSource, 'undo' | 'redo'>;
   updates: EditHistoryUpdate[];
+}
+
+interface EditCommitTransactionContext {
+  source: EditCommitSource;
+  transactionId: string;
+  rootTransactionId: string;
+  transactionKind: EditTransactionKind;
+  transactionStep: EditTransactionStep;
 }
 
 const HISTORY_ROW_KEY_FIELD_CANDIDATES = ['id', 'rowId', 'key'] as const;
@@ -736,12 +760,17 @@ export class DomRenderer implements GridRendererPort {
 
   private overlayElement: HTMLDivElement;
   private fillHandleElement: HTMLDivElement;
+  private editActionBarElement: HTMLDivElement;
+  private editActionBarMainElement: HTMLDivElement;
+  private editActionBarActionsElement: HTMLDivElement;
+  private editActionBarMessageElement: HTMLDivElement;
   private statusBarElement: HTMLDivElement;
   private statusBarMainElement: HTMLDivElement;
   private statusBarMetaElement: HTMLDivElement;
   private sideBarShellElement: HTMLDivElement;
   private editorHostElement: HTMLDivElement;
   private editorInputElement: HTMLInputElement;
+  private editorSelectElement: HTMLSelectElement;
   private editorMessageElement: HTMLDivElement;
   private columnMenuElement: HTMLDivElement;
   private columnMenuListElement: HTMLDivElement;
@@ -764,6 +793,7 @@ export class DomRenderer implements GridRendererPort {
   private dataDirty = false;
   private selectionDirty = false;
   private themeDirty = false;
+  private editActionBarDirty = false;
   private statusBarDirty = false;
   private scrollDirty = false;
   private shouldForcePoolRebuild = false;
@@ -838,6 +868,7 @@ export class DomRenderer implements GridRendererPort {
   private ariaColCount = -1;
   private activeDescendantCellId = '';
   private editCommitSequence = 0;
+  private editTransactionSequence = 0;
   private locale = 'en-US';
   private localeText: GridLocaleText = resolveGridLocaleText('en-US');
   private columnValueFormatContext: ColumnValueFormatContext | null = null;
@@ -852,6 +883,8 @@ export class DomRenderer implements GridRendererPort {
   private statusBarSelectionSummary: StatusBarSelectionSummary | null = null;
   private statusBarAggregateSummary: StatusBarAggregateSummary | null = null;
   private statusBarAggregateComputationId = 0;
+  private editActionBarPendingAction: 'save' | 'discard' | null = null;
+  private editActionBarLastMessage: { text: string; tone: GridStatusBarItemTone } | null = null;
 
   public constructor(
     container: HTMLElement,
@@ -901,12 +934,17 @@ export class DomRenderer implements GridRendererPort {
 
     this.overlayElement = document.createElement('div');
     this.fillHandleElement = document.createElement('div');
+    this.editActionBarElement = document.createElement('div');
+    this.editActionBarMainElement = document.createElement('div');
+    this.editActionBarActionsElement = document.createElement('div');
+    this.editActionBarMessageElement = document.createElement('div');
     this.statusBarElement = document.createElement('div');
     this.statusBarMainElement = document.createElement('div');
     this.statusBarMetaElement = document.createElement('div');
     this.sideBarShellElement = document.createElement('div');
     this.editorHostElement = document.createElement('div');
     this.editorInputElement = document.createElement('input');
+    this.editorSelectElement = document.createElement('select');
     this.editorMessageElement = document.createElement('div');
     this.columnMenuElement = document.createElement('div');
     this.columnMenuListElement = document.createElement('div');
@@ -925,6 +963,7 @@ export class DomRenderer implements GridRendererPort {
     this.refreshI18nContext();
 
     this.initializeDom();
+    this.eventBus.on('dirtyChange', this.handleDirtyChangeEvent);
     this.markLayoutDirty(true);
     this.flushRender();
   }
@@ -941,12 +980,17 @@ export class DomRenderer implements GridRendererPort {
     if (didChangeDataProvider || !this.isUndoRedoEnabled()) {
       this.clearEditHistory();
     }
+    if (didChangeDataProvider) {
+      this.editActionBarLastMessage = null;
+      this.editActionBarPendingAction = null;
+    }
     this.clearFilterSetOptionsCache();
     this.columnsByZone = this.splitColumns(this.options.columns);
     this.refreshI18nContext();
     this.reconcileToolPanelState(false);
     this.reconcileSelection('reconcile');
     this.markLayoutDirty(true);
+    this.editActionBarDirty = true;
     this.flushRender();
   }
 
@@ -971,6 +1015,7 @@ export class DomRenderer implements GridRendererPort {
 
     this.syncAriaGridMetrics();
     this.markDataDirty();
+    this.editActionBarDirty = true;
     this.flushRender();
   }
 
@@ -1129,13 +1174,18 @@ export class DomRenderer implements GridRendererPort {
     this.editorInputElement.removeEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorInputElement.removeEventListener('blur', this.handleEditorInputBlur);
     this.editorInputElement.removeEventListener('input', this.handleEditorInput);
+    this.editorSelectElement.removeEventListener('keydown', this.handleEditorInputKeyDown);
+    this.editorSelectElement.removeEventListener('blur', this.handleEditorInputBlur);
+    this.editorSelectElement.removeEventListener('change', this.handleEditorInput);
     this.filterPanelElement.removeEventListener('click', this.handleFilterPanelClick);
     this.filterPanelElement.removeEventListener('input', this.handleFilterPanelInput);
     this.toolPanelRailElement.removeEventListener('click', this.handleToolPanelRailClick);
     this.toolPanelElement.removeEventListener('click', this.handleToolPanelClick);
     this.toolPanelElement.removeEventListener('change', this.handleToolPanelChange);
     this.toolPanelElement.removeEventListener('input', this.handleToolPanelInput);
+    this.editActionBarElement.removeEventListener('click', this.handleEditActionBarClick);
     this.teardownResizeObserver();
+    this.eventBus.off('dirtyChange', this.handleDirtyChangeEvent);
 
     if (this.scheduledFrameId !== null) {
       cancelAnimationFrame(this.scheduledFrameId);
@@ -1247,6 +1297,11 @@ export class DomRenderer implements GridRendererPort {
     this.fillHandleElement.className = 'hgrid__fill-handle';
     this.fillHandleElement.setAttribute('role', 'presentation');
     this.fillHandleElement.dataset.rangeHandle = 'true';
+    this.editActionBarElement.className = 'hgrid__edit-action-bar';
+    this.editActionBarElement.setAttribute('role', 'toolbar');
+    this.editActionBarMainElement.className = 'hgrid__edit-action-bar-main';
+    this.editActionBarActionsElement.className = 'hgrid__edit-action-bar-actions';
+    this.editActionBarMessageElement.className = 'hgrid__edit-action-bar-message';
     this.statusBarElement.className = 'hgrid__status-bar';
     this.statusBarElement.setAttribute('role', 'status');
     this.statusBarMainElement.className = 'hgrid__status-bar-main';
@@ -1257,7 +1312,11 @@ export class DomRenderer implements GridRendererPort {
     this.editorInputElement.className = 'hgrid__editor-input';
     this.editorInputElement.type = 'text';
     this.editorInputElement.spellcheck = false;
+    this.editorSelectElement.className = 'hgrid__editor-input hgrid__editor-input--select';
+    this.editorSelectElement.style.display = 'none';
     this.editorMessageElement.className = 'hgrid__editor-message';
+    this.editorMessageElement.setAttribute('role', 'alert');
+    this.editorMessageElement.setAttribute('aria-live', 'polite');
     this.columnMenuElement.className = 'hgrid__column-menu';
     this.columnMenuElement.setAttribute('role', 'presentation');
     this.columnMenuListElement.className = 'hgrid__column-menu-list';
@@ -1270,10 +1329,15 @@ export class DomRenderer implements GridRendererPort {
     this.toolPanelElement.className = 'hgrid__tool-panel';
     this.toolPanelElement.setAttribute('role', 'complementary');
     this.toolPanelBodyElement.className = 'hgrid__tool-panel-body';
-    this.editorHostElement.append(this.editorInputElement, this.editorMessageElement);
+    this.editorHostElement.append(this.editorInputElement, this.editorSelectElement, this.editorMessageElement);
     this.columnMenuElement.append(this.columnMenuListElement);
     this.filterPanelElement.append(this.filterPanelBodyElement);
     this.toolPanelElement.append(this.toolPanelBodyElement);
+    this.editActionBarElement.append(
+      this.editActionBarMainElement,
+      this.editActionBarActionsElement,
+      this.editActionBarMessageElement
+    );
     this.statusBarElement.append(this.statusBarMainElement, this.statusBarMetaElement);
     this.sideBarShellElement.append(this.toolPanelRailElement, this.toolPanelElement);
     this.overlayElement.append(
@@ -1283,7 +1347,14 @@ export class DomRenderer implements GridRendererPort {
       this.filterPanelElement
     );
 
-    this.rootElement.append(this.headerElement, this.bodyElement, this.statusBarElement, this.overlayElement, this.sideBarShellElement);
+    this.rootElement.append(
+      this.headerElement,
+      this.bodyElement,
+      this.editActionBarElement,
+      this.statusBarElement,
+      this.overlayElement,
+      this.sideBarShellElement
+    );
 
     this.updateViewportHeights();
     this.updateSpacerSize();
@@ -1310,12 +1381,16 @@ export class DomRenderer implements GridRendererPort {
     this.editorInputElement.addEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorInputElement.addEventListener('blur', this.handleEditorInputBlur);
     this.editorInputElement.addEventListener('input', this.handleEditorInput);
+    this.editorSelectElement.addEventListener('keydown', this.handleEditorInputKeyDown);
+    this.editorSelectElement.addEventListener('blur', this.handleEditorInputBlur);
+    this.editorSelectElement.addEventListener('change', this.handleEditorInput);
     this.filterPanelElement.addEventListener('click', this.handleFilterPanelClick);
     this.filterPanelElement.addEventListener('input', this.handleFilterPanelInput);
     this.toolPanelRailElement.addEventListener('click', this.handleToolPanelRailClick);
     this.toolPanelElement.addEventListener('click', this.handleToolPanelClick);
     this.toolPanelElement.addEventListener('change', this.handleToolPanelChange);
     this.toolPanelElement.addEventListener('input', this.handleToolPanelInput);
+    this.editActionBarElement.addEventListener('click', this.handleEditActionBarClick);
 
     this.syncAriaGridMetrics();
     this.syncAriaActiveDescendant();
@@ -3471,6 +3546,213 @@ export class DomRenderer implements GridRendererPort {
     this.renderToolPanelRail();
     this.renderToolPanel();
     this.requestToolPanelDockRelayout(previousDockWidth);
+  }
+
+  private getEditActionBarRuntime() {
+    const runtimeOptions = this.options as GridOptions & GridRendererRuntimeOptions;
+    return runtimeOptions.__editActionBarRuntime ?? null;
+  }
+
+  private isEditActionBarEnabled(): boolean {
+    return Boolean(this.options.editPolicy?.actionBar?.enabled === true && this.getEditActionBarRuntime());
+  }
+
+  private createEditActionBarButton(
+    action: 'save' | 'discard',
+    label: string,
+    isDisabled: boolean,
+    isPending: boolean
+  ): HTMLButtonElement {
+    const buttonElement = document.createElement('button');
+    buttonElement.type = 'button';
+    buttonElement.className = 'hgrid__edit-action-bar-button';
+    buttonElement.dataset.editActionBarAction = action;
+    if (action === 'save') {
+      buttonElement.classList.add('hgrid__edit-action-bar-button--primary');
+    }
+    buttonElement.disabled = isDisabled || isPending;
+    buttonElement.textContent = label;
+    return buttonElement;
+  }
+
+  private normalizeEditActionBarResult(
+    result: boolean | void | GridEditActionBarActionResult | null | undefined,
+    fallbackMessage: string
+  ): { completed: boolean; message: string; tone: GridStatusBarItemTone } {
+    if (result === false) {
+      return {
+        completed: false,
+        message: '',
+        tone: 'default'
+      };
+    }
+
+    if (result && typeof result === 'object') {
+      return {
+        completed: result.completed !== false,
+        message: typeof result.message === 'string' ? result.message.trim() : fallbackMessage,
+        tone: result.tone === 'active' || result.tone === 'danger' ? result.tone : 'default'
+      };
+    }
+
+    return {
+      completed: true,
+      message: fallbackMessage,
+      tone: 'active'
+    };
+  }
+
+  private async runEditActionBarAction(action: 'save' | 'discard'): Promise<void> {
+    const runtime = this.getEditActionBarRuntime();
+    if (!runtime || this.editActionBarPendingAction) {
+      return;
+    }
+
+    const state = runtime.getState();
+    if (!state.hasDirtyChanges) {
+      return;
+    }
+
+    const remoteSummary = resolveStatusBarRemoteSummary(this.resolveRemoteStatusDataProvider()?.getDebugState() ?? null);
+    const context: GridEditActionBarActionContext = {
+      dirtyChanges: state.changes,
+      summary: state.summary,
+      remote: remoteSummary
+    };
+    const fallbackMessage =
+      action === 'save' ? this.localeText.editActionBarSaved : this.localeText.editActionBarDiscarded;
+    const fallbackError =
+      action === 'save' ? this.localeText.editActionBarSaveFailed : this.localeText.editActionBarDiscardFailed;
+
+    this.editActionBarPendingAction = action;
+    this.editActionBarLastMessage = null;
+    this.editActionBarDirty = true;
+    this.scheduleRender();
+
+    try {
+      const result = action === 'save' ? await runtime.onSave(context) : await runtime.onDiscard(context);
+      const normalizedResult = this.normalizeEditActionBarResult(result, fallbackMessage);
+      this.editActionBarLastMessage =
+        normalizedResult.message.length > 0
+          ? {
+              text: normalizedResult.message,
+              tone: normalizedResult.completed ? normalizedResult.tone : 'danger'
+            }
+          : null;
+    } catch (error) {
+      const errorMessage = error instanceof Error && error.message.trim().length > 0 ? error.message.trim() : fallbackError;
+      this.editActionBarLastMessage = {
+        text: errorMessage,
+        tone: 'danger'
+      };
+    } finally {
+      this.editActionBarPendingAction = null;
+      this.editActionBarDirty = true;
+      this.scheduleRender();
+    }
+  }
+
+  private renderEditActionBar(): void {
+    if (!this.isEditActionBarEnabled()) {
+      this.editActionBarElement.style.display = 'none';
+      this.editActionBarMainElement.replaceChildren();
+      this.editActionBarActionsElement.replaceChildren();
+      this.editActionBarMessageElement.textContent = '';
+      this.editActionBarMessageElement.className = 'hgrid__edit-action-bar-message';
+      return;
+    }
+
+    const runtime = this.getEditActionBarRuntime();
+    if (!runtime) {
+      return;
+    }
+
+    const state = runtime.getState();
+    const remoteSummary = resolveStatusBarRemoteSummary(this.resolveRemoteStatusDataProvider()?.getDebugState() ?? null);
+    const hasActionableChanges = state.hasDirtyChanges;
+    const hasRemoteIssues = Boolean(remoteSummary && (remoteSummary.isPending || remoteSummary.hasError));
+    const hasMessage = Boolean(this.editActionBarLastMessage && this.editActionBarLastMessage.text.length > 0);
+    const shouldShow = hasActionableChanges || hasRemoteIssues || hasMessage || this.editActionBarPendingAction !== null;
+    if (!shouldShow) {
+      this.editActionBarElement.style.display = 'none';
+      this.editActionBarMainElement.replaceChildren();
+      this.editActionBarActionsElement.replaceChildren();
+      this.editActionBarMessageElement.textContent = '';
+      this.editActionBarMessageElement.className = 'hgrid__edit-action-bar-message';
+      return;
+    }
+
+    this.editActionBarElement.style.display = 'flex';
+
+    const summaryItems: HTMLElement[] = [];
+    if (state.summary.rowCount > 0 || state.summary.cellCount > 0) {
+      summaryItems.push(
+        this.createStatusBarItem(
+          'editActionBarDirty',
+          this.localizeText(this.localeText.editActionBarDirtySummary, {
+            rows: state.summary.rowCount,
+            cells: state.summary.cellCount
+          }),
+          'active'
+        )
+      );
+    }
+
+    if (remoteSummary?.isPending) {
+      summaryItems.push(
+        this.createStatusBarItem(
+          'editActionBarRemotePending',
+          this.localizeText(this.localeText.statusBarRemotePending, {
+            rows: remoteSummary.pendingRowCount,
+            cells: remoteSummary.pendingCellCount
+          }),
+          'active'
+        )
+      );
+    }
+
+    if (remoteSummary?.hasError) {
+      summaryItems.push(
+        this.createStatusBarItem(
+          'editActionBarRemoteError',
+          this.localizeText(this.localeText.statusBarRemoteError, {
+            count: remoteSummary.errorCount
+          }),
+          'danger'
+        )
+      );
+    }
+
+    const isBusy = this.editActionBarPendingAction !== null;
+    const saveLabel =
+      this.editActionBarPendingAction === 'save' ? this.localeText.editActionBarSaving : this.localeText.editActionBarSave;
+    const discardLabel =
+      this.editActionBarPendingAction === 'discard'
+        ? this.localeText.editActionBarDiscarding
+        : this.localeText.editActionBarDiscard;
+
+    this.editActionBarMainElement.replaceChildren(...summaryItems);
+    this.editActionBarActionsElement.replaceChildren(
+      this.createEditActionBarButton('discard', discardLabel, !hasActionableChanges, isBusy),
+      this.createEditActionBarButton('save', saveLabel, !hasActionableChanges, isBusy)
+    );
+
+    const shouldShowMessage = Boolean(
+      this.editActionBarLastMessage &&
+      this.editActionBarLastMessage.text.length > 0 &&
+      (!hasActionableChanges || this.editActionBarLastMessage.tone === 'danger')
+    );
+    this.editActionBarMessageElement.className = 'hgrid__edit-action-bar-message';
+    if (shouldShowMessage && this.editActionBarLastMessage) {
+      this.editActionBarMessageElement.textContent = this.editActionBarLastMessage.text;
+      if (this.editActionBarLastMessage.tone === 'active') {
+        this.editActionBarMessageElement.classList.add('hgrid__edit-action-bar-message--active');
+      } else if (this.editActionBarLastMessage.tone === 'danger') {
+        this.editActionBarMessageElement.classList.add('hgrid__edit-action-bar-message--danger');
+      }
+    } else {
+      this.editActionBarMessageElement.textContent = '';
+    }
   }
 
   private isStatusBarEnabled(): boolean {
@@ -6516,6 +6798,31 @@ export class DomRenderer implements GridRendererPort {
     event.preventDefault();
   };
 
+  private handleEditActionBarClick = (event: MouseEvent): void => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const actionButton = target.closest('[data-edit-action-bar-action]') as HTMLButtonElement | null;
+    if (!actionButton) {
+      return;
+    }
+
+    const action = actionButton.dataset.editActionBarAction;
+    if (action !== 'save' && action !== 'discard') {
+      return;
+    }
+
+    event.preventDefault();
+    void this.runEditActionBarAction(action);
+  };
+
+  private handleDirtyChangeEvent = (): void => {
+    this.editActionBarDirty = true;
+    this.scheduleRender();
+  };
+
   private handleToolPanelChange = (event: Event): void => {
     const target = event.target;
     if (target instanceof HTMLSelectElement && target.dataset.toolPanelColumnsPresetSelect === 'true') {
@@ -8414,6 +8721,7 @@ export class DomRenderer implements GridRendererPort {
     this.syncAriaGridMetrics();
     this.syncAriaActiveDescendant();
     this.renderFillHandle();
+    this.renderEditActionBar();
     this.renderStatusBar(false);
     this.scheduleMeasuredRowHeightPass();
     if (this.editSession) {
@@ -8503,9 +8811,42 @@ export class DomRenderer implements GridRendererPort {
     return prependCellContentPrefix(content, prefix);
   }
 
+  private createNextEditTransactionId(): string {
+    const timestampMs = Date.now();
+    this.editTransactionSequence += 1;
+    return `txn-${timestampMs}-${this.editTransactionSequence}`;
+  }
+
+  private createOriginalEditTransactionContext(
+    source: Exclude<EditCommitSource, 'undo' | 'redo'>,
+    transactionKind: Exclude<EditTransactionKind, 'historyReplay'>
+  ): EditCommitTransactionContext {
+    const transactionId = this.createNextEditTransactionId();
+    return {
+      source,
+      transactionId,
+      rootTransactionId: transactionId,
+      transactionKind,
+      transactionStep: 'apply'
+    };
+  }
+
+  private createHistoryReplayTransactionContext(
+    source: 'undo' | 'redo',
+    entry: EditHistoryEntry
+  ): EditCommitTransactionContext {
+    return {
+      source,
+      transactionId: this.createNextEditTransactionId(),
+      rootTransactionId: entry.rootTransactionId,
+      transactionKind: 'historyReplay',
+      transactionStep: source
+    };
+  }
+
   private createEditCommitEventPayload(
     payload: ClipboardCellUpdate | ClipboardCellUpdate[],
-    source: EditCommitSource
+    transaction: EditCommitTransactionContext
   ): EditCommitEventPayload {
     const updates = Array.isArray(payload) ? payload : [payload];
     const changes = updates.map((update) => ({
@@ -8531,8 +8872,12 @@ export class DomRenderer implements GridRendererPort {
       columnId: primaryChange.columnId,
       previousValue: primaryChange.previousValue,
       value: primaryChange.value,
-      source,
+      source: transaction.source,
       commitId: `edit-${timestampMs}-${this.editCommitSequence}`,
+      transactionId: transaction.transactionId,
+      rootTransactionId: transaction.rootTransactionId,
+      transactionKind: transaction.transactionKind,
+      transactionStep: transaction.transactionStep,
       timestampMs,
       timestamp: new Date(timestampMs).toISOString(),
       rowCount: rowKeys.size,
@@ -9005,13 +9350,9 @@ export class DomRenderer implements GridRendererPort {
   }
 
   private recordEditHistoryEntry(
-    source: Exclude<EditCommitSource, 'undo' | 'redo'>,
+    transaction: EditCommitTransactionContext,
     updates: ClipboardCellUpdate[]
-  ): void {
-    if (!this.isUndoRedoEnabled() || updates.length === 0) {
-      return;
-    }
-
+  ): EditHistoryEntry | null {
     const historyUpdates: EditHistoryUpdate[] = [];
     for (let index = 0; index < updates.length; index += 1) {
       const update = updates[index];
@@ -9028,18 +9369,27 @@ export class DomRenderer implements GridRendererPort {
     }
 
     if (historyUpdates.length === 0) {
-      return;
+      return null;
     }
 
-    this.undoStack.push({
-      source,
+    if (!this.isUndoRedoEnabled()) {
+      return null;
+    }
+
+    const entry: EditHistoryEntry = {
+      transactionId: transaction.transactionId,
+      rootTransactionId: transaction.rootTransactionId,
+      transactionKind: transaction.transactionKind as Exclude<EditTransactionKind, 'historyReplay'>,
+      source: transaction.source as Exclude<EditCommitSource, 'undo' | 'redo'>,
       updates: historyUpdates
-    });
+    };
+    this.undoStack.push(entry);
     const limit = this.getUndoRedoLimit();
     if (this.undoStack.length > limit) {
       this.undoStack.splice(0, this.undoStack.length - limit);
     }
     this.redoStack = [];
+    return entry;
   }
 
   private resolveDataIndexByRowKey(rowKey: RowKey, dataIndexHint: number): number {
@@ -9231,7 +9581,10 @@ export class DomRenderer implements GridRendererPort {
     }
 
     if (appliedUpdates.length > 0) {
-      this.eventBus.emit('editCommit', this.createEditCommitEventPayload(appliedUpdates, direction));
+      this.eventBus.emit(
+        'editCommit',
+        this.createEditCommitEventPayload(appliedUpdates, this.createHistoryReplayTransactionContext(direction, entry))
+      );
     }
 
     this.scheduleRender();
@@ -9784,10 +10137,122 @@ export class DomRenderer implements GridRendererPort {
     this.editorHostElement.classList.toggle('hgrid__editor-host--invalid', state.isInvalid);
     this.editorHostElement.classList.toggle('hgrid__editor-host--pending', state.isPending);
     this.editorInputElement.disabled = state.isDisabled;
+    this.editorSelectElement.disabled = state.isDisabled;
     this.editorMessageElement.textContent = state.message;
     if (state.nextInputValue !== null) {
-      this.editorInputElement.value = state.nextInputValue;
+      this.setEditorControlValue(state.nextInputValue);
     }
+  }
+
+  private getActiveEditorDefinition(): ResolvedColumnEditor | null {
+    if (!this.editSession) {
+      return null;
+    }
+
+    return resolveColumnEditor(this.editSession.column);
+  }
+
+  private getActiveEditorControl(): HTMLInputElement | HTMLSelectElement {
+    const activeEditor = this.getActiveEditorDefinition();
+    if (activeEditor && (activeEditor.type === 'boolean' || activeEditor.type === 'select')) {
+      return this.editorSelectElement;
+    }
+
+    return this.editorInputElement;
+  }
+
+  private configureEditorControl(session: EditSession): void {
+    const editor = resolveColumnEditor(session.column);
+    const usesSelect = editor.type === 'boolean' || editor.type === 'select';
+    this.editorInputElement.style.display = usesSelect ? 'none' : '';
+    this.editorSelectElement.style.display = usesSelect ? '' : 'none';
+    this.editorInputElement.disabled = false;
+    this.editorSelectElement.disabled = false;
+
+    if (usesSelect) {
+      this.editorSelectElement.replaceChildren();
+      const emptyOption = document.createElement('option');
+      emptyOption.value = '';
+      emptyOption.textContent = editor.placeholder;
+      this.editorSelectElement.append(emptyOption);
+      for (let index = 0; index < editor.options.length; index += 1) {
+        const option = editor.options[index];
+        const optionElement = document.createElement('option');
+        optionElement.value = String(index);
+        optionElement.textContent = option.label;
+        this.editorSelectElement.append(optionElement);
+      }
+      this.editorSelectElement.value = formatEditorInputValue(session.column, session.originalValue);
+      return;
+    }
+
+    this.editorInputElement.type = editor.type === 'number' || editor.type === 'date' ? editor.type : 'text';
+    this.editorInputElement.placeholder = editor.placeholder;
+    this.editorInputElement.inputMode = editor.inputMode ?? '';
+    this.editorInputElement.setAttribute('autocomplete', editor.autoComplete ?? 'off');
+    if (editor.pattern) {
+      this.editorInputElement.pattern = editor.pattern;
+    } else {
+      this.editorInputElement.removeAttribute('pattern');
+    }
+    if (typeof editor.min === 'number') {
+      this.editorInputElement.min = String(editor.min);
+    } else {
+      this.editorInputElement.removeAttribute('min');
+    }
+    if (typeof editor.max === 'number') {
+      this.editorInputElement.max = String(editor.max);
+    } else {
+      this.editorInputElement.removeAttribute('max');
+    }
+    if (typeof editor.step === 'number') {
+      this.editorInputElement.step = String(editor.step);
+    } else {
+      this.editorInputElement.removeAttribute('step');
+    }
+    this.editorInputElement.value = formatEditorInputValue(session.column, session.originalValue);
+  }
+
+  private getEditorControlValue(): string {
+    const activeControl = this.getActiveEditorControl();
+    return activeControl.value;
+  }
+
+  private setEditorControlValue(value: string): void {
+    const activeControl = this.getActiveEditorControl();
+    activeControl.value = value;
+  }
+
+  private focusEditorControl(): void {
+    const activeControl = this.getActiveEditorControl();
+    activeControl.focus();
+    if (activeControl instanceof HTMLInputElement) {
+      activeControl.select();
+    }
+  }
+
+  private getEditorControlValidationMessage(): string | null {
+    const activeEditor = this.getActiveEditorDefinition();
+    const activeControl = this.getActiveEditorControl();
+    if (!activeEditor || activeControl instanceof HTMLSelectElement) {
+      return null;
+    }
+
+    const shouldUseNativeValidation =
+      activeEditor.type === 'number' ||
+      Boolean(activeEditor.pattern) ||
+      typeof activeEditor.min === 'number' ||
+      typeof activeEditor.max === 'number' ||
+      typeof activeEditor.step === 'number';
+    if (!shouldUseNativeValidation) {
+      return null;
+    }
+
+    if (typeof activeControl.checkValidity === 'function' && !activeControl.checkValidity()) {
+      return activeControl.validationMessage || this.localeText.validationFailed;
+    }
+
+    return null;
   }
 
   private startEditingAtCell(
@@ -9803,8 +10268,7 @@ export class DomRenderer implements GridRendererPort {
       const isSameCell = this.editSession.rowIndex === rowIndex && this.editSession.colIndex === colIndex;
       if (isSameCell) {
         this.syncEditorOverlayPosition();
-        this.editorInputElement.focus();
-        this.editorInputElement.select();
+        this.focusEditorControl();
         return true;
       }
 
@@ -9833,12 +10297,12 @@ export class DomRenderer implements GridRendererPort {
     const originalValue = getColumnValue(column, row);
 
     this.editSession = createEditSession(rowIndex, dataIndex, colIndex, column, originalValue);
+    this.configureEditorControl(this.editSession);
     this.editValidationTicket += 1;
     this.isEditValidationPending = false;
-    this.applyEditorOverlayState(createOpenEditorOverlayState(originalValue));
+    this.applyEditorOverlayState(createOpenEditorOverlayState(formatEditorInputValue(column, originalValue)));
     this.syncEditorOverlayPosition();
-    this.editorInputElement.focus();
-    this.editorInputElement.select();
+    this.focusEditorControl();
 
     this.eventBus.emit('editStart', {
       rowIndex,
@@ -9856,6 +10320,7 @@ export class DomRenderer implements GridRendererPort {
     }
 
     const currentSession = this.editSession;
+    const currentEditorValue = this.getEditorControlValue();
     this.editValidationTicket += 1;
     this.isEditValidationPending = false;
     this.editSession = null;
@@ -9866,7 +10331,7 @@ export class DomRenderer implements GridRendererPort {
         rowIndex: currentSession.rowIndex,
         dataIndex: currentSession.dataIndex,
         columnId: currentSession.column.id,
-        value: this.editorInputElement.value,
+        value: currentEditorValue,
         reason
       });
     }
@@ -9878,10 +10343,20 @@ export class DomRenderer implements GridRendererPort {
       return;
     }
 
-    const nextValue = normalizeEditorInputValue(currentSession.column, this.editorInputElement.value);
+    const rawInputValue = this.getEditorControlValue();
+    const nextValue = normalizeEditorInputValue(currentSession.column, rawInputValue);
     const row = this.resolveRow(currentSession.dataIndex);
     const validateEdit = this.options.validateEdit;
     const currentValidationTicket = ++this.editValidationTicket;
+    const editorValidationMessage = this.getEditorControlValidationMessage();
+
+    if (editorValidationMessage) {
+      this.applyEditorOverlayState(createInvalidEditorOverlayState(editorValidationMessage));
+      if (shouldRefocusEditorAfterValidationFailure(trigger)) {
+        this.focusEditorControl();
+      }
+      return;
+    }
 
     if (validateEdit) {
       const validationResult = validateEdit({
@@ -9896,9 +10371,9 @@ export class DomRenderer implements GridRendererPort {
       if (validationResult && typeof (validationResult as Promise<unknown>).then === 'function') {
         this.isEditValidationPending = true;
         this.applyEditorOverlayState(createPendingEditorOverlayState());
-        let resolvedMessage: string | null | undefined = null;
+        let resolvedMessage: string | null = null;
         try {
-          resolvedMessage = await validationResult;
+          resolvedMessage = resolveEditValidationMessage(await validationResult);
         } catch (error) {
           resolvedMessage = error instanceof Error && error.message ? error.message : this.localeText.validationFailed;
         }
@@ -9909,25 +10384,29 @@ export class DomRenderer implements GridRendererPort {
         this.isEditValidationPending = false;
         this.applyEditorOverlayState(createActiveEditorOverlayState());
 
-        if (typeof resolvedMessage === 'string' && resolvedMessage.length > 0) {
+        if (resolvedMessage) {
           this.applyEditorOverlayState(createInvalidEditorOverlayState(resolvedMessage));
           if (shouldRefocusEditorAfterValidationFailure(trigger)) {
-            this.editorInputElement.focus();
-            this.editorInputElement.select();
+            this.focusEditorControl();
           }
           return;
         }
-      } else if (typeof validationResult === 'string' && validationResult.length > 0) {
-        this.applyEditorOverlayState(createInvalidEditorOverlayState(validationResult));
-        if (shouldRefocusEditorAfterValidationFailure(trigger)) {
-          this.editorInputElement.focus();
-          this.editorInputElement.select();
+      } else {
+        const resolvedMessage = resolveEditValidationMessage(validationResult as string | EditValidationIssue | null | undefined);
+        if (!resolvedMessage) {
+          this.applyEditorOverlayState(createActiveEditorOverlayState());
+        } else {
+          this.applyEditorOverlayState(createInvalidEditorOverlayState(resolvedMessage));
+          if (shouldRefocusEditorAfterValidationFailure(trigger)) {
+            this.focusEditorControl();
+          }
+          return;
         }
-        return;
       }
+    } else {
+      this.applyEditorOverlayState(createActiveEditorOverlayState());
     }
 
-    this.applyEditorOverlayState(createActiveEditorOverlayState());
     let committedValue = nextValue;
     if (currentSession.column.valueSetter) {
       const rowForSetter = this.options.dataProvider.getRow
@@ -9938,7 +10417,8 @@ export class DomRenderer implements GridRendererPort {
     }
     this.options.dataProvider.setValue(currentSession.dataIndex, currentSession.column.id, committedValue);
     const committedRowKey = this.resolveStableRowKeyFromLoadedRow(currentSession.dataIndex, row);
-    this.recordEditHistoryEntry('editor', [
+    const transaction = this.createOriginalEditTransactionContext('editor', 'singleCell');
+    this.recordEditHistoryEntry(transaction, [
       {
         rowIndex: currentSession.rowIndex,
         dataIndex: currentSession.dataIndex,
@@ -9960,7 +10440,7 @@ export class DomRenderer implements GridRendererPort {
           previousValue: currentSession.originalValue,
           value: committedValue
         },
-        'editor'
+        transaction
       )
     );
 
@@ -10621,7 +11101,15 @@ export class DomRenderer implements GridRendererPort {
   }
 
   private hasPendingRenderWork(): boolean {
-    return this.layoutDirty || this.dataDirty || this.selectionDirty || this.themeDirty || this.scrollDirty || this.statusBarDirty;
+    return (
+      this.layoutDirty ||
+      this.dataDirty ||
+      this.selectionDirty ||
+      this.themeDirty ||
+      this.scrollDirty ||
+      this.editActionBarDirty ||
+      this.statusBarDirty
+    );
   }
 
   private applyPendingThemeTokens(): void {
@@ -10648,6 +11136,7 @@ export class DomRenderer implements GridRendererPort {
 
     const shouldRunLayout = this.layoutDirty;
     const shouldRunRows = this.scrollDirty || this.dataDirty || this.selectionDirty;
+    const shouldRunActionBarOnly = this.editActionBarDirty;
     const shouldRunStatusBarOnly = this.statusBarDirty;
     const shouldForcePoolRebuild = this.shouldForcePoolRebuild;
 
@@ -10655,6 +11144,7 @@ export class DomRenderer implements GridRendererPort {
     this.dataDirty = false;
     this.selectionDirty = false;
     this.scrollDirty = false;
+    this.editActionBarDirty = false;
     this.statusBarDirty = false;
     this.shouldForcePoolRebuild = false;
 
@@ -10668,7 +11158,10 @@ export class DomRenderer implements GridRendererPort {
       return;
     }
 
-    if (shouldRunStatusBarOnly) {
+    if (shouldRunActionBarOnly || shouldRunStatusBarOnly) {
+      if (shouldRunActionBarOnly) {
+        this.renderEditActionBar();
+      }
       this.renderStatusBar(false);
     }
   }
@@ -11464,8 +11957,9 @@ export class DomRenderer implements GridRendererPort {
     this.teardownFillHandleSession();
     const updates = this.applyRangeFill(sourceRectangle, finalPreviewRectangle);
     if (updates.length > 0) {
-      this.recordEditHistoryEntry('fillHandle', updates);
-      this.eventBus.emit('editCommit', this.createEditCommitEventPayload(updates, 'fillHandle'));
+      const transaction = this.createOriginalEditTransactionContext('fillHandle', 'fillRange');
+      this.recordEditHistoryEntry(transaction, updates);
+      this.eventBus.emit('editCommit', this.createEditCommitEventPayload(updates, transaction));
     }
 
     this.markSelectionDirty();
@@ -12516,6 +13010,10 @@ export class DomRenderer implements GridRendererPort {
 
     const plainText = clipboardData.getData('text/plain');
     if (typeof plainText !== 'string' || plainText.length === 0) {
+      const htmlText = clipboardData.getData('text/html');
+      if (typeof htmlText === 'string' && htmlText.length > 0) {
+        event.preventDefault();
+      }
       return;
     }
 
@@ -12525,8 +13023,9 @@ export class DomRenderer implements GridRendererPort {
       return;
     }
 
-    this.recordEditHistoryEntry('clipboard', updates);
-    this.eventBus.emit('editCommit', this.createEditCommitEventPayload(updates, 'clipboard'));
+    const transaction = this.createOriginalEditTransactionContext('clipboard', 'clipboardRange');
+    this.recordEditHistoryEntry(transaction, updates);
+    this.eventBus.emit('editCommit', this.createEditCommitEventPayload(updates, transaction));
     event.preventDefault();
   };
 
@@ -12608,6 +13107,14 @@ export class DomRenderer implements GridRendererPort {
   private handleEditorInput = (): void => {
     if (!this.editSession) {
       return;
+    }
+
+    const activeEditor = this.getActiveEditorDefinition();
+    if (activeEditor && activeEditor.type === 'masked') {
+      const sanitizedValue = sanitizeEditorInputValue(this.editSession.column, this.editorInputElement.value);
+      if (sanitizedValue !== this.editorInputElement.value) {
+        this.editorInputElement.value = sanitizedValue;
+      }
     }
 
     if (!this.editorHostElement.classList.contains('hgrid__editor-host--invalid')) {

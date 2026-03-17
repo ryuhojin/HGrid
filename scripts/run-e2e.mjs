@@ -4,6 +4,8 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { startStaticServer } from './static-server.mjs';
 
+const TEXT_EDITOR_SELECTOR = '.hgrid__editor-input:not(.hgrid__editor-input--select)';
+
 async function waitAnimationFrame(page) {
   await page.evaluate(
     () =>
@@ -3096,6 +3098,21 @@ async function runExample34Checks(page, serverUrl, pageErrors) {
   assert.equal(afterPasteSnapshot.row2.status, 'idle', 'example34 should paste second row status');
   assert.equal(afterPasteSnapshot.hasInjectedHtmlNode, false, 'example34 should not inject HTML nodes from clipboard');
 
+  await page.evaluate(async () => {
+    const api = window.__example34;
+    if (!api || typeof api.simulateHtmlOnlyPaste !== 'function') {
+      throw new Error('Missing window.__example34.simulateHtmlOnlyPaste');
+    }
+    await api.simulateHtmlOnlyPaste();
+  });
+  await waitAnimationFrame(page);
+
+  const afterHtmlOnlySnapshot = await readSnapshot();
+  assert.equal(afterHtmlOnlySnapshot.row1.name, '<b>Safe</b>', 'example34 html-only paste should not overwrite name');
+  assert.equal(afterHtmlOnlySnapshot.row1.status, 'active', 'example34 html-only paste should not overwrite status');
+  assert.equal(afterHtmlOnlySnapshot.row2.name, 'Literal', 'example34 html-only paste should keep second row name');
+  assert.equal(afterHtmlOnlySnapshot.hasInjectedHtmlNode, false, 'example34 html-only paste should not inject HTML nodes');
+
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
@@ -3409,7 +3426,7 @@ async function runExample39Checks(page, serverUrl, pageErrors) {
 
   await page.keyboard.press('F2');
   await page.waitForSelector('.hgrid__editor-host--visible', { timeout: 10_000, state: 'attached' });
-  await page.fill('.hgrid__editor-input', 'Customer-1-Edited');
+  await page.fill(TEXT_EDITOR_SELECTOR, 'Customer-1-Edited');
   await page.keyboard.press('Tab');
   await waitAnimationFrame(page);
   await waitAnimationFrame(page);
@@ -3427,7 +3444,7 @@ async function runExample39Checks(page, serverUrl, pageErrors) {
     .textContent();
   assert.equal(editedNameCellText, 'Customer-1-Edited', 'example39 name should be committed by Tab');
 
-  await page.fill('.hgrid__editor-input', '999');
+  await page.fill(TEXT_EDITOR_SELECTOR, '999');
   await page.keyboard.press('Shift+Tab');
   await waitAnimationFrame(page);
   await waitAnimationFrame(page);
@@ -4249,9 +4266,9 @@ async function runExample58Checks(page, serverUrl, pageErrors) {
   });
 
   await page.locator('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="name"]').dblclick();
-  await page.waitForSelector('.hgrid__editor-input', { timeout: 10_000, state: 'attached' });
-  await page.locator('.hgrid__editor-input').fill('Remote-1-Edited');
-  await page.locator('.hgrid__editor-input').press('Enter');
+  await page.waitForSelector(TEXT_EDITOR_SELECTOR, { timeout: 10_000, state: 'attached' });
+  await page.locator(TEXT_EDITOR_SELECTOR).fill('Remote-1-Edited');
+  await page.locator(TEXT_EDITOR_SELECTOR).press('Enter');
   await page.waitForFunction(() => window.__example58?.getPendingChanges?.().length === 1, null, { timeout: 20_000 });
 
   await page.evaluate(() => window.__example58.saveChanges());
@@ -5040,6 +5057,246 @@ async function runExample83Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample84Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example84.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example84?.grid), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="account"]', {
+    timeout: 15_000,
+    state: 'attached'
+  });
+
+  await page.locator('.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="account"]').dblclick();
+  await page.waitForSelector(TEXT_EDITOR_SELECTOR, { timeout: 10_000, state: 'attached' });
+  await page.locator(TEXT_EDITOR_SELECTOR).fill('Account-1-Edited');
+  await page.locator(TEXT_EDITOR_SELECTOR).press('Enter');
+  await page.waitForFunction(() => {
+    const flag = document.getElementById('dirty-flag')?.textContent;
+    const rows = document.getElementById('dirty-rows')?.textContent;
+    const cells = document.getElementById('dirty-cells')?.textContent;
+    return flag === 'true' && rows === '1' && cells === '1';
+  }, null, { timeout: 10_000 });
+
+  await page.click('#accept-dirty');
+  await page.waitForFunction(() => {
+    const flag = document.getElementById('dirty-flag')?.textContent;
+    const rows = document.getElementById('dirty-rows')?.textContent;
+    const cells = document.getElementById('dirty-cells')?.textContent;
+    return flag === 'false' && rows === '0' && cells === '0';
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample85Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example85.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example85?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.click('#editFirstName');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example85?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.rows?.[0]?.name === 'Customer-1-Edited' &&
+      snapshot.lastEdit?.source === 'editor' &&
+      snapshot.lastEdit?.transactionKind === 'singleCell' &&
+      snapshot.lastEdit?.transactionStep === 'apply' &&
+      snapshot.lastEdit?.transactionId === snapshot.lastEdit?.rootTransactionId
+    );
+  }, null, { timeout: 10_000 });
+  const editorSnapshot = await page.evaluate(() => window.__example85.getSnapshot());
+
+  await page.click('#undoAction');
+  await page.waitForFunction(
+    ({ rootTransactionId }) => {
+      const snapshot = window.__example85?.getSnapshot?.();
+      return (
+        snapshot &&
+        snapshot.rows?.[0]?.name === 'Customer-1' &&
+        snapshot.lastEdit?.source === 'undo' &&
+        snapshot.lastEdit?.transactionKind === 'historyReplay' &&
+        snapshot.lastEdit?.transactionStep === 'undo' &&
+        snapshot.lastEdit?.rootTransactionId === rootTransactionId
+      );
+    },
+    { rootTransactionId: editorSnapshot.lastEdit.rootTransactionId },
+    { timeout: 10_000 }
+  );
+
+  await page.click('#redoAction');
+  await page.waitForFunction(
+    ({ rootTransactionId }) => {
+      const snapshot = window.__example85?.getSnapshot?.();
+      return (
+        snapshot &&
+        snapshot.rows?.[0]?.name === 'Customer-1-Edited' &&
+        snapshot.lastEdit?.source === 'redo' &&
+        snapshot.lastEdit?.transactionKind === 'historyReplay' &&
+        snapshot.lastEdit?.transactionStep === 'redo' &&
+        snapshot.lastEdit?.rootTransactionId === rootTransactionId
+      );
+    },
+    { rootTransactionId: editorSnapshot.lastEdit.rootTransactionId },
+    { timeout: 10_000 }
+  );
+
+  await page.click('#pasteStatusBlock');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example85?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.rows?.[0]?.status === 'active' &&
+      snapshot.rows?.[0]?.note === 'copied' &&
+      snapshot.rows?.[1]?.status === 'hold' &&
+      snapshot.rows?.[1]?.note === 'manual' &&
+      snapshot.lastEdit?.source === 'clipboard' &&
+      snapshot.lastEdit?.transactionKind === 'clipboardRange' &&
+      snapshot.lastEdit?.transactionStep === 'apply'
+    );
+  }, null, { timeout: 10_000 });
+  const clipboardSnapshot = await page.evaluate(() => window.__example85.getSnapshot());
+
+  await page.click('#undoAction');
+  await page.waitForFunction(
+    ({ rootTransactionId }) => {
+      const snapshot = window.__example85?.getSnapshot?.();
+      return (
+        snapshot &&
+        snapshot.rows?.[0]?.status === 'draft' &&
+        snapshot.rows?.[0]?.note === 'queued' &&
+        snapshot.rows?.[1]?.status === 'review' &&
+        snapshot.rows?.[1]?.note === 'awaiting' &&
+        snapshot.lastEdit?.source === 'undo' &&
+        snapshot.lastEdit?.rootTransactionId === rootTransactionId
+      );
+    },
+    { rootTransactionId: clipboardSnapshot.lastEdit.rootTransactionId },
+    { timeout: 10_000 }
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample86Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example86.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example86?.getSnapshot), null, { timeout: 15_000 });
+
+  const csvSummary = await page.evaluate(async () => window.__example86.runCsvSelectionExport());
+  assert.equal(csvSummary.format, 'csv', 'example86 csv export should use csv format');
+  assert.equal(csvSummary.scope, 'selection', 'example86 csv export should use selection scope');
+  assert.equal(csvSummary.rowCount, 2, 'example86 csv selection export should include two rows');
+  assert.equal(csvSummary.firstLine, 'Name,Status,Score', 'example86 csv selection export should include selected headers');
+
+  const tsvSummary = await page.evaluate(async () => window.__example86.runTsvVisibleExport());
+  assert.equal(tsvSummary.format, 'tsv', 'example86 tsv export should use tsv format');
+  assert.equal(tsvSummary.scope, 'visible', 'example86 tsv export should use visible scope');
+  assert.ok(tsvSummary.rowCount >= 6, 'example86 tsv visible export should include visible rows');
+
+  const delegatedSummary = await page.evaluate(async () => window.__example86.runDelegatedXlsxExport());
+  assert.equal(delegatedSummary.delegated, true, 'example86 xlsx export should delegate on large row count');
+  assert.ok(
+    typeof delegatedSummary.downloadUrl === 'string' && delegatedSummary.downloadUrl.includes('/downloads/policy-export.xlsx'),
+    'example86 delegated xlsx export should expose download url'
+  );
+  assert.ok(
+    Array.isArray(delegatedSummary.progress) &&
+      delegatedSummary.progress.some((entry) => entry.status === 'delegated'),
+    'example86 delegated xlsx export should report delegated progress'
+  );
+
+  const skipSummary = await page.evaluate(async () => window.__example86.runConflictImport('skipConflicts'));
+  assert.equal(skipSummary.result.updatedRows, 0, 'example86 skipConflicts should not update rows');
+  assert.equal(skipSummary.result.conflictRows, 2, 'example86 skipConflicts should count conflicts');
+  assert.equal(skipSummary.result.issues.length, 2, 'example86 skipConflicts should report conflict issues');
+  assert.equal(skipSummary.snapshot.row0.name, 'Ahn', 'example86 skipConflicts should keep row0 name');
+  assert.equal(skipSummary.snapshot.row1.status, 'idle', 'example86 skipConflicts should keep row1 status');
+
+  const overwriteSummary = await page.evaluate(async () => window.__example86.runConflictImport('overwrite'));
+  assert.equal(overwriteSummary.result.updatedRows, 2, 'example86 overwrite should update conflicting rows');
+  assert.equal(overwriteSummary.result.conflictRows, 2, 'example86 overwrite should still report conflict count');
+  assert.equal(overwriteSummary.result.issues.length, 0, 'example86 overwrite should not create conflict issues');
+  assert.equal(overwriteSummary.snapshot.row0.name, 'Ahn Imported', 'example86 overwrite should apply imported row0');
+  assert.equal(overwriteSummary.snapshot.row1.status, 'hold', 'example86 overwrite should apply imported row1');
+
+  const reportOnlySummary = await page.evaluate(async () => window.__example86.runConflictImport('reportOnly'));
+  assert.equal(reportOnlySummary.result.updatedRows, 0, 'example86 reportOnly should not update rows');
+  assert.equal(reportOnlySummary.result.conflictRows, 2, 'example86 reportOnly should report conflicts');
+  assert.equal(reportOnlySummary.snapshot.row0.name, 'Ahn', 'example86 reportOnly should keep row0 unchanged');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample87Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example87.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example87?.getSnapshot), null, { timeout: 15_000 });
+
+  const initialSnapshot = await page.evaluate(() => window.__example87.getSnapshot());
+  assert.equal(initialSnapshot.policy.formulaSupport, 'plugin-only', 'example87 should expose plugin-only formula policy');
+  assert.equal(initialSnapshot.row0.subtotal, '240.00', 'example87 should render initial derived subtotal');
+  assert.equal(initialSnapshot.row0.grandTotal, '264.00', 'example87 should render initial derived grand total');
+
+  await page.evaluate(async () => window.__example87.applyBaseValue(0, 'quantity', 5));
+  await page.waitForFunction(() => {
+    const snapshot = window.__example87?.getSnapshot?.();
+    return snapshot && snapshot.row0.quantity === '5' && snapshot.row0.subtotal === '600.00' && snapshot.row0.grandTotal === '660.00';
+  }, null, { timeout: 10_000 });
+
+  await page.evaluate(async () => window.__example87.applyBaseValue(1, 'unitPrice', 150.5));
+  await page.waitForFunction(() => {
+    const snapshot = window.__example87?.getSnapshot?.();
+    return snapshot && snapshot.row1.unitPrice === '150.5' && snapshot.row1.subtotal === '451.50' && snapshot.row1.grandTotal === '487.62';
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample88Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example88.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example88?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.evaluate(async () => window.__example88.applyCellChange(0, 'budget', 1500));
+  await page.waitForFunction(() => {
+    const snapshot = window.__example88?.getSnapshot?.();
+    return snapshot && snapshot.hasDirtyChanges === true && snapshot.dirtySummary.cellCount === 1;
+  }, null, { timeout: 10_000 });
+  await page.waitForFunction(() => window.__example88?.getSnapshot?.().actionBar.visible === true, null, { timeout: 10_000 });
+
+  const initialDirtySnapshot = await page.evaluate(() => window.__example88.getSnapshot());
+  assert.equal(initialDirtySnapshot.actionBar.visible, true, 'example88 action bar should be visible after edit');
+  assert.equal(initialDirtySnapshot.actionBar.saveDisabled, false, 'example88 save should be enabled after edit');
+  assert.equal(initialDirtySnapshot.rows[0].budget, 1500, 'example88 first edit should update local row');
+
+  await page.evaluate(() => window.__example88.setFailNextSave(true));
+  await page.click('[data-edit-action-bar-action="save"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example88?.getSnapshot?.();
+    return snapshot && snapshot.hasDirtyChanges === true && snapshot.actionBar.message.includes('Server rejected changes');
+  }, null, { timeout: 10_000 });
+
+  await page.click('[data-edit-action-bar-action="discard"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example88?.getSnapshot?.();
+    return snapshot && snapshot.hasDirtyChanges === false && snapshot.rows[0].budget === 1200;
+  }, null, { timeout: 10_000 });
+
+  await page.evaluate(async () => window.__example88.applyCellChange(1, 'status', 'active'));
+  await page.waitForFunction(() => window.__example88?.getSnapshot?.().hasDirtyChanges === true, null, { timeout: 10_000 });
+
+  await page.click('[data-edit-action-bar-action="save"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example88?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.hasDirtyChanges === false &&
+      snapshot.rows[1].status === 'active' &&
+      snapshot.lastSavePayload &&
+      snapshot.lastSavePayload.summary.rowCount === 1 &&
+      snapshot.actionBar.message.includes('Changes saved')
+    );
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function runExample66Checks(page, serverUrl, pageErrors) {
   await page.goto(`${serverUrl}/examples/example66.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(window.__example66?.getSnapshot), null, { timeout: 15_000 });
@@ -5556,6 +5813,16 @@ async function main() {
     await runExample82Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample83Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample84Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample85Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample86Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample87Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample88Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample64Checks(page, server.url, pageErrors);
     pageErrors.length = 0;

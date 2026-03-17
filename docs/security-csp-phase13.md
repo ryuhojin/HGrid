@@ -22,6 +22,7 @@
 ### 2) XSS 기본값 + opt-in HTML
 
 - 기본 셀 렌더는 기존과 동일하게 `textContent`를 사용한다.
+- clipboard paste는 편집 overlay 밖에서는 `text/plain`만 소비하고, `text/html` only payload는 no-op + `preventDefault()`로 처리한다.
 - 컬럼 단위 opt-in:
   - `ColumnDef.unsafeHtml?: boolean`
   - `ColumnDef.sanitizeHtml?: UnsafeHtmlSanitizer`
@@ -44,7 +45,8 @@
   - `rowIndex`, `dataIndex`, `rowKey`
   - `columnId`, `previousValue`, `value`
   - `source: 'editor' | 'clipboard' | 'fillHandle' | 'undo' | 'redo'`
-  - `commitId`, `timestampMs`, `timestamp`
+  - `commitId`, `transactionId`, `rootTransactionId`, `transactionKind`, `transactionStep`
+  - `timestampMs`, `timestamp`
   - `rowCount`, `cellCount`, `changes[]`
 - 엔터프라이즈 감사 훅:
   - `GridOptions.onAuditLog?: EditCommitAuditLogger`
@@ -54,6 +56,7 @@
 
 - unit (`packages/grid-core/test/grid.spec.ts`)
   - 기본 text cell은 literal text 유지
+  - html-only clipboard payload가 body paste 경로에서 무시되는지 검증
   - `unsafeHtml` + sanitize 훅 적용 시 HTML 렌더/유해 태그 제거 검증
   - `editCommit` 표준 payload/`onAuditLog` payload 검증
 - e2e (`scripts/run-e2e.mjs`)

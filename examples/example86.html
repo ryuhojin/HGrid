@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 86 - Clipboard Import Export Policy</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 8px 12px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #summary,
+      #log {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1080px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 86 - Clipboard Import Export Policy</h1>
+    <div class="controls">
+      <button id="select-range" type="button">select B1:D2</button>
+      <button id="export-csv" type="button">export csv selection</button>
+      <button id="export-tsv" type="button">export tsv visible</button>
+      <button id="export-xlsx-delegated" type="button">export xlsx delegated</button>
+      <button id="import-overwrite" type="button">import overwrite</button>
+      <button id="import-skip" type="button">import skip conflicts</button>
+      <button id="import-report" type="button">import report only</button>
+      <button id="reset" type="button">reset rows</button>
+      <button id="inspect" type="button">inspect</button>
+    </div>
+    <pre id="summary">Ready</pre>
+    <pre id="log">Ready</pre>
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script src="../packages/grid-plugins/excel/node_modules/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="../packages/grid-plugins/excel/dist/hgrid-excel.umd.js"></script>
+    <script>
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function cloneRows(rows) {
+        return rows.map((row) => ({ ...row }));
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'status', header: 'Status', width: 140, type: 'text', editable: true },
+        { id: 'score', header: 'Score', width: 120, type: 'number', editable: true },
+        { id: 'region', header: 'Region', width: 130, type: 'text', editable: true },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date', editable: true }
+      ];
+
+      const baseRows = [
+        { id: 1, name: 'Ahn', status: 'active', score: 120, region: 'KR', updatedAt: '2026-03-12T09:00:00.000Z' },
+        { id: 2, name: 'Park', status: 'idle', score: 220, region: 'US', updatedAt: '2026-03-12T10:00:00.000Z' },
+        { id: 3, name: 'Kim', status: 'review', score: 320, region: 'JP', updatedAt: '2026-03-12T11:00:00.000Z' },
+        { id: 4, name: 'Lee', status: 'draft', score: 420, region: 'DE', updatedAt: '2026-03-12T12:00:00.000Z' },
+        { id: 5, name: 'Choi', status: 'active', score: 520, region: 'KR', updatedAt: '2026-03-12T13:00:00.000Z' },
+        { id: 6, name: 'Han', status: 'idle', score: 620, region: 'US', updatedAt: '2026-03-12T14:00:00.000Z' }
+      ];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: cloneRows(baseRows),
+        height: 280,
+        rowHeight: 28,
+        overscan: 4,
+        overscanCols: 2
+      });
+
+      const excelPlugin = HGridExcel.createExcelPlugin({
+        defaultSheetName: 'Policy',
+        maxClientExportRows: 3
+      });
+
+      const summaryElement = document.getElementById('summary');
+      const logElement = document.getElementById('log');
+      let lastExportSummary = null;
+      let lastImportSummary = null;
+
+      function readCell(rowIndex, columnId) {
+        const selector = '.hgrid__row[data-row-index="' + rowIndex + '"] .hgrid__cell[data-column-id="' + columnId + '"]';
+        const cell = document.querySelector(selector);
+        return cell && typeof cell.textContent === 'string' ? cell.textContent.trim() : '';
+      }
+
+      function getSnapshot() {
+        return {
+          row0: {
+            id: readCell(0, 'id'),
+            name: readCell(0, 'name'),
+            status: readCell(0, 'status'),
+            score: readCell(0, 'score'),
+            region: readCell(0, 'region')
+          },
+          row1: {
+            id: readCell(1, 'id'),
+            name: readCell(1, 'name'),
+            status: readCell(1, 'status'),
+            score: readCell(1, 'score'),
+            region: readCell(1, 'region')
+          },
+          row2: {
+            id: readCell(2, 'id'),
+            name: readCell(2, 'name'),
+            status: readCell(2, 'status'),
+            score: readCell(2, 'score'),
+            region: readCell(2, 'region')
+          },
+          selection: grid.getSelection(),
+          lastExportSummary,
+          lastImportSummary
+        };
+      }
+
+      function writeLog(label, payload) {
+        logElement.textContent = JSON.stringify(
+          {
+            label,
+            payload,
+            snapshot: getSnapshot()
+          },
+          null,
+          2
+        );
+      }
+
+      function setSummary(text) {
+        summaryElement.textContent = text;
+      }
+
+      async function resetRows() {
+        grid.setOptions({ rowData: cloneRows(baseRows) });
+        await waitFrame();
+        await waitFrame();
+        lastImportSummary = null;
+        setSummary('Rows reset');
+      }
+
+      function selectDemoRange() {
+        grid.setSelection({
+          activeCell: { rowIndex: 0, colIndex: 1 },
+          cellRanges: [{ r1: 0, c1: 1, r2: 1, c2: 3 }],
+          rowRanges: []
+        });
+      }
+
+      async function runCsvSelectionExport() {
+        selectDemoRange();
+        await waitFrame();
+        const result = await grid.exportCsv({
+          scope: 'selection',
+          includeHeaders: true
+        });
+        lastExportSummary = {
+          format: result.format,
+          scope: result.scope,
+          rowCount: result.rowCount,
+          canceled: result.canceled,
+          firstLine: result.content.split('\n')[0]
+        };
+        setSummary('CSV selection export rows=' + result.rowCount);
+        writeLog('export-csv-selection', lastExportSummary);
+        return lastExportSummary;
+      }
+
+      async function runTsvVisibleExport() {
+        const result = await grid.exportTsv({
+          scope: 'visible',
+          includeHeaders: true
+        });
+        lastExportSummary = {
+          format: result.format,
+          scope: result.scope,
+          rowCount: result.rowCount,
+          canceled: result.canceled,
+          firstLine: result.content.split('\n')[0]
+        };
+        setSummary('TSV visible export rows=' + result.rowCount);
+        writeLog('export-tsv-visible', lastExportSummary);
+        return lastExportSummary;
+      }
+
+      async function runDelegatedXlsxExport() {
+        const progress = [];
+        const result = await excelPlugin.exportXlsx(grid, {
+          scope: 'all',
+          includeHeaders: true,
+          maxClientRows: 3,
+          onProgress(event) {
+            progress.push({
+              status: event.status,
+              processedRows: event.processedRows,
+              totalRows: event.totalRows
+            });
+          },
+          serverExportHook(context) {
+            return {
+              delegated: true,
+              downloadUrl: '/downloads/policy-export.xlsx?op=' + encodeURIComponent(context.operationId),
+              fileName: 'policy-export.xlsx',
+              meta: {
+                totalRows: context.totalRows,
+                scope: context.scope
+              }
+            };
+          }
+        });
+
+        lastExportSummary = {
+          scope: result.scope,
+          rowCount: result.rowCount,
+          totalRows: result.totalRows,
+          delegated: result.delegated,
+          downloadUrl: result.serverResult ? result.serverResult.downloadUrl || '' : '',
+          progress
+        };
+        setSummary('XLSX delegated export totalRows=' + result.totalRows);
+        writeLog('export-xlsx-delegated', lastExportSummary);
+        return lastExportSummary;
+      }
+
+      function buildConflictWorkbook() {
+        const workbook = XLSX.utils.book_new();
+        const rows = [
+          ['Name', 'Status', 'Score', 'Region'],
+          ['Ahn Imported', 'review', 810, 'KR'],
+          ['Park Imported', 'hold', 910, 'US']
+        ];
+        const sheet = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(workbook, sheet, 'Import');
+        return workbook;
+      }
+
+      async function runConflictImport(conflictMode) {
+        await resetRows();
+        const workbook = buildConflictWorkbook();
+        const result = await excelPlugin.importXlsx(grid, workbook, {
+          sheetName: 'Import',
+          headerMappingPolicy: 'header',
+          validationMode: 'skipInvalidRows',
+          conflictMode
+        });
+        await waitFrame();
+        await waitFrame();
+
+        lastImportSummary = {
+          conflictMode,
+          importedRows: result.importedRows,
+          updatedRows: result.updatedRows,
+          addedRows: result.addedRows,
+          conflictRows: result.conflictRows,
+          issueCount: result.issues.length,
+          firstConflictAction: result.conflicts[0] ? result.conflicts[0].action : null,
+          firstConflictColumns: result.conflicts[0] ? result.conflicts[0].columnIds : []
+        };
+        setSummary(
+          'Import ' +
+            conflictMode +
+            ' => updated=' +
+            result.updatedRows +
+            ', conflicts=' +
+            result.conflictRows +
+            ', issues=' +
+            result.issues.length
+        );
+        writeLog('import-' + conflictMode, {
+          result,
+          snapshot: getSnapshot()
+        });
+        return {
+          result,
+          snapshot: getSnapshot()
+        };
+      }
+
+      document.getElementById('select-range').addEventListener('click', () => {
+        selectDemoRange();
+        writeLog('select-range');
+      });
+      document.getElementById('export-csv').addEventListener('click', () => {
+        void runCsvSelectionExport();
+      });
+      document.getElementById('export-tsv').addEventListener('click', () => {
+        void runTsvVisibleExport();
+      });
+      document.getElementById('export-xlsx-delegated').addEventListener('click', () => {
+        void runDelegatedXlsxExport();
+      });
+      document.getElementById('import-overwrite').addEventListener('click', () => {
+        void runConflictImport('overwrite');
+      });
+      document.getElementById('import-skip').addEventListener('click', () => {
+        void runConflictImport('skipConflicts');
+      });
+      document.getElementById('import-report').addEventListener('click', () => {
+        void runConflictImport('reportOnly');
+      });
+      document.getElementById('reset').addEventListener('click', () => {
+        void resetRows();
+      });
+      document.getElementById('inspect').addEventListener('click', () => {
+        writeLog('inspect');
+      });
+
+      selectDemoRange();
+      writeLog('ready');
+
+      window.__example86 = {
+        getSnapshot,
+        resetRows,
+        selectDemoRange,
+        runCsvSelectionExport,
+        runTsvVisibleExport,
+        runDelegatedXlsxExport,
+        runConflictImport
+      };
+    </script>
+  </body>
+</html>

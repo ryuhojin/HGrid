@@ -55,6 +55,7 @@
       <button id="select-range" type="button">select B2:C4</button>
       <button id="simulate-copy" type="button">simulate copy</button>
       <button id="simulate-paste" type="button">simulate paste</button>
+      <button id="simulate-html-only-paste" type="button">simulate html-only paste</button>
       <button id="inspect" type="button">inspect</button>
     </div>
     <pre id="log">Ready</pre>
@@ -203,6 +204,15 @@
         await waitFrame();
       }
 
+      async function simulateHtmlOnlyPaste() {
+        const root = document.querySelector('.hgrid');
+        const clipboard = createClipboardEvent('paste', {
+          'text/html': '<table><tr><td><b>unsafe-only</b></td><td>active</td></tr></table>'
+        });
+        root.dispatchEvent(clipboard.event);
+        await waitFrame();
+      }
+
       document.getElementById('select-range').addEventListener('click', () => {
         selectDemoRange();
         writeLog('select-range');
@@ -218,6 +228,11 @@
         writeLog('simulate-paste');
       });
 
+      document.getElementById('simulate-html-only-paste').addEventListener('click', async () => {
+        await simulateHtmlOnlyPaste();
+        writeLog('simulate-html-only-paste');
+      });
+
       document.getElementById('inspect').addEventListener('click', () => {
         writeLog('inspect');
       });
@@ -229,7 +244,8 @@
         getSnapshot,
         selectDemoRange,
         simulateCopy,
-        simulatePaste
+        simulatePaste,
+        simulateHtmlOnlyPaste
       };
     </script>
   </body>

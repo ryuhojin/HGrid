@@ -8,6 +8,8 @@ import type { GridSelection } from '../interaction/selection-model';
 
 export type CellValueType = 'text' | 'number' | 'date' | 'boolean';
 export type ColumnFilterMode = 'auto' | 'text' | 'set';
+export type GridCellEditorType = 'auto' | 'text' | 'number' | 'date' | 'boolean' | 'select' | 'masked';
+export type GridMaskedEditorMode = 'digits' | 'alphanumeric' | 'uppercase' | 'lowercase';
 export type ColumnPinPosition = 'left' | 'right';
 export type ScrollbarVisibility = 'auto' | 'always' | 'hidden';
 export type RowHeightMode = 'fixed' | 'estimated' | 'measured';
@@ -43,6 +45,25 @@ export type ColumnValueGetter = (row: GridRowData, column: ColumnDef) => unknown
 export type ColumnValueSetter = (row: GridRowData, value: unknown, column: ColumnDef) => void;
 export type RowHeightGetter = (rowIndex: number, dataIndex: number) => number;
 export type UnsafeHtmlSanitizer = (unsafeHtml: string, context: UnsafeHtmlSanitizeContext) => string;
+
+export interface GridCellEditorOption {
+  value: string | number | boolean | null;
+  label: string;
+}
+
+export interface GridCellEditorOptions {
+  type?: GridCellEditorType;
+  placeholder?: string;
+  options?: GridCellEditorOption[];
+  strict?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  inputMode?: HTMLInputElement['inputMode'];
+  autoComplete?: string;
+  pattern?: string;
+  maskMode?: GridMaskedEditorMode;
+}
 
 export interface GridLocaleText {
   selectAllRows: string;
@@ -120,6 +141,15 @@ export interface GridLocaleText {
   toolPanelLayoutPresets: string;
   toolPanelApplyLayoutPreset: string;
   toolPanelNoLayoutPresets: string;
+  editActionBarDirtySummary: string;
+  editActionBarSave: string;
+  editActionBarDiscard: string;
+  editActionBarSaving: string;
+  editActionBarDiscarding: string;
+  editActionBarSaved: string;
+  editActionBarDiscarded: string;
+  editActionBarSaveFailed: string;
+  editActionBarDiscardFailed: string;
   statusBarSelectionCells: string;
   statusBarSelectionRows: string;
   statusBarVisibleRows: string;
@@ -148,7 +178,18 @@ export interface EditValidationContext {
   previousValue: unknown;
   row: GridRowData;
 }
-export type EditValidationResult = string | null | undefined | Promise<string | null | undefined>;
+
+export interface EditValidationIssue {
+  message: string;
+  code?: string;
+}
+
+export type EditValidationResult =
+  | string
+  | EditValidationIssue
+  | null
+  | undefined
+  | Promise<string | EditValidationIssue | null | undefined>;
 export type EditValidator = (context: EditValidationContext) => EditValidationResult;
 
 export interface RowIndicatorStatusContext {
@@ -279,8 +320,57 @@ export interface ColumnDef {
   comparator?: ColumnComparator;
   valueGetter?: ColumnValueGetter;
   valueSetter?: ColumnValueSetter;
+  editor?: GridCellEditorOptions;
   unsafeHtml?: boolean;
   sanitizeHtml?: UnsafeHtmlSanitizer;
+}
+
+export interface GridDirtyCellChange {
+  columnId: string;
+  originalValue: unknown;
+  value: unknown;
+}
+
+export interface GridDirtyRowChange {
+  rowKey: RowKey;
+  dataIndexHint: number;
+  changes: GridDirtyCellChange[];
+}
+
+export interface GridDirtyChangeSummary {
+  rowCount: number;
+  cellCount: number;
+  rowKeys: RowKey[];
+}
+
+export interface GridDirtyChangeOptions {
+  rowKeys?: RowKey[];
+}
+
+export interface GridEditActionBarActionContext {
+  dirtyChanges: GridDirtyRowChange[];
+  summary: GridDirtyChangeSummary;
+  remote: GridStatusBarRemoteSummary | null;
+}
+
+export interface GridEditActionBarActionResult {
+  completed?: boolean;
+  message?: string;
+  tone?: GridStatusBarItemTone;
+}
+
+export type GridEditActionBarActionHandler = (
+  context: GridEditActionBarActionContext
+) =>
+  | boolean
+  | void
+  | GridEditActionBarActionResult
+  | Promise<boolean | void | GridEditActionBarActionResult>;
+
+export interface GridEditActionBarOptions {
+  enabled?: boolean;
+  onSave?: GridEditActionBarActionHandler;
+  onDiscard?: GridEditActionBarActionHandler;
 }
 
 export interface GridColumnMenuContext {
@@ -389,6 +479,15 @@ export interface GridRangeHandleOptions {
 export interface GridUndoRedoOptions {
   enabled?: boolean;
   limit?: number;
+}
+
+export interface GridDirtyTrackingOptions {
+  enabled?: boolean;
+}
+
+export interface GridEditPolicyOptions {
+  dirtyTracking?: GridDirtyTrackingOptions;
+  actionBar?: GridEditActionBarOptions;
 }
 
 export type GridBuiltInStatusBarItemId = 'selection' | 'aggregates' | 'rows' | 'remote';
@@ -553,6 +652,7 @@ export interface GridOptions {
   sideBar?: GridSideBarOptions;
   rangeHandle?: GridRangeHandleOptions;
   undoRedo?: GridUndoRedoOptions;
+  editPolicy?: GridEditPolicyOptions;
   statusBar?: GridStatusBarOptions;
   filterRow?: GridFilterRowOptions;
   setFilter?: GridSetFilterOptions;

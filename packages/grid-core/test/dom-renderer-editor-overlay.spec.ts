@@ -7,17 +7,22 @@ import {
   createInvalidEditorOverlayState,
   createOpenEditorOverlayState,
   createPendingEditorOverlayState,
+  formatEditorInputValue,
   normalizeEditorInputValue,
+  resolveColumnEditor,
+  resolveEditValidationMessage,
   resolveEditorOverlayRect,
+  sanitizeEditorInputValue,
   shouldRefocusEditorAfterValidationFailure
 } from '../src/render/dom-renderer-editor-overlay';
 
-function createColumn(type: ColumnDef['type']): ColumnDef {
+function createColumn(type: ColumnDef['type'], editor?: ColumnDef['editor']): ColumnDef {
   return {
     id: `${type}-column`,
     header: type.toUpperCase(),
     width: 160,
-    type
+    type,
+    editor
   };
 }
 
@@ -55,6 +60,45 @@ describe('dom-renderer-editor-overlay', () => {
   it('leaves text and date editor values untouched', () => {
     expect(normalizeEditorInputValue(createColumn('text'), ' raw text ')).toBe(' raw text ');
     expect(normalizeEditorInputValue(createColumn('date'), '2026-03-11')).toBe('2026-03-11');
+  });
+
+  it('resolves editor definitions and formats select/date values for controls', () => {
+    const selectColumn = createColumn('text', {
+      type: 'select',
+      options: [
+        { value: 'draft', label: 'Draft' },
+        { value: 'active', label: 'Active' }
+      ]
+    });
+
+    expect(resolveColumnEditor(selectColumn)).toMatchObject({
+      type: 'select',
+      strict: false
+    });
+    expect(formatEditorInputValue(selectColumn, 'active')).toBe('1');
+    expect(normalizeEditorInputValue(selectColumn, '0')).toBe('draft');
+    expect(formatEditorInputValue(createColumn('date'), '2026-03-16T09:30:00.000Z')).toBe('2026-03-16');
+  });
+
+  it('sanitizes masked editor values based on mask mode', () => {
+    const digitsColumn = createColumn('text', {
+      type: 'masked',
+      maskMode: 'digits'
+    });
+    const uppercaseColumn = createColumn('text', {
+      type: 'masked',
+      maskMode: 'uppercase'
+    });
+
+    expect(sanitizeEditorInputValue(digitsColumn, 'A-10b2')).toBe('102');
+    expect(normalizeEditorInputValue(digitsColumn, 'A-10b2')).toBe('102');
+    expect(sanitizeEditorInputValue(uppercaseColumn, 'ab-cd')).toBe('AB-CD');
+  });
+
+  it('extracts validation messages from strings and issue objects', () => {
+    expect(resolveEditValidationMessage('  blocked  ')).toBe('blocked');
+    expect(resolveEditValidationMessage({ message: 'invalid range', code: 'range' })).toBe('invalid range');
+    expect(resolveEditValidationMessage(null)).toBeNull();
   });
 
   it('creates overlay states for open, active, pending, invalid, and closed transitions', () => {

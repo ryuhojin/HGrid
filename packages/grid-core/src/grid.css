@@ -772,6 +772,80 @@
   transform: scale(1.05);
 }
 
+.hgrid__edit-action-bar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - var(--hgrid-side-bar-space-right));
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-top: var(--hgrid-line-width) solid var(--hgrid-border-color);
+  background: color-mix(in srgb, var(--hgrid-status-bar-bg) 88%, white);
+}
+
+.hgrid__edit-action-bar-main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hgrid__edit-action-bar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.hgrid__edit-action-bar-message {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--hgrid-muted-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hgrid__edit-action-bar-message--active {
+  color: var(--hgrid-active-border);
+}
+
+.hgrid__edit-action-bar-message--danger {
+  color: var(--hgrid-state-error);
+}
+
+.hgrid__edit-action-bar-button {
+  border: var(--hgrid-line-width) solid var(--hgrid-border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.hgrid__edit-action-bar-button--primary {
+  border-color: var(--hgrid-active-border);
+  background: color-mix(in srgb, var(--hgrid-selection-bg) 70%, white);
+}
+
+.hgrid__edit-action-bar-button:hover:not(:disabled),
+.hgrid__edit-action-bar-button:focus-visible {
+  outline: 0;
+  background: var(--hgrid-selection-bg);
+}
+
+.hgrid__edit-action-bar-button:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
 .hgrid__status-bar {
   display: none;
   align-items: center;

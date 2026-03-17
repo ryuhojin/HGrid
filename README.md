@@ -3,7 +3,7 @@
 HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 데이터 그리드**입니다.
 `Canvas/WebGL/OffscreenCanvas` 없이 대용량(10M~100M) 스크롤, pinned 컬럼, 수직/수평 가상화, 풀링 렌더를 제공합니다.
 
-## 프로젝트 상태 (2026-03-12)
+## 프로젝트 상태 (2026-03-16)
 
 - 코어 베이스라인: `Phase 0` ~ `Phase 14.3` 범위의 핵심 엔진/테스트/벤치 파이프라인은 구현됨
 - 남은 핵심 범위: mature server-side row model, enterprise product surface, framework/package productization, `Phase 15` (commercial readiness)
@@ -20,7 +20,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Variable row height (`fixed | estimated | measured`) + row top map
 - Event delegation/hit-test/wheel orchestration
 - Selection model ranges + keyboard navigation
-- Single overlay editor + sync/async validation
+- Single overlay editor + sync/async validation + typed editor policy(select/date/number/masked) + grid-owned dirty tracking summary/accept/discard API + built-in save/discard action bar + transaction-aware undo/redo metadata(root transaction relation + audit fan-out)
 - Worker protocol 계약 + transferable 유틸 + per-operation worker entrypoint
 - Worker dispatcher + dist worker asset + 100k+ worker-first policy + optional prewarm + configurable poolSize
 - Sort/filter/group/pivot low-overhead columnar worker payload fast path + tree compact key-field payload
@@ -32,9 +32,9 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Grouping pipeline (client grouping + key 기반 expand/collapse + sum/avg/min/max/count/custom aggregation)
 - Tree data pipeline (client tree model + key expansion state + lazy children load)
 - Pivot pipeline (client pivot matrix + 동적 컬럼 생성 + server query model)
-- Clipboard pipeline (selection copy TSV + plain text paste + HTML paste 방어)
+- Clipboard pipeline (selection copy TSV + plain text paste + HTML-only paste no-op 회귀 포함)
 - CSV/TSV export pipeline (visible/selection/all + progress + cancel)
-- Excel(xlsx) plugin pipeline (plugin 분리, export/import, header mapping, validation)
+- Excel(xlsx) plugin pipeline (plugin 분리, export/import, header mapping, validation, conflict mode, server delegation UX)
 - CSS Variables theme token pipeline (`.h-theme-light` / `.h-theme-dark` + `setTheme()` runtime override)
 - SI Design Guide pipeline (토큰 매핑표 + 커스터마이징 레시피 + 고객사 테마 샘플)
 - RemoteDataProvider block cache/LRU/prefetch + server query model(sort/filter/group/pivot/tree) + remote grouping/tree row metadata + server pivot result columns + targeted invalidate/query diff/background refresh/retry + rowKey 기반 pending change/save-discard API
@@ -50,7 +50,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 아직 엔터프라이즈 상용 제품으로 완료되지 않은 범위:
 
 - mature server-side row model (store hierarchy, save orchestration, conflict UI는 아직 부족)
-- enterprise UI surface(chart/formula/master-detail, layout persistence 확장, filter/profile preset transport 등)
+- enterprise UI surface(chart, formula plugin/productization, master-detail, layout persistence 확장, filter/profile preset transport 등)
 - React/Vue product package 및 plugin SDK
 - release/commercial readiness (`Phase 15`)
 
@@ -252,7 +252,11 @@ const excel = createExcelPlugin({
 const xlsx = await excel.exportXlsx(grid, {
   scope: 'selection',
   dateFormat: 'yyyy-mm-dd hh:mm:ss',
-  numberFormat: '#,##0.00'
+  numberFormat: '#,##0.00',
+  serverExportHook: async (context) => ({
+    delegated: true,
+    downloadUrl: '/api/export/xlsx?op=' + encodeURIComponent(context.operationId)
+  })
 });
 
 if (!xlsx.delegated) {
@@ -261,7 +265,8 @@ if (!xlsx.delegated) {
 
 await excel.importXlsx(grid, file, {
   headerMappingPolicy: 'auto',
-  validationMode: 'skipInvalidRows'
+  validationMode: 'skipInvalidRows',
+  conflictMode: 'skipConflicts'
 });
 ```
 
@@ -286,7 +291,7 @@ await excel.importXlsx(grid, file, {
 pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 ```
 
-## Examples (현재 1~48)
+## Examples (현재 1~84)
 
 - `example1`: 기본 UMD 마운트
 - `example2~5`: Public API / Column / DataProvider / RowModel
@@ -312,7 +317,7 @@ pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 - `example31`: grouping + aggregation + expand/collapse + mode 전환
 - `example32`: tree data(parentId) + expand/collapse + server lazy children
 - `example33`: local pivot matrix(가로 집계 컬럼) + server pivot query model
-- `example34`: clipboard copy/paste(sanitize 포함)
+- `example34`: clipboard copy/paste(text/plain only + html-only regression)
 - `example35`: CSV/TSV export(visible/selection/all + progress/cancel)
 - `example36`: Excel(xlsx) import/export(header mapping + validation)
 - `example37`: CSS variable theme switching(light/dark/custom setTheme)
@@ -332,6 +337,25 @@ pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 - `example51`: E1 worker pool smoke(prewarm wiring + parallel sort queue growth)
 - `example52`: E1 worker projection cache smoke(repeated valueGetter/comparator offload reuse + invalidation)
 - `example53`: E1 worker projection prefix smoke(needed derived prefix only, trailing derived getter skip)
+- `example54`: async payload serialization + cancel-before-post smoke
+- `example55~61`: E2 enterprise server-side row model(fake server, grouping/tree/pivot, cache sync, server edit, example set)
+- `example62~68`: E3 column menu/body context menu, filter panel, docked side bar, custom tool panel surface
+- `example69`: side bar initial open/closed option
+- `example70`: status bar / summary UX
+- `example71`: fill handle range/fill/copy smoke
+- `example72`: layout persistence / workspace recipe
+- `example73`: body context menu built-in actions
+- `example74~78`: advanced filter builder / preset / filter row / saved preset smoke
+- `example79`: columns preset apply + custom status bar item registry
+- `example80`: filter row enum + full distinct strategy
+- `example81`: fill handle auto-scroll + matrix trend
+- `example82`: large selection async aggregate
+- `example83`: undo/redo editing
+- `example84`: E4.1 editing policy productization(select/date/number/masked editor policy + validation issue + dirty tracking summary)
+- `example85`: E4.2 undo/redo transaction semantics(root transaction id + clipboard rollback scope + audit relation)
+- `example86`: E4.3 clipboard/import/export hardening(shared export contract + xlsx conflict mode + delegated export UX)
+- `example87`: E4.4 derived value strategy(valueGetter-based row-local derived columns + core formula policy)
+- `example88`: E4 close-out editing workflow(save/discard action bar + save failure recovery + audit snapshot)
 
 기능 추가 시 규칙:
 

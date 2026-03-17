@@ -1,5 +1,7 @@
 # Phase 5.1 Editing Policy
 
+> 참고: E4.1에서 typed editor policy, dirty tracking summary API, `dirtyChange` event, state column dirty/commit tone을 추가로 제품화했다. 최신 범위는 [editing-productization-phase-e4.md](./editing-productization-phase-e4.md)를 따른다.
+
 ## Scope
 - Single overlay editor only.
 - No per-cell input creation.

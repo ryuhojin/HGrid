@@ -1,6 +1,6 @@
 # HGrid Enterprise Known Limitations
 
-> 기준일: 2026-03-12
+> 기준일: 2026-03-17
 >
 > 이 문서는 “현재 제품이 아직 아닌 부분”을 숨기지 않고 고정하기 위한 제한사항 문서다.
 
@@ -31,14 +31,15 @@
 - 의미:
   - SSRM 제품 완성도 관점에서는 store-aware expand policy가 더 필요하다.
 
-## 4. 서버모드 dirty tracking은 1차 구현됐지만 save orchestration은 앱 책임이다
+## 4. 서버모드 dirty tracking과 E4 action bar는 들어왔지만 save orchestration은 앱 책임이다
 - E2.4 기준으로 remote/server mode는 rowKey 기반 pending change tracking과 `getPendingChanges()` / `acceptPendingChanges()` / `discardPendingChanges()` / `revertPendingChange()`를 제공한다.
+- E4 기준으로 grid-owned dirty tracking도 `hasDirtyChanges()` / `getDirtyChanges()` / `getDirtyChangeSummary()` / `acceptDirtyChanges()` / `discardDirtyChanges()`와 `dirtyChange` event, built-in save/discard action bar까지 제공한다.
 - 하지만 다음은 아직 grid-owned 기능이 아니다.
   - 서버 mutation transport
   - 저장 성공 후 refetch orchestration
-  - conflict badge / dirty badge / save toolbar 같은 product UI
+  - conflict merge / diff review dialog
 - 의미:
-  - 엔터프라이즈 업무형 “편집 후 저장”의 데이터 계약은 생겼지만, 최종 제품 UX는 아직 완성 전이다.
+  - 엔터프라이즈 업무형 “편집 후 저장”의 dirty/recovery UI는 생겼지만, 최종 저장 orchestration은 여전히 앱 설계가 필요하다.
 ## 5. Column Group `collapsed` 미완성
 - column group schema에 `collapsed`가 존재하지만 실제 child visibility 토글은 구현되지 않았다.
 - 의미:
@@ -47,7 +48,7 @@
 ## 6. 제품형 UI surface 부족
 - 현재 저장소에는 다음이 아직 부족하다:
   - integrated charts
-  - formula editing
+  - formula editing plugin/productization
   - master-detail
 - 현재 들어간 범위:
   - header column menu
@@ -60,12 +61,15 @@
   - columns panel search/reorder + preset apply
   - status bar(selection/aggregate/rows/remote summary + custom item registry + large selection chunked async aggregate)
   - fill handle(range fill/copy + numeric series fill + body-edge auto-scroll + 2D affine matrix trend)
-  - shared undo/redo(editor / clipboard / fillHandle)
+  - shared undo/redo(editor / clipboard / fillHandle) + transaction-aware audit metadata
   - layout persistence(order/visibility/pin/width snapshot + preset apply)
   - composed workspace recipe(layout + state)
   - custom side bar panel registry
+- E4.4 기준 current scope:
+  - row-local derived value는 `valueGetter`로 지원한다.
+  - formula/expression authoring은 core 범위가 아니라 future plugin 범위로 선언됐다.
 - 의미:
-  - 주요 product surface는 많이 닫혔지만, chart/formula/master-detail 같은 상위 surface와 domain-specific row action productization은 아직 비어 있다.
+  - 주요 product surface는 많이 닫혔지만, chart/formula plugin/master-detail 같은 상위 surface와 domain-specific row action productization은 아직 비어 있다.
 
 ## 7. 보안 정책이 secure-by-default로 닫히지 않음
 - `unsafeHtml` 컬럼에서 sanitizer가 없으면 raw HTML이 렌더된다.
@@ -88,6 +92,7 @@
 
 ## 10. Plugin SDK 부재
 - excel plugin은 존재하지만 공식 plugin lifecycle / command registry / overlay registry 체계는 없다.
+- excel import/export는 validation/conflict/delegation contract까지는 있지만 built-in diff preview dialog나 import review panel은 아직 없다.
 - 의미:
   - 기능 확장을 core 수정 없이 안정적으로 쌓는 플랫폼 단계는 아니다.
 

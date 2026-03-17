@@ -195,13 +195,13 @@
   - 앱은 `discardPendingChanges()` 또는 `revertPendingChange()`를 호출해 롤백할 수 있다.
 - conflict 표시:
   - E2.4에서는 데이터 계약과 rollback policy만 고정한다.
-  - 시각적인 conflict badge / dirty badge / toolbar UX는 E3 product surface 범위다.
+  - 시각적인 dirty/action bar UX는 E4 close-out에서 들어갔고, conflict merge dialog는 여전히 후속 범위다.
 
 ## 아직 하지 않은 것
 - partial/full store의 실제 fetch scheduling과 store hierarchy 자체는 아직 더 필요하다.
 - remote global expand-all/collapse-all을 server keyspace 전체 기준으로 완성하지는 않았다.
 - save transport 자체(`saveChanges()` 같은 grid-owned network hook)는 아직 없다.
-- save conflict 표시 UI와 batch toolbar UX는 아직 없다.
+- save conflict merge UI와 server-owned batch orchestration은 아직 없다.
 
 ## 검증
 - unit:
@@ -236,4 +236,4 @@
 - `example61`: dedicated server tree example
 
 ## 다음 단계
-- E2는 현재 예제 세트까지 마감했고, 이후 E3에서 dirty badge / save-discard UI surface와 제품형 서버 편집 UX를 올린다.
+- E2는 현재 예제 세트까지 마감했고, 이후 phase에서는 grid-owned save transport와 conflict merge UX를 올리는 쪽으로 이어진다.

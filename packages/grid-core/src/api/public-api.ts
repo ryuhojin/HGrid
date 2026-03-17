@@ -12,6 +12,10 @@ export type {
   ColumnComparator,
   ColumnDef,
   ColumnFilterMode,
+  EditValidationIssue,
+  GridCellEditorOption,
+  GridCellEditorOptions,
+  GridCellEditorType,
   GridAdvancedFilterPreset,
   GridColumnLayout,
   GridColumnLayoutPreset,
@@ -24,10 +28,20 @@ export type {
   GridColumnMenuTrigger,
   GridCustomToolPanelDefinition,
   GridCustomToolPanelRenderContext,
+  GridDirtyCellChange,
+  GridEditActionBarActionContext,
+  GridEditActionBarActionHandler,
+  GridEditActionBarActionResult,
+  GridEditActionBarOptions,
+  GridDirtyChangeOptions,
+  GridDirtyChangeSummary,
+  GridDirtyRowChange,
   GridContextMenuContext,
   GridContextMenuOptions,
+  GridEditPolicyOptions,
   GridMenuItem,
   GridMenuOpenSource,
+  GridMaskedEditorMode,
   GridRangeHandleMode,
   GridRangeHandleOptions,
   GridUndoRedoOptions,
@@ -111,7 +125,14 @@ export type {
   GridEventName,
   PivotUiApplyEvent
 } from '../core/event-bus';
-export type { EditCommitAuditLogger, EditCommitAuditPayload, EditCommitEventPayload, EditCommitSource } from '../core/edit-events';
+export type {
+  EditCommitAuditLogger,
+  EditCommitAuditPayload,
+  EditCommitEventPayload,
+  EditCommitSource,
+  EditTransactionKind,
+  EditTransactionStep
+} from '../core/edit-events';
 export { LocalDataProvider } from '../data/local-data-provider';
 export { ColumnarDataProvider } from '../data/columnar-data-provider';
 export { CooperativeFilterExecutor } from '../data/filter-executor';

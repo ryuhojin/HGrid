@@ -1078,6 +1078,80 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 84,
+      "file": "example84.html",
+      "title": "Example 84 - E4 Editing Policy Productization",
+      "tags": [
+        "enterprise",
+        "editing",
+        "dirty-tracking",
+        "validation",
+        "select-editor",
+        "date-editor",
+        "masked-editor",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 85,
+      "file": "example85.html",
+      "title": "Example 85 - Undo Redo Transaction Semantics",
+      "tags": [
+        "enterprise",
+        "editing",
+        "undo-redo",
+        "transactions",
+        "audit",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 86,
+      "file": "example86.html",
+      "title": "Example 86 - Clipboard Import Export Policy",
+      "tags": [
+        "enterprise",
+        "clipboard",
+        "import",
+        "export",
+        "excel",
+        "server-delegation",
+        "umd"
+      ],
+      "plugins": [
+        "excel"
+      ]
+    },
+    {
+      "number": 87,
+      "file": "example87.html",
+      "title": "Example 87 - Derived Value Strategy",
+      "tags": [
+        "enterprise",
+        "editing",
+        "derived-value",
+        "value-getter",
+        "formula-strategy",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 88,
+      "file": "example88.html",
+      "title": "Example 88 - Edit Workflow Action Bar",
+      "tags": [
+        "e4",
+        "editing",
+        "workflow",
+        "audit",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

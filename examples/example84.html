@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Editing Policy Productization</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      body {
+        margin: 0;
+        background: #f5f7fb;
+        color: #172033;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 20px;
+        min-height: 100vh;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+
+      .stage,
+      .inspector {
+        background: #ffffff;
+        border: 1px solid #dbe3f0;
+        border-radius: 18px;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      .stage {
+        padding: 18px;
+      }
+
+      .eyebrow {
+        margin: 0 0 6px;
+        color: #4f5d78;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.15;
+      }
+
+      .lede {
+        margin: 10px 0 18px;
+        color: #51607a;
+        line-height: 1.5;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .toolbar button {
+        border: 1px solid #c8d3e6;
+        background: #fff;
+        color: #122033;
+        border-radius: 999px;
+        padding: 10px 16px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .toolbar button.primary {
+        background: #122033;
+        border-color: #122033;
+        color: #fff;
+      }
+
+      .toolbar button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      .tips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      .tip {
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #edf3ff;
+        color: #294d8f;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      .inspector {
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .panel {
+        border: 1px solid #e4ebf5;
+        border-radius: 14px;
+        padding: 14px;
+        background: #f9fbff;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .stat {
+        padding: 10px;
+        border-radius: 12px;
+        background: #fff;
+        border: 1px solid #dbe3f0;
+      }
+
+      .stat-label {
+        display: block;
+        color: #607089;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .stat-value {
+        display: block;
+        margin-top: 6px;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      pre {
+        margin: 0;
+        overflow: auto;
+        border-radius: 12px;
+        background: #0f172a;
+        color: #dbe8ff;
+        padding: 12px;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .log {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 180px;
+        overflow: auto;
+      }
+
+      .log-item {
+        border-radius: 12px;
+        background: #fff;
+        border: 1px solid #dbe3f0;
+        padding: 10px;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      @media (max-width: 1180px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <section class="stage">
+        <p class="eyebrow">Phase E4.1</p>
+        <h1>Editing Policy Productization</h1>
+        <p class="lede">
+          `select / number / date / masked` editor policy, validation issue object, dirty tracking summary, state column
+          tone, and accept-dirty workflow를 한 화면에서 확인하는 E4.1 smoke입니다.
+        </p>
+        <div class="toolbar">
+          <button id="accept-dirty" class="primary">Accept Dirty Changes</button>
+          <button id="clear-selection">Clear Selection</button>
+          <button id="load-invalid">Load Invalid Draft</button>
+        </div>
+        <div class="tips">
+          <span class="tip">Status는 select editor</span>
+          <span class="tip">Budget은 number min/max validation</span>
+          <span class="tip">Renewal은 native date picker</span>
+          <span class="tip">Code는 uppercase + pattern mask</span>
+        </div>
+        <div id="grid"></div>
+      </section>
+
+      <aside class="inspector">
+        <section class="panel">
+          <h2>Dirty Summary</h2>
+          <div class="stats">
+            <div class="stat">
+              <span class="stat-label">Has Dirty</span>
+              <span id="dirty-flag" class="stat-value">false</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Rows</span>
+              <span id="dirty-rows" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Cells</span>
+              <span id="dirty-cells" class="stat-value">0</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Pending Payload</h2>
+          <pre id="dirty-json"></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Recent Events</h2>
+          <div id="event-log" class="log"></div>
+        </section>
+      </aside>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const columns = [
+        { id: '__state', header: 'State', width: 96, type: 'text', editable: false },
+        { id: 'id', header: 'ID', width: 90, type: 'number', editable: false },
+        {
+          id: 'account',
+          header: 'Account',
+          width: 180,
+          type: 'text',
+          editable: true
+        },
+        {
+          id: 'status',
+          header: 'Status',
+          width: 150,
+          type: 'text',
+          editable: true,
+          editor: {
+            type: 'select',
+            options: [
+              { value: 'draft', label: 'Draft' },
+              { value: 'review', label: 'Review' },
+              { value: 'active', label: 'Active' }
+            ]
+          }
+        },
+        {
+          id: 'budget',
+          header: 'Budget',
+          width: 130,
+          type: 'number',
+          editable: true,
+          editor: {
+            type: 'number',
+            min: 0,
+            max: 100000,
+            step: 100
+          }
+        },
+        {
+          id: 'renewalDate',
+          header: 'Renewal Date',
+          width: 160,
+          type: 'date',
+          editable: true,
+          editor: {
+            type: 'date'
+          }
+        },
+        {
+          id: 'code',
+          header: 'Code',
+          width: 130,
+          type: 'text',
+          editable: true,
+          editor: {
+            type: 'masked',
+            maskMode: 'uppercase',
+            pattern: '[A-Z]{2}-[0-9]{3}',
+            placeholder: 'AB-123'
+          }
+        }
+      ];
+
+      const baseRowData = Array.from({ length: 12 }, (_, index) => ({
+        id: index + 1,
+        account: 'Account-' + (index + 1),
+        status: index % 3 === 0 ? 'draft' : index % 3 === 1 ? 'review' : 'active',
+        budget: 500 + index * 250,
+        renewalDate: '2026-03-' + String((index % 9) + 10).padStart(2, '0'),
+        code: 'AB-' + String(100 + index)
+      }));
+
+      function cloneRows(rows) {
+        return rows.map((row) => ({ ...row }));
+      }
+
+      const dirtyFlagElement = document.getElementById('dirty-flag');
+      const dirtyRowsElement = document.getElementById('dirty-rows');
+      const dirtyCellsElement = document.getElementById('dirty-cells');
+      const dirtyJsonElement = document.getElementById('dirty-json');
+      const eventLogElement = document.getElementById('event-log');
+      const acceptDirtyButton = document.getElementById('accept-dirty');
+      const clearSelectionButton = document.getElementById('clear-selection');
+      const loadInvalidButton = document.getElementById('load-invalid');
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: cloneRows(baseRowData),
+        height: 520,
+        rowHeight: 28,
+        overscan: 8,
+        editPolicy: {
+          dirtyTracking: {
+            enabled: true
+          }
+        },
+        validateEdit(context) {
+          if (context.column.id === 'budget') {
+            if (typeof context.value !== 'number' || context.value < 0 || context.value > 100000) {
+              return { message: 'Budget must be between 0 and 100000', code: 'budget_range' };
+            }
+            if (context.row.status === 'active' && context.value < 500) {
+              return { message: 'Active rows require budget >= 500', code: 'active_budget_min' };
+            }
+          }
+
+          if (context.column.id === 'code') {
+            if (typeof context.value !== 'string' || !/^[A-Z]{2}-[0-9]{3}$/.test(context.value)) {
+              return { message: 'Code must match AB-123 format', code: 'code_mask' };
+            }
+          }
+
+          return null;
+        }
+      });
+
+      function pushLog(label, payload) {
+        const item = document.createElement('div');
+        item.className = 'log-item';
+        item.textContent = label + ': ' + JSON.stringify(payload);
+        eventLogElement.prepend(item);
+        while (eventLogElement.childElementCount > 8) {
+          eventLogElement.removeChild(eventLogElement.lastElementChild);
+        }
+      }
+
+      function renderDirtySummary() {
+        const summary = grid.getDirtyChangeSummary();
+        dirtyFlagElement.textContent = String(grid.hasDirtyChanges());
+        dirtyRowsElement.textContent = String(summary.rowCount);
+        dirtyCellsElement.textContent = String(summary.cellCount);
+        dirtyJsonElement.textContent = JSON.stringify(
+          {
+            summary,
+            changes: grid.getDirtyChanges()
+          },
+          null,
+          2
+        );
+        acceptDirtyButton.disabled = !grid.hasDirtyChanges();
+      }
+
+      acceptDirtyButton.addEventListener('click', () => {
+        grid.acceptDirtyChanges();
+        pushLog('acceptDirtyChanges', grid.getDirtyChangeSummary());
+        renderDirtySummary();
+      });
+
+      clearSelectionButton.addEventListener('click', () => {
+        grid.clearSelection();
+      });
+
+      loadInvalidButton.addEventListener('click', () => {
+        grid.setOptions({
+          rowData: cloneRows(baseRowData).map((row, index) =>
+            index === 0
+              ? {
+                  ...row,
+                  status: 'active',
+                  budget: 100,
+                  code: 'bad-01'
+                }
+              : row
+          )
+        });
+        pushLog('loadInvalidDraft', { row: 1 });
+        renderDirtySummary();
+      });
+
+      grid.on('dirtyChange', (event) => {
+        pushLog('dirtyChange', event.summary);
+        renderDirtySummary();
+      });
+
+      grid.on('editCommit', (event) => {
+        pushLog('editCommit', {
+          source: event.source,
+          rowKey: event.rowKey,
+          columnId: event.columnId,
+          rowCount: event.rowCount,
+          cellCount: event.cellCount
+        });
+      });
+
+      renderDirtySummary();
+      window.__example84 = {
+        grid,
+        renderDirtySummary
+      };
+    </script>
+  </body>
+</html>

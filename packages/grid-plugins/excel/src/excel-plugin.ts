@@ -34,6 +34,9 @@ export type ExcelExportScope = 'visible' | 'selection' | 'all';
 export type ExcelExportStatus = 'running' | 'completed' | 'canceled' | 'delegated';
 export type ExcelHeaderMappingPolicy = 'id' | 'header' | 'auto';
 export type ExcelImportValidationMode = 'skipInvalidRows' | 'rejectOnError';
+export type ExcelImportIssueKind = 'mapping' | 'validation' | 'conflict';
+export type ExcelImportConflictMode = 'overwrite' | 'skipConflicts' | 'reportOnly';
+export type ExcelImportConflictAction = 'overwrite' | 'skip';
 
 export interface ExcelExportProgressEvent {
   operationId: string;
@@ -87,10 +90,38 @@ export interface ExcelExportResult {
 }
 
 export interface ExcelImportIssue {
+  kind?: ExcelImportIssueKind;
   sheetRowNumber: number;
   columnId?: string;
   message: string;
   value?: unknown;
+}
+
+export interface ExcelImportConflict {
+  sheetRowNumber: number;
+  targetRowIndex: number;
+  dataIndex: number;
+  columnIds: string[];
+  currentValues: Record<string, unknown>;
+  incomingValues: Record<string, unknown>;
+  action: ExcelImportConflictAction;
+  message?: string;
+}
+
+export interface ExcelImportConflictContext {
+  sheetRowNumber: number;
+  targetRowIndex: number;
+  dataIndex: number;
+  currentValues: Record<string, unknown>;
+  incomingValues: Record<string, unknown>;
+  conflictingColumnIds: string[];
+  defaultAction: ExcelImportConflictAction;
+}
+
+export interface ExcelImportConflictResolutionResult {
+  action: ExcelImportConflictAction;
+  values?: Record<string, unknown>;
+  message?: string;
 }
 
 export interface ExcelImportCellContext {
@@ -130,6 +161,8 @@ export interface ExcelImportOptions {
   skipUnknownColumns?: boolean;
   headerMappingPolicy?: ExcelHeaderMappingPolicy;
   validationMode?: ExcelImportValidationMode;
+  conflictMode?: ExcelImportConflictMode;
+  resolveConflict?: (context: ExcelImportConflictContext) => MaybePromise<ExcelImportConflictResolutionResult | undefined>;
   validateCell?: (context: ExcelImportCellContext) => MaybePromise<ExcelImportCellValidationResult | unknown>;
   validateRow?: (context: ExcelImportRowContext) => MaybePromise<ExcelImportRowValidationResult | Record<string, unknown> | boolean>;
   batchSize?: number;
@@ -141,7 +174,9 @@ export interface ExcelImportResult {
   importedRows: number;
   updatedRows: number;
   addedRows: number;
+  conflictRows: number;
   mappedColumns: string[];
+  conflicts: ExcelImportConflict[];
   issues: ExcelImportIssue[];
 }
 
@@ -891,6 +926,7 @@ function resolveImportColumnMappings(
     if (!column) {
       if (!skipUnknownColumns) {
         issues.push({
+          kind: 'mapping',
           sheetRowNumber: 1,
           message: `Unknown header: ${headerToken}`,
           value: rawHeader
@@ -901,6 +937,7 @@ function resolveImportColumnMappings(
 
     if (mappedColumnIds.has(column.id)) {
       issues.push({
+        kind: 'mapping',
         sheetRowNumber: 1,
         columnId: column.id,
         message: `Duplicate mapped header for column: ${column.id}`,
@@ -1041,6 +1078,7 @@ export async function importExcelToGrid(
   const policy = options.headerMappingPolicy ?? 'auto';
   const skipUnknownColumns = options.skipUnknownColumns !== false;
   const validationMode = options.validationMode ?? 'skipInvalidRows';
+  const conflictMode = options.conflictMode ?? 'overwrite';
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? DEFAULT_IMPORT_BATCH_SIZE));
   const issues: ExcelImportIssue[] = [];
 
@@ -1056,6 +1094,8 @@ export async function importExcelToGrid(
   let importedRows = 0;
   let updatedRows = 0;
   let addedRows = 0;
+  let conflictRows = 0;
+  const conflicts: ExcelImportConflict[] = [];
 
   for (let sheetRowIndex = headerRowIndex + 1; sheetRowIndex < matrix.length; sheetRowIndex += 1) {
     const sheetRow = matrix[sheetRowIndex] ?? [];
@@ -1084,6 +1124,7 @@ export async function importExcelToGrid(
 
       if (!validation || validation.accept === false) {
         issues.push({
+          kind: 'validation',
           sheetRowNumber,
           columnId: mapping.column.id,
           message: validation?.message ?? 'Cell validation failed.',
@@ -1110,6 +1151,7 @@ export async function importExcelToGrid(
 
     if (rowValidation.accept === false) {
       issues.push({
+        kind: 'validation',
         sheetRowNumber,
         message: rowValidation.message ?? 'Row validation failed.'
       });
@@ -1126,12 +1168,64 @@ export async function importExcelToGrid(
       const dataIndex = grid.getDataIndex(targetViewRowIndex);
       if (dataIndex >= 0) {
         const currentRow = buildRowSnapshot(dataProvider, dataIndex, gridColumns);
+        let nextValues = validatedValues;
+        const conflictingColumnIds = Object.keys(validatedValues).filter((columnId) => !Object.is(currentRow[columnId], validatedValues[columnId]));
+        if (conflictingColumnIds.length > 0) {
+          let action: ExcelImportConflictAction = conflictMode === 'overwrite' ? 'overwrite' : 'skip';
+          let message: string | undefined;
+
+          if (typeof options.resolveConflict === 'function') {
+            const resolution = await options.resolveConflict({
+              sheetRowNumber,
+              targetRowIndex: targetViewRowIndex,
+              dataIndex,
+              currentValues: { ...currentRow },
+              incomingValues: { ...validatedValues },
+              conflictingColumnIds: [...conflictingColumnIds],
+              defaultAction: action
+            });
+            if (resolution) {
+              action = resolution.action === 'overwrite' ? 'overwrite' : 'skip';
+              if (resolution.values && typeof resolution.values === 'object') {
+                nextValues = {
+                  ...nextValues,
+                  ...resolution.values
+                };
+              }
+              message = resolution.message;
+            }
+          }
+
+          conflicts.push({
+            sheetRowNumber,
+            targetRowIndex: targetViewRowIndex,
+            dataIndex,
+            columnIds: conflictingColumnIds,
+            currentValues: Object.fromEntries(conflictingColumnIds.map((columnId) => [columnId, currentRow[columnId]])),
+            incomingValues: Object.fromEntries(conflictingColumnIds.map((columnId) => [columnId, nextValues[columnId]])),
+            action,
+            message
+          });
+          conflictRows += 1;
+
+          if (action === 'skip') {
+            issues.push({
+              kind: 'conflict',
+              sheetRowNumber,
+              message:
+                message ??
+                `Conflict on row ${targetViewRowIndex + 1}: ${conflictingColumnIds.join(', ')}`
+            });
+            continue;
+          }
+        }
+
         transactions.push({
           type: 'update',
           index: dataIndex,
           row: {
             ...currentRow,
-            ...validatedValues
+            ...nextValues
           }
         });
         updatedRows += 1;
@@ -1161,7 +1255,9 @@ export async function importExcelToGrid(
     importedRows,
     updatedRows,
     addedRows,
+    conflictRows,
     mappedColumns,
+    conflicts,
     issues
   };
 }

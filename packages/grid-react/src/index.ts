@@ -4,6 +4,9 @@ import type {
   ColumnDef,
   GridAdvancedFilterPreset,
   GridColumnLayout,
+  GridDirtyChangeOptions,
+  GridDirtyChangeSummary,
+  GridDirtyRowChange,
   ColumnPinPosition,
   GroupAggregationDef,
   GroupModelItem,
@@ -31,6 +34,9 @@ export type {
   ColumnDef,
   GridAdvancedFilterPreset,
   GridColumnLayout,
+  GridDirtyChangeOptions,
+  GridDirtyChangeSummary,
+  GridDirtyRowChange,
   ColumnPinPosition,
   GroupAggregationDef,
   GroupModelItem,
@@ -290,6 +296,26 @@ export class ReactGridAdapter {
 
   public canRedo(): boolean {
     return this.grid.canRedo();
+  }
+
+  public hasDirtyChanges(): boolean {
+    return this.grid.hasDirtyChanges();
+  }
+
+  public getDirtyChanges(): GridDirtyRowChange[] {
+    return this.grid.getDirtyChanges();
+  }
+
+  public getDirtyChangeSummary(): GridDirtyChangeSummary {
+    return this.grid.getDirtyChangeSummary();
+  }
+
+  public acceptDirtyChanges(options?: GridDirtyChangeOptions): void {
+    this.grid.acceptDirtyChanges(options);
+  }
+
+  public discardDirtyChanges(options?: GridDirtyChangeOptions): void {
+    this.grid.discardDirtyChanges(options);
   }
 
   public on<K extends GridEventName>(eventName: K, handler: (payload: GridEventMap[K]) => void): void {

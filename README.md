@@ -35,7 +35,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - Clipboard pipeline (selection copy TSV + plain text paste + HTML-only paste no-op 회귀 포함)
 - CSV/TSV export pipeline (visible/selection/all + progress + cancel)
 - Excel(xlsx) plugin pipeline (plugin 분리, export/import, header mapping, validation, conflict mode, server delegation UX)
-- CSS Variables theme token pipeline (`.h-theme-light` / `.h-theme-dark` + `setTheme()` runtime override)
+- CSS Variables theme token pipeline (`default` / `enterprise` preset, light/dark/system mode, `setTheme()` runtime override, filter/tool-panel/status surfaces 포함)
 - SI Design Guide pipeline (토큰 매핑표 + 커스터마이징 레시피 + 고객사 테마 샘플)
 - RemoteDataProvider block cache/LRU/prefetch + server query model(sort/filter/group/pivot/tree) + remote grouping/tree row metadata + server pivot result columns + targeted invalidate/query diff/background refresh/retry + rowKey 기반 pending change/save-discard API
 - 성능 스모크(e2e heartbeat max gap)로 그룹/트리/피벗 UI freeze 회귀 점검
@@ -326,6 +326,10 @@ pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 - `example35`: CSV/TSV export(visible/selection/all + progress/cancel)
 - `example36`: Excel(xlsx) import/export(header mapping + validation)
 - `example37`: CSS variable theme switching(light/dark/custom setTheme)
+- `example92`: theme preset + system dark mode + customer CSS shell override
+- `example93`: operations work queue(filter row + filters/columns panel + status bar + context menu)
+- `example94`: remote save/discard workflow(server mode editing + action bar + save failure recovery)
+- `example95`: analyst workspace presets(theme + layout + state + personal workspace save/load)
 - `example38`: ARIA grid semantics(role/row/col index + active descendant)
 - `example39`: keyboard-only flow(navigation/selection/editing)
 - `example40`: i18n(localeText/Intl formatting/RTL)

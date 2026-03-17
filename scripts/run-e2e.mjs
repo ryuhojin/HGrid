@@ -3642,6 +3642,154 @@ async function runExample91Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample92Checks(page, serverUrl, pageErrors) {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto(`${serverUrl}/examples/example92.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example92?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.evaluate(() => window.__example92.setPresetEnterprise());
+  await page.evaluate(() => window.__example92.setModeDark());
+  let snapshot = await page.evaluate(() => window.__example92.getSnapshot());
+  assert.equal(snapshot.themeState.preset, 'enterprise', 'example92 should switch to enterprise preset');
+  assert.equal(snapshot.themeState.resolvedMode, 'dark', 'example92 should switch to dark mode');
+  assert.equal(snapshot.rootClassName.includes('h-theme-enterprise'), true, 'example92 should apply enterprise class');
+  assert.equal(snapshot.computed.filterBackground.length > 0, true, 'example92 should expose filter-row surface tokens');
+  assert.equal(snapshot.computed.toolPanelBackground.length > 0, true, 'example92 should expose tool-panel surface tokens');
+  assert.equal(snapshot.computed.statusBarBackground.length > 0, true, 'example92 should expose status-bar surface tokens');
+
+  await page.evaluate(() => window.__example92.toggleShell());
+  snapshot = await page.evaluate(() => window.__example92.getSnapshot());
+  assert.equal(snapshot.shellClassName.includes('customer-ops-shell'), true, 'example92 should toggle customer CSS shell');
+
+  await page.evaluate(() => window.__example92.setModeSystem());
+  snapshot = await page.evaluate(() => window.__example92.getSnapshot());
+  assert.equal(snapshot.themeState.mode, 'system', 'example92 should move into system mode');
+  assert.equal(snapshot.themeState.resolvedMode, 'dark', 'example92 should follow emulated dark system mode');
+
+  await page.evaluate(() => window.__example92.clearTheme());
+  snapshot = await page.evaluate(() => window.__example92.getSnapshot());
+  assert.equal(snapshot.computed.borderColor.length > 0, true, 'example92 should keep resolved theme tokens after clearTheme');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+  await page.emulateMedia({ colorScheme: 'light' });
+}
+
+async function runExample93Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example93.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example93?.getSnapshot), null, { timeout: 15_000 });
+  await page.waitForSelector('.hgrid__tool-panel--open', { timeout: 15_000, state: 'visible' });
+
+  let snapshot = await page.evaluate(() => window.__example93.getSnapshot());
+  assert.equal(snapshot.activePanel, 'Filters', 'example93 should start with filters panel open');
+  assert.equal(snapshot.viewRowCount, 96, 'example93 should start with full queue size');
+
+  await page.locator('.hgrid__filter-row-input[data-filter-row-column-id="site"]').fill('APAC');
+  await page.locator('.hgrid__filter-row-input[data-filter-row-column-id="site"]').press('Tab');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example93?.getSnapshot?.();
+    return snapshot && snapshot.viewRowCount < 96 && Boolean(snapshot.filterModel.site);
+  }, null, { timeout: 10_000 });
+
+  await page.click('[data-tool-panel-tab-id="columns"]');
+  await page.waitForFunction(() => window.__example93?.getSnapshot?.().activePanel === 'Columns', null, { timeout: 10_000 });
+
+  await page.locator('[data-tool-panel-visibility-column-id="owner"]').setChecked(false);
+  await page.waitForFunction(() => {
+    const snapshot = window.__example93?.getSnapshot?.();
+    return snapshot && snapshot.hiddenColumns.includes('owner');
+  }, null, { timeout: 10_000 });
+
+  snapshot = await page.evaluate(() => window.__example93.getSnapshot());
+  assert.equal(snapshot.visibleColumns.includes('owner'), false, 'example93 should hide owner via columns panel');
+  assert.equal(snapshot.rowsText.length > 0, true, 'example93 should expose rows status bar text');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample94Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example94.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example94?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.evaluate(async () => window.__example94.applyCellChange(0, 'status', 'active'));
+  await page.waitForFunction(() => {
+    const snapshot = window.__example94?.getSnapshot?.();
+    return snapshot && snapshot.hasDirtyChanges === true && snapshot.pendingSummary.cellCount === 1;
+  }, null, { timeout: 10_000 });
+  await page.waitForFunction(() => window.__example94?.getSnapshot?.().actionBar.visible === true, null, { timeout: 10_000 });
+
+  await page.click('[data-edit-action-bar-action="save"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example94?.getSnapshot?.();
+    return (
+      snapshot &&
+      snapshot.hasDirtyChanges === false &&
+      snapshot.pendingSummary.cellCount === 0 &&
+      snapshot.lastSavePayload &&
+      snapshot.lastSavePayload.summary.rowCount === 1 &&
+      snapshot.serverPreview[0].status === 'active'
+    );
+  }, null, { timeout: 10_000 });
+
+  await page.click('#fail-next-save');
+  await page.evaluate(async () => window.__example94.applyCellChange(1, 'owner', 'Han'));
+  await page.waitForFunction(() => window.__example94?.getSnapshot?.().hasDirtyChanges === true, null, { timeout: 10_000 });
+
+  await page.click('[data-edit-action-bar-action="save"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example94?.getSnapshot?.();
+    return snapshot && snapshot.hasDirtyChanges === true && snapshot.actionBar.message.includes('rejected');
+  }, null, { timeout: 10_000 });
+
+  await page.click('[data-edit-action-bar-action="discard"]');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example94?.getSnapshot?.();
+    return snapshot && snapshot.hasDirtyChanges === false && snapshot.pendingSummary.cellCount === 0;
+  }, null, { timeout: 10_000 });
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample95Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example95.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example95?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.click('#clearWorkspace');
+  await page.waitForFunction(() => window.__example95?.getSnapshot?.().savedWorkspaceExists === false, null, { timeout: 10_000 });
+
+  let snapshot = await page.evaluate(() => window.__example95.getSnapshot());
+  assert.equal(snapshot.workspaceName, 'ops', 'example95 should start in ops workspace');
+  assert.equal(snapshot.themeState.preset, 'enterprise', 'example95 ops workspace should use enterprise preset');
+
+  await page.click('#analystWorkspace');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example95?.getSnapshot?.();
+    return snapshot && snapshot.workspaceName === 'analyst' && snapshot.themeState.preset === 'default';
+  }, null, { timeout: 10_000 });
+
+  snapshot = await page.evaluate(() => window.__example95.getSnapshot());
+  const analystVisibleColumns = snapshot.visibleColumns.slice();
+
+  await page.click('#saveWorkspace');
+  await page.waitForFunction(() => window.__example95?.getSnapshot?.().savedWorkspaceExists === true, null, { timeout: 10_000 });
+
+  await page.click('#leadWorkspace');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example95?.getSnapshot?.();
+    return snapshot && snapshot.workspaceName === 'lead-dark' && snapshot.themeState.resolvedMode === 'dark';
+  }, null, { timeout: 10_000 });
+
+  await page.click('#loadWorkspace');
+  await page.waitForFunction(() => {
+    const snapshot = window.__example95?.getSnapshot?.();
+    return snapshot && snapshot.workspaceName === 'personal' && snapshot.themeState.preset === 'default';
+  }, null, { timeout: 10_000 });
+
+  snapshot = await page.evaluate(() => window.__example95.getSnapshot());
+  assert.deepEqual(snapshot.visibleColumns, analystVisibleColumns, 'example95 personal workspace should restore saved layout');
+
+  await page.click('#clearWorkspace');
+  await page.waitForFunction(() => window.__example95?.getSnapshot?.().savedWorkspaceExists === false, null, { timeout: 10_000 });
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function runExample44Checks(page, serverUrl, pageErrors) {
   await page.goto(`${serverUrl}/examples/example44.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(window.__example44?.getSnapshot), null, { timeout: 15_000 });
@@ -5909,6 +6057,14 @@ async function main() {
     await runExample90Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample91Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample92Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample93Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample94Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample95Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample64Checks(page, server.url, pageErrors);
     pageErrors.length = 0;

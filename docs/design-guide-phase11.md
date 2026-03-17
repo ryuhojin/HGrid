@@ -5,8 +5,29 @@
 핵심 원칙은 다음과 같다.
 
 1. 구조/레이아웃 로직은 변경하지 않고 CSS Variables만 조정한다.
-2. 테마 클래스(`.h-theme-light`, `.h-theme-dark`)와 `grid.setTheme()`를 조합한다.
+2. 테마 클래스(`.h-theme-light`, `.h-theme-dark`, `.h-theme-enterprise`)와 `grid.setThemePreset()/setThemeMode()/setTheme()`를 조합한다.
 3. 접근성 대비(텍스트/배경 대비, 포커스 가시성)를 유지한다.
+
+## Safe Override Boundary
+
+고객사 CSS 커스터마이징은 아래 경계 안에서만 진행한다.
+
+1. root selector
+- `.hgrid`
+- `.h-theme-mode-light`
+- `.h-theme-mode-dark`
+- `.h-theme-preset-enterprise`
+
+2. app shell selector
+- `.customer-ops-shell .hgrid`
+- 프로젝트 wrapper class를 통해 CSS variable만 override한다.
+
+3. 금지
+- row/cell absolute positioning 변경
+- viewport/pool layout class에 `display/position/overflow` 직접 override
+- scroll container 크기 계산을 깨는 padding/margin 삽입
+
+실무 기준 안전한 커스터마이징 경계는 이제 header/body 셀뿐 아니라 filter row, filter panel, side bar/tool panel, status bar, edit action bar까지 포함한다.
 
 ## 토큰 -> UI 반영 위치
 
@@ -167,7 +188,8 @@ const themeOpsAmber = {
 
 ## 적용 순서 권장
 1. 기본 테마 클래스 선택(`.h-theme-light` 또는 `.h-theme-dark`).
-2. 고객사 브랜드 토큰을 `setTheme()`로 오버라이드.
+2. built-in preset/mode를 먼저 고른다.
+3. 고객사 브랜드 토큰을 `setTheme()` 또는 wrapper CSS variable로 오버라이드한다.
 3. Selection/Focus 대비 확인.
 4. 헤더 높이/패딩 변경 시 rowHeight 및 예제 화면에서 셀 클리핑 확인.
 
@@ -180,3 +202,4 @@ const themeOpsAmber = {
 ## 연계 문서
 - `docs/theme-tokens-phase11.md`
 - `examples/example37.html`
+- `examples/example92.html`

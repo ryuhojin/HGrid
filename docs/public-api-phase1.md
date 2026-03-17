@@ -16,6 +16,10 @@
 - `getRowModelState()`
 - `resetRowHeights(rowIndexes?)`
 - `setTheme(themeTokens)`
+- `clearTheme()`
+- `setThemePreset(preset)`
+- `setThemeMode(mode)`
+- `getThemeState()`
 - `getState()`
 - `setState(state)`
 - `getColumnLayout()`
@@ -49,6 +53,14 @@
 ## Config/State Types
 - `GridConfig`: partial runtime configuration for constructor and incremental updates.
 - `GridOptions`: normalized runtime option shape.
+- theme options (Phase E3.7):
+  - `theme?: { preset?: "default" | "enterprise", mode?: "light" | "dark" | "system", tokens?: GridTheme }`
+  - `GridResolvedThemeState`: `{ preset, mode, resolvedMode, tokens }`
+  - built-in preset/mode token surface covers:
+    - header/body cells
+    - filter row / filter panel
+    - side bar / tool panel
+    - status bar / edit action bar
 - `GridExportOptions` / `GridExportProgressEvent` / `GridExportResult` (Phase 10.2):
   - `scope: "visible" | "selection" | "all"`
   - `signal: AbortSignal` cancel 지원
@@ -392,7 +404,8 @@
 - `setColumns`, `setOptions`, `setColumnOrder`, `setColumnVisibility`, `setColumnWidth`
 - `setColumnPin`
 - `setRowOrder`, `setFilteredRowOrder`, `resetRowOrder`, `setRowModelOptions`, `getRowModelState`, `resetRowHeights`
-- `setTheme`, `getState`, `setState`, `getSelection`, `setSelection`, `clearSelection`
+- `setTheme`, `clearTheme`, `setThemePreset`, `setThemeMode`, `getThemeState`
+- `getState`, `setState`, `getSelection`, `setSelection`, `clearSelection`
 - `hasDirtyChanges`, `getDirtyChanges`, `getDirtyChangeSummary`, `acceptDirtyChanges`, `discardDirtyChanges`
 - `undo`, `redo`, `canUndo`, `canRedo`
 - `getColumnLayout`, `setColumnLayout`

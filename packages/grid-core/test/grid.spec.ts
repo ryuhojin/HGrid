@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Grid } from '../src';
 import { EDIT_COMMIT_AUDIT_SCHEMA_VERSION } from '../src/core/edit-events';
 import { LocalDataProvider } from '../src/data/local-data-provider';
@@ -4329,6 +4329,137 @@ describe('Grid DOM pooling', () => {
 
     grid.destroy();
     container.remove();
+  });
+
+  it('applies built-in theme preset and clears theme overrides', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' }
+      ],
+      rowData: [
+        { id: 1, name: 'Alpha' },
+        { id: 2, name: 'Beta' }
+      ],
+      theme: {
+        preset: 'enterprise',
+        mode: 'dark'
+      },
+      height: 160,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    grid.setTheme({
+      '--hgrid-header-bg': '#123456'
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    expect(root.classList.contains('h-theme-enterprise')).toBe(true);
+    expect(root.classList.contains('h-theme-dark')).toBe(true);
+    expect(grid.getThemeState()).toMatchObject({
+      preset: 'enterprise',
+      mode: 'dark',
+      resolvedMode: 'dark'
+    });
+    expect(root.style.getPropertyValue('--hgrid-header-bg')).toBe('#123456');
+
+    grid.clearTheme();
+    await waitForFrame();
+    expect(root.style.getPropertyValue('--hgrid-header-bg')).toBe('');
+
+    grid.setThemePreset('default');
+    grid.setThemeMode('light');
+    await waitForFrame();
+    expect(root.classList.contains('h-theme-enterprise')).toBe(false);
+    expect(root.classList.contains('h-theme-light')).toBe(true);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('tracks system color scheme changes through theme mode', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    let isDarkMode = false;
+    const listeners = new Set<(event: MediaQueryListEvent) => void>();
+    const mediaQueryList = {
+      matches: false,
+      media: '(prefers-color-scheme: dark)',
+      onchange: null,
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+        listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+        listeners.delete(listener);
+      },
+      addListener: (listener: (event: MediaQueryListEvent) => void) => {
+        listeners.add(listener);
+      },
+      removeListener: (listener: (event: MediaQueryListEvent) => void) => {
+        listeners.delete(listener);
+      },
+      dispatchEvent: () => true
+    };
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        mediaQueryList.matches = isDarkMode;
+        return mediaQueryList;
+      })
+    });
+
+    try {
+      const grid = new Grid(container, {
+        columns: [
+          { id: 'id', header: 'ID', width: 100, type: 'number' },
+          { id: 'name', header: 'Name', width: 220, type: 'text' }
+        ],
+        rowData: [
+          { id: 1, name: 'Alpha' },
+          { id: 2, name: 'Beta' }
+        ],
+        theme: {
+          preset: 'enterprise',
+          mode: 'system'
+        },
+        height: 160,
+        rowHeight: 28,
+        overscan: 2
+      });
+
+      await waitForFrame();
+
+      const root = container.querySelector('.hgrid') as HTMLDivElement;
+      expect(root.classList.contains('h-theme-light')).toBe(true);
+      expect(grid.getThemeState().resolvedMode).toBe('light');
+
+      isDarkMode = true;
+      mediaQueryList.matches = true;
+      listeners.forEach((listener) => {
+        listener({ matches: true, media: mediaQueryList.media } as MediaQueryListEvent);
+      });
+      await waitForFrame();
+
+      expect(root.classList.contains('h-theme-dark')).toBe(true);
+      expect(grid.getThemeState().resolvedMode).toBe('dark');
+
+      grid.destroy();
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: originalMatchMedia
+      });
+      container.remove();
+    }
   });
 
   it('supports indicator checkbox/checkAll interactions and Space toggle', async () => {

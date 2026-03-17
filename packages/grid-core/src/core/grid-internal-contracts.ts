@@ -8,6 +8,8 @@ import type {
   GridDirtyChangeSummary,
   GridDirtyRowChange,
   GridOptions,
+  GridResolvedThemeMode,
+  GridThemePreset,
   GroupAggregationDef,
   GroupModelItem,
   GroupingMode,
@@ -58,6 +60,8 @@ export interface GridRendererPort {
   setColumns(columns: ColumnDef[]): void;
   setColumnCatalog(columns: ColumnDef[]): void;
   setTheme(themeTokens: Record<string, string>): void;
+  clearTheme(): void;
+  setThemeAppearance(preset: GridThemePreset, resolvedMode: GridResolvedThemeMode): void;
   getState(): GridRendererState;
   setState(state: GridRendererState): void;
   getSelection(): GridSelection;

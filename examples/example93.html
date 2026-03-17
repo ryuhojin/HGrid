@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 93 - Operations Work Queue</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #102535;
+        background:
+          radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 320px),
+          linear-gradient(180deg, #f6f8fb 0%, #ebf1f6 100%);
+      }
+
+      .page {
+        max-width: 1540px;
+        margin: 0 auto;
+        padding: 28px 24px 40px;
+      }
+
+      .hero,
+      .workspace {
+        border: 1px solid rgba(16, 37, 53, 0.08);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+        gap: 20px;
+        padding: 24px;
+        margin-bottom: 18px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        margin-bottom: 12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(15, 118, 110, 0.12);
+        color: #0f766e;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+        line-height: 1.08;
+      }
+
+      p,
+      li {
+        color: #4b6475;
+        line-height: 1.58;
+      }
+
+      .hero ul {
+        margin: 14px 0 0;
+        padding-left: 18px;
+      }
+
+      .task-card {
+        padding: 18px 20px;
+        border-radius: 18px;
+        background: #102535;
+        color: #dbeefd;
+      }
+
+      .task-card h2 {
+        margin: 0 0 10px;
+        font-size: 15px;
+      }
+
+      .task-card ol {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .task-card li {
+        color: #dbeefd;
+      }
+
+      .workspace {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: #0f766e;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #dbe6f4;
+        color: #143353;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      #grid {
+        min-width: 0;
+      }
+
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        padding: 12px;
+        border-radius: 14px;
+        background: #edf7f5;
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #61758a;
+      }
+
+      .metric span {
+        display: block;
+        margin-top: 6px;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      pre {
+        margin: 0;
+        padding: 14px;
+        border-radius: 14px;
+        background: #10212d;
+        color: #d8eef9;
+        font-size: 12px;
+        line-height: 1.52;
+        overflow: auto;
+      }
+
+      @media (max-width: 1180px) {
+        .hero,
+        .content {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <div>
+          <div class="eyebrow">Enterprise E3 Close-Out</div>
+          <h1>Operations Work Queue</h1>
+          <p>
+            운영팀 담당자가 개발자 도움 없이 필터, 사이드 패널, 컬럼 토글, 컨텍스트 메뉴, 상태바를 사용해
+            실시간 작업 큐를 정리하는 업무형 예제입니다.
+          </p>
+          <ul>
+            <li>필터 row에서 <strong>site / queue / priority</strong>를 바로 좁힙니다.</li>
+            <li><strong>Filters</strong> / <strong>Columns</strong> 탭에서 패널만으로 뷰를 바꿉니다.</li>
+            <li>body 우클릭으로 현재 값 기반 필터와 복사를 바로 실행할 수 있습니다.</li>
+            <li>status bar로 현재 visible rows와 selection 상태를 즉시 확인합니다.</li>
+          </ul>
+        </div>
+        <aside class="task-card">
+          <h2>권장 체험 순서</h2>
+          <ol>
+            <li><strong>Site</strong> 필터에 <code>APAC</code>를 입력합니다.</li>
+            <li><strong>Filters</strong> 탭에서 <code>priority = P1</code>만 남깁니다.</li>
+            <li><strong>Columns</strong> 탭으로 가서 <code>owner</code>를 숨깁니다.</li>
+            <li>status bar에서 visible rows가 줄어드는지 확인합니다.</li>
+          </ol>
+        </aside>
+      </section>
+
+      <section class="workspace">
+        <div class="toolbar">
+          <button id="resetView" type="button">Reset Queue View</button>
+          <button id="openFilters" class="secondary" type="button">Open Filters Tab</button>
+          <button id="openColumns" class="secondary" type="button">Open Columns Tab</button>
+        </div>
+
+        <div class="content">
+          <div id="grid"></div>
+
+          <aside class="side">
+            <div class="metric-grid">
+              <div class="metric">
+                <strong>Visible Rows</strong>
+                <span id="visibleRowsText">-</span>
+              </div>
+              <div class="metric">
+                <strong>Hidden Columns</strong>
+                <span id="hiddenColumnsText">-</span>
+              </div>
+              <div class="metric">
+                <strong>Active Panel</strong>
+                <span id="activePanelText">-</span>
+              </div>
+              <div class="metric">
+                <strong>Status Bar</strong>
+                <span id="statusRowsText">-</span>
+              </div>
+            </div>
+            <pre id="snapshotText">Initializing...</pre>
+          </aside>
+        </div>
+      </section>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const BASE_COLUMNS = [
+        { id: 'ticketId', header: 'Ticket', width: 108, type: 'number' },
+        { id: 'site', header: 'Site', width: 120, type: 'text' },
+        { id: 'queue', header: 'Queue', width: 160, type: 'text' },
+        { id: 'priority', header: 'Priority', width: 110, type: 'text', filterMode: 'set' },
+        { id: 'status', header: 'Status', width: 132, type: 'text', filterMode: 'set' },
+        { id: 'owner', header: 'Owner', width: 148, type: 'text', filterMode: 'set' },
+        { id: 'slaMinutes', header: 'SLA Left', width: 124, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 190, type: 'date' }
+      ];
+
+      const STATUS_VALUES = ['queued', 'active', 'watch', 'blocked'];
+      const SITES = ['APAC', 'EMEA', 'AMER'];
+      const QUEUES = ['Payments', 'Fraud', 'Onboarding', 'Support'];
+      const PRIORITIES = ['P1', 'P2', 'P3'];
+      const OWNERS = ['Kim', 'Park', 'Lee', 'Choi', 'Han'];
+
+      const rowData = Array.from({ length: 96 }, (_, index) => ({
+        ticketId: 7000 + index,
+        site: SITES[index % SITES.length],
+        queue: QUEUES[index % QUEUES.length],
+        priority: PRIORITIES[index % PRIORITIES.length],
+        status: STATUS_VALUES[index % STATUS_VALUES.length],
+        owner: OWNERS[index % OWNERS.length],
+        slaMinutes: 120 - index,
+        updatedAt: new Date(Date.UTC(2026, 2, 17, 2, index % 60, 0)).toISOString()
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: BASE_COLUMNS.map((column) => ({ ...column })),
+        rowData,
+        theme: {
+          preset: 'enterprise',
+          mode: 'light'
+        },
+        height: 560,
+        rowHeight: 30,
+        overscan: 8,
+        rowIndicator: {
+          width: 84,
+          showCheckbox: true
+        },
+        filterRow: {
+          enabled: true
+        },
+        columnMenu: {
+          enabled: true,
+          trigger: 'both'
+        },
+        contextMenu: {
+          enabled: true,
+          builtInActions: ['copyCell', 'copyRow', 'copySelection', 'filterByValue', 'clearColumnFilter']
+        },
+        sideBar: {
+          enabled: true,
+          panels: ['filters', 'columns'],
+          defaultPanel: 'filters',
+          initialOpen: true,
+          width: 408
+        },
+        statusBar: {
+          enabled: true,
+          items: ['selection', 'rows', 'aggregates']
+        }
+      });
+
+      const visibleRowsText = document.getElementById('visibleRowsText');
+      const hiddenColumnsText = document.getElementById('hiddenColumnsText');
+      const activePanelText = document.getElementById('activePanelText');
+      const statusRowsText = document.getElementById('statusRowsText');
+      const snapshotText = document.getElementById('snapshotText');
+
+      function getStatusBarText(itemId) {
+        const element = document.querySelector('[data-status-bar-item="' + itemId + '"]');
+        return element ? element.textContent.trim() : '';
+      }
+
+      function getVisibleTicketIds(limit) {
+        const ids = [];
+        const count = Math.min(limit, grid.getViewRowCount());
+        for (let rowIndex = 0; rowIndex < count; rowIndex += 1) {
+          const dataIndex = grid.getDataIndex(rowIndex);
+          ids.push(grid.getDataProvider().getValue(dataIndex, 'ticketId'));
+        }
+        return ids;
+      }
+
+      function getActivePanelLabel() {
+        const activeTab = document.querySelector('.hgrid__tool-panel-tab--active');
+        return activeTab ? activeTab.textContent.trim() : '';
+      }
+
+      function getSnapshot() {
+        const columns = grid.getColumns();
+        return {
+          viewRowCount: grid.getViewRowCount(),
+          visibleColumns: grid.getVisibleColumns().map((column) => column.id),
+          hiddenColumns: columns.filter((column) => column.visible === false).map((column) => column.id),
+          filterModel: JSON.parse(JSON.stringify(grid.getFilterModel())),
+          activePanel: getActivePanelLabel(),
+          panelOpen: document.querySelector('.hgrid__tool-panel--open') !== null,
+          rowsText: getStatusBarText('rows'),
+          selectionText: getStatusBarText('selection'),
+          visibleTicketIds: getVisibleTicketIds(8)
+        };
+      }
+
+      function renderSnapshot() {
+        const snapshot = getSnapshot();
+        visibleRowsText.textContent = String(snapshot.viewRowCount);
+        hiddenColumnsText.textContent = snapshot.hiddenColumns.join(', ') || 'none';
+        activePanelText.textContent = snapshot.activePanel || 'closed';
+        statusRowsText.textContent = snapshot.rowsText || 'n/a';
+        snapshotText.textContent = JSON.stringify(snapshot, null, 2);
+      }
+
+      async function resetQueueView() {
+        grid.setColumns(BASE_COLUMNS.map((column) => ({ ...column })));
+        await Promise.resolve(grid.clearFilterModel());
+        grid.clearSelection();
+        renderSnapshot();
+      }
+
+      document.getElementById('resetView').addEventListener('click', () => {
+        void resetQueueView();
+      });
+
+      document.getElementById('openFilters').addEventListener('click', () => {
+        const tab = Array.from(document.querySelectorAll('.hgrid__tool-panel-tab')).find((node) => node.textContent.trim() === 'Filters');
+        if (tab) {
+          tab.click();
+        }
+      });
+
+      document.getElementById('openColumns').addEventListener('click', () => {
+        const tab = Array.from(document.querySelectorAll('.hgrid__tool-panel-tab')).find((node) => node.textContent.trim() === 'Columns');
+        if (tab) {
+          tab.click();
+        }
+      });
+
+      const observer = new MutationObserver(() => {
+        renderSnapshot();
+      });
+      observer.observe(document.getElementById('grid'), {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'checked', 'aria-pressed', 'aria-selected']
+      });
+
+      grid.on('selectionChange', renderSnapshot);
+      renderSnapshot();
+
+      window.__example93 = {
+        getSnapshot,
+        resetQueueView
+      };
+    </script>
+  </body>
+</html>

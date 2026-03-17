@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 94 - Remote Save and Discard Workflow</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #0f172a;
+        background:
+          radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 260px),
+          linear-gradient(180deg, #f8fbff 0%, #f2f6fb 100%);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0;
+        color: #475569;
+        line-height: 1.55;
+      }
+
+      .page {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .toolbar button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        color: inherit;
+        font: inherit;
+        font-weight: 600;
+        padding: 9px 14px;
+        cursor: pointer;
+      }
+
+      .toolbar button[data-active='true'] {
+        border-color: #dc2626;
+        background: rgba(254, 226, 226, 0.96);
+        color: #991b1b;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .card {
+        border: 1px solid #dbe3ee;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      .meta {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .meta-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .meta-title {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+      }
+
+      .meta-kpis {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .meta-kpi {
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        background: #f8fafc;
+        padding: 10px 12px;
+      }
+
+      .meta-kpi strong {
+        display: block;
+        font-size: 20px;
+      }
+
+      pre {
+        margin: 0;
+        padding: 12px;
+        border-radius: 14px;
+        background: #0f172a;
+        color: #dbeafe;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow: auto;
+      }
+
+      .note {
+        font-size: 13px;
+        color: #475569;
+      }
+
+      @media (max-width: 1200px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div>
+        <h1>Example 94 - Remote Save and Discard Workflow</h1>
+        <p>
+          서버모드에서도 셀 편집은 즉시 반영되고, action bar에서 저장/폐기/오류 복구까지 끝내는 업무형 예제입니다.
+          더블클릭 또는 Enter로 <strong>status</strong>, <strong>owner</strong>, <strong>budget</strong>를 편집한 뒤
+          그리드 하단 action bar로 저장 또는 폐기해 보세요.
+        </p>
+      </div>
+
+      <div class="toolbar">
+        <button id="fail-next-save" type="button" data-active="false">Fail Next Save</button>
+        <button id="invalidate-block0" type="button">Invalidate Block 0</button>
+      </div>
+
+      <div class="layout">
+        <div class="card">
+          <div id="grid"></div>
+        </div>
+
+        <div class="card meta">
+          <div class="meta-section">
+            <div class="meta-title">Workflow Summary</div>
+            <div class="meta-kpis">
+              <div class="meta-kpi">
+                <span>Dirty Rows</span>
+                <strong id="dirty-rows">0</strong>
+              </div>
+              <div class="meta-kpi">
+                <span>Pending Cells</span>
+                <strong id="pending-cells">0</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="meta-section">
+            <div class="meta-title">Action Bar</div>
+            <pre id="action-bar-json"></pre>
+          </div>
+
+          <div class="meta-section">
+            <div class="meta-title">Pending Payload</div>
+            <pre id="pending-json"></pre>
+          </div>
+
+          <div class="meta-section">
+            <div class="meta-title">Last Save Payload</div>
+            <pre id="save-json"></pre>
+          </div>
+
+          <div class="meta-section">
+            <div class="meta-title">Server Preview</div>
+            <pre id="server-json"></pre>
+          </div>
+
+          <div class="meta-section">
+            <div class="meta-title">Last Audit</div>
+            <pre id="audit-json"></pre>
+          </div>
+
+          <div class="note">저장 실패를 한 번 켜고 Save를 누르면 danger tone message와 dirty 유지 동작을 같이 볼 수 있습니다.</div>
+        </div>
+      </div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const TOTAL_ROWS = 72;
+      const BLOCK_SIZE = 18;
+      const LATENCY_MS = 28;
+      const REGIONS = ['APAC', 'EMEA', 'AMER'];
+      const OWNERS = ['Kim', 'Park', 'Lee', 'Choi'];
+      const serverRows = Array.from({ length: TOTAL_ROWS }, (_, index) => ({
+        id: index + 1,
+        account: 'Remote-' + String(index + 1).padStart(3, '0'),
+        region: REGIONS[index % REGIONS.length],
+        status: index % 3 === 0 ? 'draft' : index % 3 === 1 ? 'review' : 'active',
+        owner: OWNERS[index % OWNERS.length],
+        budget: 900 + index * 23,
+        renewalDate: '2026-03-' + String((index % 16) + 10).padStart(2, '0'),
+        revision: 1
+      }));
+      const serverRowsById = new Map(serverRows.map((row) => [row.id, row]));
+
+      const dirtyRowsElement = document.getElementById('dirty-rows');
+      const pendingCellsElement = document.getElementById('pending-cells');
+      const actionBarJsonElement = document.getElementById('action-bar-json');
+      const pendingJsonElement = document.getElementById('pending-json');
+      const saveJsonElement = document.getElementById('save-json');
+      const serverJsonElement = document.getElementById('server-json');
+      const auditJsonElement = document.getElementById('audit-json');
+      const failNextSaveButton = document.getElementById('fail-next-save');
+
+      let failNextSave = false;
+      let lastSavePayload = null;
+      let lastAudit = null;
+      let provider = null;
+
+      function wait(delayMs) {
+        return new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      function nextFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function clone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function readServerSlice(startIndex, endIndex) {
+        const rows = [];
+        for (let dataIndex = startIndex; dataIndex < Math.min(endIndex, serverRows.length); dataIndex += 1) {
+          const row = serverRows[dataIndex];
+          rows.push({
+            id: row.id,
+            account: row.account,
+            region: row.region,
+            status: row.status,
+            owner: row.owner,
+            budget: row.budget,
+            renewalDate: row.renewalDate,
+            revision: 'srv-v' + row.revision
+          });
+        }
+        return rows;
+      }
+
+      const columns = [
+        { id: 'id', header: 'ID', width: 84, type: 'number' },
+        { id: 'account', header: 'Account', width: 200, type: 'text' },
+        { id: 'region', header: 'Region', width: 120, type: 'text', filterMode: 'set' },
+        {
+          id: 'status',
+          header: 'Status',
+          width: 150,
+          type: 'text',
+          editable: true,
+          filterMode: 'set',
+          editor: {
+            type: 'select',
+            options: [
+              { value: 'draft', label: 'Draft' },
+              { value: 'review', label: 'Review' },
+              { value: 'active', label: 'Active' }
+            ]
+          }
+        },
+        {
+          id: 'owner',
+          header: 'Owner',
+          width: 140,
+          type: 'text',
+          editable: true
+        },
+        {
+          id: 'budget',
+          header: 'Budget',
+          width: 140,
+          type: 'number',
+          editable: true,
+          editor: {
+            type: 'number',
+            min: 0,
+            step: 10
+          }
+        },
+        {
+          id: 'renewalDate',
+          header: 'Renewal Date',
+          width: 170,
+          type: 'date',
+          editable: true,
+          editor: {
+            type: 'date'
+          }
+        }
+      ];
+
+      const dataSource = {
+        async fetchBlock(request) {
+          await wait(LATENCY_MS);
+          return {
+            rows: readServerSlice(request.startIndex, request.endIndex),
+            totalRowCount: serverRows.length
+          };
+        }
+      };
+
+      provider = new HGrid.RemoteDataProvider({
+        dataSource,
+        rowCount: TOTAL_ROWS,
+        cache: {
+          blockSize: BLOCK_SIZE,
+          maxBlocks: 6
+        }
+      });
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        dataProvider: provider,
+        theme: {
+          preset: 'enterprise',
+          mode: 'light'
+        },
+        height: 520,
+        rowHeight: 30,
+        overscan: 8,
+        statusBar: {
+          enabled: true,
+          items: ['remote', 'rows', 'selection']
+        },
+        editPolicy: {
+          dirtyTracking: {
+            enabled: true
+          },
+          actionBar: {
+            enabled: true,
+            async onSave(context) {
+              await wait(90);
+              if (failNextSave) {
+                failNextSave = false;
+                renderMeta();
+                return {
+                  completed: false,
+                  message: 'Server rejected changes. Review and retry.',
+                  tone: 'danger'
+                };
+              }
+
+              const pendingChanges = provider.getPendingChanges();
+              pendingChanges.forEach((rowChange) => {
+                const serverRow = serverRowsById.get(rowChange.rowKey);
+                if (!serverRow) {
+                  return;
+                }
+                rowChange.changes.forEach((change) => {
+                  serverRow[change.columnId] = change.value;
+                });
+                serverRow.revision += 1;
+              });
+              provider.acceptPendingChanges();
+
+              lastSavePayload = {
+                summary: context.summary,
+                dirtyChanges: context.dirtyChanges,
+                pendingChanges
+              };
+              renderMeta();
+              return {
+                completed: true,
+                message: 'Changes saved to the remote workflow queue.',
+                tone: 'active'
+              };
+            }
+          }
+        },
+        validateEdit(context) {
+          if (context.column.id === 'owner' && String(context.value ?? '').trim().length === 0) {
+            return { message: 'Owner is required', code: 'owner_required' };
+          }
+          if (context.column.id === 'budget' && (typeof context.value !== 'number' || context.value < 0)) {
+            return { message: 'Budget must be zero or higher', code: 'budget_min' };
+          }
+          return null;
+        },
+        onAuditLog(payload) {
+          lastAudit = {
+            source: payload.source,
+            rowKey: payload.rowKey,
+            columnId: payload.columnId,
+            cellCount: payload.cellCount,
+            transactionKind: payload.transactionKind,
+            transactionStep: payload.transactionStep
+          };
+          renderMeta();
+        }
+      });
+
+      const renderer = grid.renderer;
+
+      function readActionBarSnapshot() {
+        const bar = document.querySelector('.hgrid__edit-action-bar');
+        const saveButton = document.querySelector('[data-edit-action-bar-action="save"]');
+        const discardButton = document.querySelector('[data-edit-action-bar-action="discard"]');
+        const message = document.querySelector('.hgrid__edit-action-bar-message');
+        return {
+          visible: Boolean(bar) && getComputedStyle(bar).display !== 'none',
+          text: bar ? bar.textContent.trim().replace(/\s+/g, ' ') : '',
+          message: message ? message.textContent.trim() : '',
+          saveDisabled: saveButton ? saveButton.disabled : true,
+          discardDisabled: discardButton ? discardButton.disabled : true
+        };
+      }
+
+      function getSnapshot() {
+        return {
+          hasDirtyChanges: grid.hasDirtyChanges(),
+          dirtySummary: grid.getDirtyChangeSummary(),
+          pendingSummary: provider.getPendingChangeSummary(),
+          pendingChanges: provider.getPendingChanges(),
+          actionBar: readActionBarSnapshot(),
+          lastSavePayload,
+          lastAudit,
+          serverPreview: clone(serverRows.slice(0, 6)),
+          remoteStatusText: (document.querySelector('[data-status-bar-item="remote"]') || { textContent: '' }).textContent.trim()
+        };
+      }
+
+      function renderMeta() {
+        const snapshot = getSnapshot();
+        dirtyRowsElement.textContent = String(snapshot.dirtySummary.rowCount);
+        pendingCellsElement.textContent = String(snapshot.pendingSummary.cellCount);
+        actionBarJsonElement.textContent = JSON.stringify(snapshot.actionBar, null, 2);
+        pendingJsonElement.textContent = JSON.stringify(
+          {
+            summary: snapshot.pendingSummary,
+            changes: snapshot.pendingChanges
+          },
+          null,
+          2
+        );
+        saveJsonElement.textContent = JSON.stringify(snapshot.lastSavePayload, null, 2);
+        serverJsonElement.textContent = JSON.stringify(snapshot.serverPreview, null, 2);
+        auditJsonElement.textContent = JSON.stringify(snapshot.lastAudit, null, 2);
+        failNextSaveButton.dataset.active = snapshot.actionBar.message.includes('rejected') || failNextSave ? 'true' : 'false';
+      }
+
+      async function applyCellChange(rowIndex, columnId, value) {
+        const columnIndex = columns.findIndex((column) => column.id === columnId);
+        if (columnIndex < 0) {
+          throw new Error('Unknown column: ' + columnId);
+        }
+
+        renderer.startEditingAtCell(rowIndex, columnIndex);
+        await nextFrame();
+
+        if (renderer.editorSelectElement && renderer.editorSelectElement.style.display !== 'none') {
+          const editorOptions = columns[columnIndex].editor?.options ?? [];
+          const optionIndex = editorOptions.findIndex((option) => String(option.value) === String(value));
+          renderer.editorSelectElement.value = String(Math.max(0, optionIndex));
+          renderer.editorSelectElement.dispatchEvent(new Event('change', { bubbles: true }));
+          renderer.editorSelectElement.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+          );
+          await nextFrame();
+          await nextFrame();
+          renderMeta();
+          return;
+        }
+
+        renderer.editorInputElement.value = String(value);
+        renderer.editorInputElement.dispatchEvent(new Event('input', { bubbles: true }));
+        renderer.editorInputElement.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+        await nextFrame();
+        await nextFrame();
+        renderMeta();
+      }
+
+      document.getElementById('fail-next-save').addEventListener('click', () => {
+        failNextSave = !failNextSave;
+        failNextSaveButton.dataset.active = failNextSave ? 'true' : 'false';
+      });
+
+      document.getElementById('invalidate-block0').addEventListener('click', () => {
+        provider.invalidateBlocks({ startIndex: 0, endIndex: BLOCK_SIZE });
+        renderMeta();
+      });
+
+      provider.onRowsChanged(renderMeta);
+      renderMeta();
+
+      window.__example94 = {
+        getSnapshot,
+        applyCellChange,
+        setFailNextSave(value) {
+          failNextSave = Boolean(value);
+          failNextSaveButton.dataset.active = failNextSave ? 'true' : 'false';
+          renderMeta();
+        }
+      };
+    </script>
+  </body>
+</html>

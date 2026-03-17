@@ -2,16 +2,22 @@
 
 ## 목표
 - 테마 토큰을 CSS Variables로 표준화
-- light/dark 테마 클래스 제공
+- built-in preset(`default` / `enterprise`) + light/dark mode 제공
 - `setTheme()` API로 런타임 오버라이드 지원
+- `setThemeMode()`로 system dark mode 대응
 
 ## 테마 클래스
 - `.h-theme-light`
 - `.h-theme-dark`
+- `.h-theme-enterprise`
+- `.h-theme-mode-light`
+- `.h-theme-mode-dark`
+- `.h-theme-preset-enterprise`
 
 적용 방식:
 - 부모 컨테이너에 클래스 적용: `<div class="h-theme-dark"><div id="grid"></div></div>`
 - 또는 grid root에 직접 적용: `<div class="hgrid h-theme-dark">...</div>`
+- built-in preset/mode API를 쓰면 core가 root `.hgrid`에 해당 클래스를 직접 부여한다.
 
 ## 토큰 카테고리
 
@@ -62,6 +68,20 @@
   - `--hgrid-state-inserted`
   - `--hgrid-state-deleted`
   - `--hgrid-state-error`
+- enterprise surface:
+  - status/action bar:
+    - `--hgrid-status-bar-*`
+    - `--hgrid-edit-action-bar-bg`
+    - `--hgrid-edit-action-button-*`
+  - filter row/panel:
+    - `--hgrid-filter-row-*`
+    - `--hgrid-filter-input-*`
+    - `--hgrid-filter-panel-*`
+    - `--hgrid-fill-handle-shadow`
+  - side bar/tool panel:
+    - `--hgrid-side-bar-*`
+    - `--hgrid-tool-panel-*`
+    - columns/advanced-filter/order row/card/empty/preset/action surface까지 포함
 
 ### 3) Line
 - `--hgrid-line-width`
@@ -87,14 +107,24 @@
 
 ## API
 ```ts
+grid.setThemePreset('enterprise');
+grid.setThemeMode('system');
+
 grid.setTheme({
   '--hgrid-header-bg': '#fffbeb',
   '--hgrid-border-color': '#fcd34d',
   '--hgrid-active-border': 'rgba(217, 119, 6, 0.95)'
 });
+
+const themeState = grid.getThemeState();
+grid.clearTheme();
 ```
 
 `setTheme()`은 root `.hgrid`에 inline CSS variable을 적용한다.
+`clearTheme()`은 core가 적용한 inline token override만 제거하고 built-in preset/mode class는 유지한다.
 
 ## 참고 예제
 - `examples/example37.html`
+- `examples/example92.html`
+
+`example92`는 header, filter row, side bar, tool panel, status bar까지 한 화면에서 확인하는 theme surface smoke다.

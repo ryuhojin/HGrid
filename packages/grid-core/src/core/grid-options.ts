@@ -39,6 +39,9 @@ export type GridBuiltInBodyMenuActionId =
   | 'filterByValue'
   | 'clearColumnFilter';
 export type GridUnsafeHtmlPolicy = 'sanitizedOnly' | 'allowRaw';
+export type GridThemePreset = 'default' | 'enterprise';
+export type GridThemeMode = 'light' | 'dark' | 'system';
+export type GridResolvedThemeMode = 'light' | 'dark';
 
 export type ColumnFormatter = (value: unknown, row: GridRowData) => string;
 export type ColumnComparator = (a: unknown, b: unknown) => number;
@@ -670,6 +673,7 @@ export interface GridOptions {
   rowModel: RowModel;
   locale?: string;
   localeText?: Partial<GridLocaleText>;
+  theme?: GridThemeOptions;
   htmlRendering?: GridHtmlRenderingOptions;
   styleNonce?: string;
   sanitizeHtml?: UnsafeHtmlSanitizer;
@@ -710,4 +714,17 @@ export interface GridState {
 
 export interface GridTheme {
   [cssVariableName: string]: string;
+}
+
+export interface GridThemeOptions {
+  preset?: GridThemePreset;
+  mode?: GridThemeMode;
+  tokens?: GridTheme;
+}
+
+export interface GridResolvedThemeState {
+  preset: GridThemePreset;
+  mode: GridThemeMode;
+  resolvedMode: GridResolvedThemeMode;
+  tokens: GridTheme;
 }

@@ -255,16 +255,28 @@
 - [x] layout / workspace storage recipe 문서화
 - [x] support matrix에 persistence 포함
 
+## E3.7 Theme / Design System / Dark Mode
+- [x] CSS variable token surface 재검토 및 누락 토큰 확장
+- [x] CSS override safe boundary(selector/token/class) 가이드 정리
+- [x] built-in theme 제공(light / dark / enterprise preset)
+- [x] dark mode toggle + system preference 대응 전략 정리
+- [x] runtime theme switching example + 고객사 브랜딩 example 추가
+- [x] adapter/framework theme recipe 문서화
+- [x] theme 변경 시 layout/contrast/focus/a11y 회귀 테스트 추가
+
 ### 경쟁 제품 parity 최소 범위
 - [x] column menu
 - [x] filter panel
 - [x] side bar / tool panel
 - [x] status bar
 - [x] layout persistence
+- [x] built-in theme / dark mode / CSS skinning
 
 ### 수용 기준
 - [x] 코드 API만 아는 개발자가 아니라 일반 업무 사용자가 UI만으로 주요 기능을 쓸 수 있다.
 - [x] examples가 “엔진 데모”에서 “업무 시나리오 데모”로 확장된다.
+- [x] 고객사가 CSS variables와 override CSS만으로 제품 스킨을 안전하게 바꿀 수 있다.
+- [x] built-in light/dark theme와 runtime switching, dark mode 대응 예제가 존재한다.
 
 ---
 

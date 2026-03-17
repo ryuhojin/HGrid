@@ -1194,6 +1194,62 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 92,
+      "file": "example92.html",
+      "title": "Example 92 - Theme Presets, Dark Mode, and Surface Tokens",
+      "tags": [
+        "phase-e3",
+        "theme",
+        "dark-mode",
+        "design-system",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 93,
+      "file": "example93.html",
+      "title": "Example 93 - Operations Work Queue",
+      "tags": [
+        "phase-e3",
+        "business-scenario",
+        "operations",
+        "filter",
+        "side-bar",
+        "status-bar",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 94,
+      "file": "example94.html",
+      "title": "Example 94 - Remote Save and Discard Workflow",
+      "tags": [
+        "phase-e4",
+        "business-scenario",
+        "remote",
+        "editing",
+        "workflow",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 95,
+      "file": "example95.html",
+      "title": "Example 95 - Analyst Workspace Presets",
+      "tags": [
+        "phase-e3",
+        "business-scenario",
+        "workspace",
+        "layout",
+        "theme",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 92 - Theme Presets, Dark Mode, and Surface Tokens</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+        background: #f8fafc;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 14px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: #ffffff;
+        color: #0f172a;
+        padding: 8px 14px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .summary {
+        margin: 0 0 12px;
+        padding: 12px 14px;
+        border: 1px solid #d7dee8;
+        border-radius: 12px;
+        background: #ffffff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid-shell {
+        width: 1120px;
+        max-width: 100%;
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      .customer-ops-shell .hgrid {
+        --hgrid-header-bg: #fff7ed;
+        --hgrid-header-group-bg: #ffedd5;
+        --hgrid-border-color: #fdba74;
+        --hgrid-selection-bg: rgba(249, 115, 22, 0.18);
+        --hgrid-active-border: rgba(234, 88, 12, 0.92);
+        --hgrid-font-family: "Pretendard", "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 92 - Theme Presets, Dark Mode, and Surface Tokens</h1>
+    <p>built-in preset(`default` / `enterprise`), mode(`light` / `dark` / `system`), filter row, side bar, status bar, CSS override shell, runtime token override를 한 화면에서 확인한다.</p>
+    <div class="controls">
+      <button id="preset-default" type="button">Preset Default</button>
+      <button id="preset-enterprise" type="button">Preset Enterprise</button>
+      <button id="mode-light" type="button">Mode Light</button>
+      <button id="mode-dark" type="button">Mode Dark</button>
+      <button id="mode-system" type="button">Mode System</button>
+      <button id="toggle-shell" type="button">Toggle CSS Shell</button>
+      <button id="apply-brand" type="button">Apply Token Override</button>
+      <button id="clear-brand" type="button">Clear Token Override</button>
+    </div>
+    <pre class="summary" id="summary">loading</pre>
+    <div id="grid-shell">
+      <div id="grid"></div>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const summaryElement = document.getElementById('summary');
+      const shellElement = document.getElementById('grid-shell');
+      const columns = [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'status', header: 'Status', width: 160, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date' }
+      ];
+
+      const rowData = Array.from({ length: 800 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        region: ['APAC', 'EMEA', 'AMER'][index % 3],
+        status: index % 2 === 0 ? 'active' : 'idle',
+        updatedAt: new Date(Date.now() - index * 60000).toISOString()
+      }));
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        theme: {
+          preset: 'default',
+          mode: 'light'
+        },
+        filterRow: {
+          enabled: true
+        },
+        sideBar: {
+          enabled: true,
+          panels: ['columns', 'filters'],
+          defaultPanel: 'columns',
+          initialOpen: true,
+          width: 408
+        },
+        statusBar: {
+          enabled: true,
+          items: ['rows', 'selection', 'aggregates']
+        },
+        height: 420,
+        rowHeight: 28,
+        overscan: 8
+      });
+
+      function getSnapshot() {
+        const root = document.querySelector('#grid .hgrid');
+        const headerCell = document.querySelector('.hgrid__header-cell--leaf');
+        const filterInput = document.querySelector('.hgrid__filter-row-input');
+        const toolPanelShell = document.querySelector('.hgrid__tool-panel');
+        const statusBar = document.querySelector('.hgrid__status-bar');
+        const rootStyle = root ? getComputedStyle(root) : null;
+        const headerStyle = headerCell ? getComputedStyle(headerCell) : null;
+        const filterStyle = filterInput ? getComputedStyle(filterInput) : null;
+        const toolPanelStyle = toolPanelShell ? getComputedStyle(toolPanelShell) : null;
+        const statusBarStyle = statusBar ? getComputedStyle(statusBar) : null;
+        return {
+          themeState: grid.getThemeState(),
+          shellClassName: shellElement.className,
+          rootClassName: root ? root.className : '',
+          computed: {
+            headerBackground: headerStyle ? headerStyle.backgroundColor : '',
+            filterBackground: filterStyle ? filterStyle.backgroundColor : '',
+            toolPanelBackground: toolPanelStyle ? toolPanelStyle.backgroundColor : '',
+            statusBarBackground: statusBarStyle ? statusBarStyle.backgroundColor : '',
+            borderColor: rootStyle ? rootStyle.getPropertyValue('--hgrid-border-color').trim() : '',
+            fontFamily: rootStyle ? rootStyle.getPropertyValue('--hgrid-font-family').trim() : ''
+          }
+        };
+      }
+
+      function renderSummary() {
+        summaryElement.textContent = JSON.stringify(getSnapshot(), null, 2);
+      }
+
+      document.getElementById('preset-default').addEventListener('click', () => {
+        grid.setThemePreset('default');
+        renderSummary();
+      });
+      document.getElementById('preset-enterprise').addEventListener('click', () => {
+        grid.setThemePreset('enterprise');
+        renderSummary();
+      });
+      document.getElementById('mode-light').addEventListener('click', () => {
+        grid.setThemeMode('light');
+        renderSummary();
+      });
+      document.getElementById('mode-dark').addEventListener('click', () => {
+        grid.setThemeMode('dark');
+        renderSummary();
+      });
+      document.getElementById('mode-system').addEventListener('click', () => {
+        grid.setThemeMode('system');
+        renderSummary();
+      });
+      document.getElementById('toggle-shell').addEventListener('click', () => {
+        shellElement.classList.toggle('customer-ops-shell');
+        renderSummary();
+      });
+      document.getElementById('apply-brand').addEventListener('click', () => {
+        grid.setTheme({
+          '--hgrid-header-bg': '#ecfeff',
+          '--hgrid-header-group-bg': '#cffafe',
+          '--hgrid-border-color': '#67e8f9',
+          '--hgrid-active-border': 'rgba(8, 145, 178, 0.92)'
+        });
+        renderSummary();
+      });
+      document.getElementById('clear-brand').addEventListener('click', () => {
+        grid.clearTheme();
+        renderSummary();
+      });
+
+      renderSummary();
+
+      window.__example92 = {
+        getSnapshot,
+        setPresetEnterprise: () => {
+          grid.setThemePreset('enterprise');
+          renderSummary();
+        },
+        setModeDark: () => {
+          grid.setThemeMode('dark');
+          renderSummary();
+        },
+        setModeSystem: () => {
+          grid.setThemeMode('system');
+          renderSummary();
+        },
+        toggleShell: () => {
+          shellElement.classList.toggle('customer-ops-shell');
+          renderSummary();
+        },
+        clearTheme: () => {
+          grid.clearTheme();
+          renderSummary();
+        }
+      };
+    </script>
+  </body>
+</html>

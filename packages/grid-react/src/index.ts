@@ -262,6 +262,22 @@ export class ReactGridAdapter {
     this.grid.setTheme(themeTokens);
   }
 
+  public clearTheme(): void {
+    this.grid.clearTheme();
+  }
+
+  public setThemePreset(preset: 'default' | 'enterprise'): void {
+    this.grid.setThemePreset(preset);
+  }
+
+  public setThemeMode(mode: 'light' | 'dark' | 'system'): void {
+    this.grid.setThemeMode(mode);
+  }
+
+  public getThemeState(): ReturnType<Grid['getThemeState']> {
+    return this.grid.getThemeState();
+  }
+
   public getState(): GridState {
     return this.grid.getState();
   }

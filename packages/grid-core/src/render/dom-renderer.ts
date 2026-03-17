@@ -27,10 +27,12 @@ import type {
   GridMenuOpenSource,
   GridOptions,
   GridRangeHandleMode,
+  GridResolvedThemeMode,
   GridSideBarOptions,
   GridSetFilterReason,
   GridSetFilterValueOption,
   GridState,
+  GridThemePreset,
   GroupModelItem,
   GroupingMode,
   PivotModelItem,
@@ -797,6 +799,9 @@ export class DomRenderer implements GridRendererPort {
   private statusBarDirty = false;
   private scrollDirty = false;
   private shouldForcePoolRebuild = false;
+  private appliedThemePreset: GridThemePreset = 'default';
+  private appliedThemeMode: GridResolvedThemeMode = 'light';
+  private readonly appliedThemeTokenNames = new Set<string>();
   private pendingThemeTokens: Record<string, string> = {};
   private isSyncingScroll = false;
   private pendingScrollTop = 0;
@@ -1144,6 +1149,33 @@ export class DomRenderer implements GridRendererPort {
     this.flushRender();
   }
 
+  public clearTheme(): void {
+    if (this.appliedThemeTokenNames.size === 0) {
+      this.pendingThemeTokens = {};
+      this.themeDirty = false;
+      return;
+    }
+
+    this.appliedThemeTokenNames.forEach((tokenName) => {
+      this.rootElement.style.removeProperty(tokenName);
+    });
+    this.appliedThemeTokenNames.clear();
+    this.pendingThemeTokens = {};
+    this.themeDirty = false;
+    this.markLayoutDirty(false);
+    this.flushRender();
+  }
+
+  public setThemeAppearance(preset: GridThemePreset, resolvedMode: GridResolvedThemeMode): void {
+    if (this.appliedThemePreset === preset && this.appliedThemeMode === resolvedMode) {
+      return;
+    }
+
+    this.updateThemeAppearanceClasses(preset, resolvedMode);
+    this.markLayoutDirty(false);
+    this.flushRender();
+  }
+
   public destroy(): void {
     this.teardownPointerSelectionSession();
     this.teardownFillHandleSession();
@@ -1203,6 +1235,10 @@ export class DomRenderer implements GridRendererPort {
 
   private initializeDom(): void {
     this.rootElement.className = 'hgrid';
+    this.updateThemeAppearanceClasses(
+      this.options.theme?.preset === 'enterprise' ? 'enterprise' : 'default',
+      this.resolveInitialThemeMode()
+    );
     this.refreshI18nContext();
     this.rootElement.id = this.ariaGridId;
     this.rootElement.setAttribute('role', 'grid');
@@ -11131,11 +11167,51 @@ export class DomRenderer implements GridRendererPort {
     for (const tokenName in this.pendingThemeTokens) {
       if (Object.prototype.hasOwnProperty.call(this.pendingThemeTokens, tokenName)) {
         this.rootElement.style.setProperty(tokenName, this.pendingThemeTokens[tokenName]);
+        this.appliedThemeTokenNames.add(tokenName);
       }
     }
 
     this.pendingThemeTokens = {};
     this.themeDirty = false;
+  }
+
+  private resolveInitialThemeMode(): GridResolvedThemeMode {
+    if (this.options.theme?.mode === 'dark') {
+      return 'dark';
+    }
+
+    if (
+      this.options.theme?.mode === 'system' &&
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    ) {
+      return 'dark';
+    }
+
+    return 'light';
+  }
+
+  private updateThemeAppearanceClasses(preset: GridThemePreset, resolvedMode: GridResolvedThemeMode): void {
+    this.rootElement.classList.remove(
+      'h-theme-light',
+      'h-theme-dark',
+      'h-theme-enterprise',
+      'h-theme-default',
+      'h-theme-mode-light',
+      'h-theme-mode-dark',
+      'h-theme-preset-default',
+      'h-theme-preset-enterprise'
+    );
+
+    this.rootElement.classList.add(
+      resolvedMode === 'dark' ? 'h-theme-dark' : 'h-theme-light',
+      resolvedMode === 'dark' ? 'h-theme-mode-dark' : 'h-theme-mode-light',
+      preset === 'enterprise' ? 'h-theme-enterprise' : 'h-theme-default',
+      preset === 'enterprise' ? 'h-theme-preset-enterprise' : 'h-theme-preset-default'
+    );
+    this.appliedThemePreset = preset;
+    this.appliedThemeMode = resolvedMode;
   }
 
   private flushRender(): void {

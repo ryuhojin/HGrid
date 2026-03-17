@@ -67,8 +67,82 @@
   --hgrid-tool-panel-width: 0px;
   --hgrid-status-bar-bg: #f8fafc;
   --hgrid-status-bar-item-bg: rgba(255, 255, 255, 0.9);
+  --hgrid-status-bar-item-border: rgba(148, 163, 184, 0.16);
   --hgrid-status-bar-item-active-bg: rgba(59, 130, 246, 0.12);
   --hgrid-status-bar-item-danger-bg: rgba(239, 68, 68, 0.12);
+  --hgrid-edit-action-bar-bg: color-mix(in srgb, var(--hgrid-status-bar-bg) 88%, white);
+  --hgrid-edit-action-button-bg: rgba(255, 255, 255, 0.92);
+  --hgrid-edit-action-button-primary-bg: color-mix(in srgb, var(--hgrid-selection-bg) 70%, white);
+  --hgrid-filter-row-bg: rgba(248, 250, 252, 0.92);
+  --hgrid-filter-row-border: rgba(148, 163, 184, 0.14);
+  --hgrid-filter-input-bg: rgba(255, 255, 255, 0.94);
+  --hgrid-filter-input-border: rgba(148, 163, 184, 0.22);
+  --hgrid-filter-input-placeholder: rgba(100, 116, 139, 0.86);
+  --hgrid-filter-input-hover-border: rgba(59, 130, 246, 0.34);
+  --hgrid-filter-input-hover-ring: rgba(59, 130, 246, 0.16);
+  --hgrid-filter-input-active-bg: rgba(239, 246, 255, 0.98);
+  --hgrid-filter-input-active-border: rgba(37, 99, 235, 0.52);
+  --hgrid-menu-danger-text: #a4252c;
+  --hgrid-floating-panel-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+  --hgrid-filter-panel-bg: var(--hgrid-editor-bg);
+  --hgrid-filter-panel-body-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.96) 100%);
+  --hgrid-filter-panel-header-border: rgba(148, 163, 184, 0.22);
+  --hgrid-filter-panel-clause-border: rgba(148, 163, 184, 0.2);
+  --hgrid-filter-panel-clause-bg: rgba(248, 250, 252, 0.92);
+  --hgrid-filter-panel-clause-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --hgrid-filter-panel-set-list-bg: rgba(255, 255, 255, 0.88);
+  --hgrid-filter-panel-actions-border: rgba(148, 163, 184, 0.22);
+  --hgrid-filter-panel-primary-text: #ffffff;
+  --hgrid-fill-handle-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+  --hgrid-side-bar-bg: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.98) 100%);
+  --hgrid-side-bar-shadow: -12px 0 26px rgba(15, 23, 42, 0.08);
+  --hgrid-tool-panel-toggle-bg: rgba(248, 250, 252, 0.98);
+  --hgrid-tool-panel-toggle-border: rgba(148, 163, 184, 0.28);
+  --hgrid-tool-panel-toggle-hover-bg: rgba(241, 245, 249, 1);
+  --hgrid-tool-panel-surface-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%);
+  --hgrid-tool-panel-body-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.98) 100%);
+  --hgrid-tool-panel-border: rgba(148, 163, 184, 0.18);
+  --hgrid-tool-panel-header-bg: rgba(248, 250, 252, 0.94);
+  --hgrid-tool-panel-header-border: rgba(148, 163, 184, 0.2);
+  --hgrid-tool-panel-header-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.72);
+  --hgrid-tool-panel-tabs-bg: rgba(241, 245, 249, 0.9);
+  --hgrid-tool-panel-tabs-border: rgba(148, 163, 184, 0.18);
+  --hgrid-tool-panel-tab-active-bg: rgba(255, 255, 255, 0.98);
+  --hgrid-tool-panel-tab-active-border: rgba(37, 99, 235, 0.24);
+  --hgrid-tool-panel-tab-active-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  --hgrid-tool-panel-search-bg: rgba(255, 255, 255, 0.96);
+  --hgrid-tool-panel-search-border: rgba(148, 163, 184, 0.24);
+  --hgrid-tool-panel-card-bg: rgba(255, 255, 255, 0.9);
+  --hgrid-tool-panel-card-border: rgba(148, 163, 184, 0.16);
+  --hgrid-tool-panel-card-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+  --hgrid-tool-panel-subtle-bg: rgba(248, 250, 252, 0.92);
+  --hgrid-tool-panel-subtle-border: rgba(148, 163, 184, 0.16);
+  --hgrid-tool-panel-muted-bg: rgba(248, 250, 252, 0.72);
+  --hgrid-tool-panel-muted-border: rgba(148, 163, 184, 0.14);
+  --hgrid-tool-panel-empty-bg: rgba(255, 255, 255, 0.72);
+  --hgrid-tool-panel-empty-border: rgba(148, 163, 184, 0.3);
+  --hgrid-tool-panel-empty-text: rgba(100, 116, 139, 0.92);
+  --hgrid-tool-panel-badge-bg: rgba(226, 232, 240, 0.92);
+  --hgrid-tool-panel-badge-text: rgba(71, 85, 105, 0.92);
+  --hgrid-tool-panel-pill-bg: rgba(241, 245, 249, 0.78);
+  --hgrid-tool-panel-pill-text: rgba(51, 65, 85, 0.88);
+  --hgrid-tool-panel-group-bg: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.92) 100%);
+  --hgrid-tool-panel-group-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 10px 18px rgba(15, 23, 42, 0.04);
+  --hgrid-tool-panel-group-title-bg: rgba(219, 234, 254, 0.72);
+  --hgrid-tool-panel-group-title-text: rgba(30, 64, 175, 0.9);
+  --hgrid-tool-panel-close-bg: rgba(255, 255, 255, 0.9);
+  --hgrid-tool-panel-close-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  --hgrid-tool-panel-preset-bg: rgba(248, 250, 252, 0.72);
+  --hgrid-tool-panel-preset-border: rgba(148, 163, 184, 0.14);
+  --hgrid-tool-panel-caption-text: rgba(71, 85, 105, 0.92);
+  --hgrid-tool-panel-rule-bg: rgba(248, 250, 252, 0.84);
+  --hgrid-tool-panel-rule-border: rgba(148, 163, 184, 0.14);
+  --hgrid-tool-panel-rule-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  --hgrid-tool-panel-action-bg: rgba(255, 255, 255, 0.94);
+  --hgrid-tool-panel-action-border: rgba(148, 163, 184, 0.2);
+  --hgrid-tool-panel-action-text: rgba(100, 116, 139, 0.92);
+  --hgrid-tool-panel-action-hover-border: rgba(59, 130, 246, 0.28);
+  --hgrid-tool-panel-action-hover-text: rgba(15, 23, 42, 0.94);
 
   position: relative;
   display: flex;
@@ -87,7 +161,9 @@
 }
 
 .h-theme-light .hgrid,
-.hgrid.h-theme-light {
+.hgrid.h-theme-light,
+.h-theme-mode-light .hgrid,
+.hgrid.h-theme-mode-light {
   --hgrid-bg: #ffffff;
   --hgrid-text: #1f2937;
   --hgrid-header-bg: #f8fafc;
@@ -100,7 +176,9 @@
 }
 
 .h-theme-dark .hgrid,
-.hgrid.h-theme-dark {
+.hgrid.h-theme-dark,
+.h-theme-mode-dark .hgrid,
+.hgrid.h-theme-mode-dark {
   --hgrid-bg: #0f172a;
   --hgrid-text: #e2e8f0;
   --hgrid-muted-text: #94a3b8;
@@ -137,8 +215,161 @@
   --hgrid-state-error: #fca5a5;
   --hgrid-status-bar-bg: #111827;
   --hgrid-status-bar-item-bg: rgba(15, 23, 42, 0.92);
+  --hgrid-status-bar-item-border: rgba(71, 85, 105, 0.28);
   --hgrid-status-bar-item-active-bg: rgba(96, 165, 250, 0.22);
   --hgrid-status-bar-item-danger-bg: rgba(248, 113, 113, 0.18);
+  --hgrid-edit-action-bar-bg: color-mix(in srgb, #111827 88%, #020617);
+  --hgrid-edit-action-button-bg: rgba(15, 23, 42, 0.92);
+  --hgrid-edit-action-button-primary-bg: color-mix(in srgb, rgba(96, 165, 250, 0.22) 74%, #0f172a);
+  --hgrid-filter-row-bg: rgba(17, 24, 39, 0.96);
+  --hgrid-filter-row-border: rgba(71, 85, 105, 0.32);
+  --hgrid-filter-input-bg: rgba(15, 23, 42, 0.94);
+  --hgrid-filter-input-border: rgba(71, 85, 105, 0.42);
+  --hgrid-filter-input-placeholder: rgba(148, 163, 184, 0.86);
+  --hgrid-filter-input-hover-border: rgba(96, 165, 250, 0.44);
+  --hgrid-filter-input-hover-ring: rgba(96, 165, 250, 0.18);
+  --hgrid-filter-input-active-bg: rgba(30, 41, 59, 0.96);
+  --hgrid-filter-input-active-border: rgba(125, 211, 252, 0.68);
+  --hgrid-menu-danger-text: #fda4af;
+  --hgrid-floating-panel-shadow: 0 20px 42px rgba(2, 6, 23, 0.42);
+  --hgrid-filter-panel-body-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(17, 24, 39, 0.98) 100%);
+  --hgrid-filter-panel-header-border: rgba(71, 85, 105, 0.36);
+  --hgrid-filter-panel-clause-border: rgba(71, 85, 105, 0.34);
+  --hgrid-filter-panel-clause-bg: rgba(15, 23, 42, 0.9);
+  --hgrid-filter-panel-clause-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+  --hgrid-filter-panel-set-list-bg: rgba(15, 23, 42, 0.88);
+  --hgrid-filter-panel-actions-border: rgba(71, 85, 105, 0.36);
+  --hgrid-filter-panel-primary-text: #e2e8f0;
+  --hgrid-fill-handle-shadow: 0 0 0 1px rgba(2, 6, 23, 0.18);
+  --hgrid-side-bar-bg: linear-gradient(180deg, rgba(17, 24, 39, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
+  --hgrid-side-bar-shadow: -12px 0 26px rgba(2, 6, 23, 0.32);
+  --hgrid-tool-panel-toggle-bg: rgba(15, 23, 42, 0.96);
+  --hgrid-tool-panel-toggle-border: rgba(71, 85, 105, 0.38);
+  --hgrid-tool-panel-toggle-hover-bg: rgba(30, 41, 59, 1);
+  --hgrid-tool-panel-surface-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(17, 24, 39, 0.98) 100%);
+  --hgrid-tool-panel-body-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.94) 0%, rgba(17, 24, 39, 0.98) 100%);
+  --hgrid-tool-panel-border: rgba(71, 85, 105, 0.3);
+  --hgrid-tool-panel-header-bg: rgba(17, 24, 39, 0.96);
+  --hgrid-tool-panel-header-border: rgba(71, 85, 105, 0.28);
+  --hgrid-tool-panel-header-shadow: inset 0 -1px 0 rgba(148, 163, 184, 0.08);
+  --hgrid-tool-panel-tabs-bg: rgba(30, 41, 59, 0.88);
+  --hgrid-tool-panel-tabs-border: rgba(71, 85, 105, 0.28);
+  --hgrid-tool-panel-tab-active-bg: rgba(15, 23, 42, 0.98);
+  --hgrid-tool-panel-tab-active-border: rgba(125, 211, 252, 0.24);
+  --hgrid-tool-panel-tab-active-shadow: 0 6px 16px rgba(2, 6, 23, 0.28);
+  --hgrid-tool-panel-search-bg: rgba(15, 23, 42, 0.96);
+  --hgrid-tool-panel-search-border: rgba(71, 85, 105, 0.34);
+  --hgrid-tool-panel-card-bg: rgba(15, 23, 42, 0.92);
+  --hgrid-tool-panel-card-border: rgba(71, 85, 105, 0.24);
+  --hgrid-tool-panel-card-shadow: 0 10px 22px rgba(2, 6, 23, 0.24);
+  --hgrid-tool-panel-subtle-bg: rgba(15, 23, 42, 0.9);
+  --hgrid-tool-panel-subtle-border: rgba(71, 85, 105, 0.24);
+  --hgrid-tool-panel-muted-bg: rgba(30, 41, 59, 0.72);
+  --hgrid-tool-panel-muted-border: rgba(71, 85, 105, 0.24);
+  --hgrid-tool-panel-empty-bg: rgba(15, 23, 42, 0.72);
+  --hgrid-tool-panel-empty-border: rgba(71, 85, 105, 0.34);
+  --hgrid-tool-panel-empty-text: rgba(148, 163, 184, 0.92);
+  --hgrid-tool-panel-badge-bg: rgba(30, 41, 59, 0.92);
+  --hgrid-tool-panel-badge-text: rgba(203, 213, 225, 0.92);
+  --hgrid-tool-panel-pill-bg: rgba(30, 41, 59, 0.78);
+  --hgrid-tool-panel-pill-text: rgba(203, 213, 225, 0.88);
+  --hgrid-tool-panel-group-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(17, 24, 39, 0.92) 100%);
+  --hgrid-tool-panel-group-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08), 0 10px 18px rgba(2, 6, 23, 0.22);
+  --hgrid-tool-panel-group-title-bg: rgba(30, 64, 175, 0.2);
+  --hgrid-tool-panel-group-title-text: rgba(191, 219, 254, 0.92);
+  --hgrid-tool-panel-close-bg: rgba(15, 23, 42, 0.9);
+  --hgrid-tool-panel-close-shadow: 0 6px 18px rgba(2, 6, 23, 0.24);
+  --hgrid-tool-panel-preset-bg: rgba(15, 23, 42, 0.72);
+  --hgrid-tool-panel-preset-border: rgba(71, 85, 105, 0.24);
+  --hgrid-tool-panel-caption-text: rgba(148, 163, 184, 0.92);
+  --hgrid-tool-panel-rule-bg: rgba(15, 23, 42, 0.84);
+  --hgrid-tool-panel-rule-border: rgba(71, 85, 105, 0.24);
+  --hgrid-tool-panel-rule-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+  --hgrid-tool-panel-action-bg: rgba(15, 23, 42, 0.94);
+  --hgrid-tool-panel-action-border: rgba(71, 85, 105, 0.32);
+  --hgrid-tool-panel-action-text: rgba(148, 163, 184, 0.92);
+  --hgrid-tool-panel-action-hover-border: rgba(125, 211, 252, 0.28);
+  --hgrid-tool-panel-action-hover-text: rgba(226, 232, 240, 0.94);
+}
+
+.h-theme-enterprise .hgrid,
+.hgrid.h-theme-enterprise,
+.h-theme-preset-enterprise .hgrid,
+.hgrid.h-theme-preset-enterprise {
+  --hgrid-font-family: "Pretendard", "Segoe UI", "Noto Sans KR", sans-serif;
+  --hgrid-header-bg: #f7f7f4;
+  --hgrid-header-group-bg: #eceee7;
+  --hgrid-header-group-text: #425466;
+  --hgrid-border-color: #c9d2dd;
+  --hgrid-row-alt-bg: #fbfcfe;
+  --hgrid-group-row-bg: #f2f6fa;
+  --hgrid-group-row-text: #243444;
+  --hgrid-header-resize-handle: rgba(100, 116, 139, 0.78);
+  --hgrid-header-drag-bg: #e5edf6;
+  --hgrid-drop-indicator: #0f766e;
+  --hgrid-selection-bg: rgba(15, 118, 110, 0.12);
+  --hgrid-row-selection-bg: rgba(15, 118, 110, 0.07);
+  --hgrid-active-border: rgba(13, 148, 136, 0.92);
+  --hgrid-editor-border: #2dd4bf;
+  --hgrid-editor-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+  --hgrid-state-updated: #0f766e;
+  --hgrid-state-clean: #166534;
+  --hgrid-state-inserted: #1d4ed8;
+  --hgrid-status-bar-item-border: rgba(148, 163, 184, 0.18);
+  --hgrid-side-bar-bg: linear-gradient(180deg, rgba(251, 252, 249, 0.98) 0%, rgba(244, 247, 241, 0.98) 100%);
+  --hgrid-tool-panel-header-bg: rgba(247, 247, 244, 0.96);
+  --hgrid-tool-panel-tabs-bg: rgba(232, 237, 228, 0.9);
+  --hgrid-tool-panel-group-title-bg: rgba(204, 251, 241, 0.82);
+  --hgrid-tool-panel-group-title-text: rgba(17, 94, 89, 0.92);
+  --hgrid-tool-panel-badge-bg: rgba(226, 232, 240, 0.92);
+  --hgrid-tool-panel-badge-text: rgba(71, 85, 105, 0.92);
+  --hgrid-tool-panel-preset-bg: rgba(247, 247, 244, 0.72);
+  --hgrid-tool-panel-preset-border: rgba(148, 163, 184, 0.14);
+  --hgrid-tool-panel-rule-bg: rgba(247, 247, 244, 0.82);
+  --hgrid-tool-panel-rule-border: rgba(148, 163, 184, 0.16);
+}
+
+.h-theme-enterprise.h-theme-dark .hgrid,
+.h-theme-preset-enterprise.h-theme-mode-dark .hgrid,
+.hgrid.h-theme-enterprise.h-theme-dark,
+.hgrid.h-theme-preset-enterprise.h-theme-mode-dark,
+.hgrid.h-theme-enterprise.h-theme-mode-dark {
+  --hgrid-bg: #0b1220;
+  --hgrid-text: #dbe7f3;
+  --hgrid-muted-text: #94a3b8;
+  --hgrid-header-bg: #121b2f;
+  --hgrid-header-group-bg: #1a263d;
+  --hgrid-header-group-text: #dbe7f3;
+  --hgrid-border-color: #334155;
+  --hgrid-row-alt-bg: #0f182d;
+  --hgrid-group-row-bg: #112035;
+  --hgrid-group-row-text: #d5f5ef;
+  --hgrid-header-resize-handle: rgba(148, 163, 184, 0.62);
+  --hgrid-header-drag-bg: #163047;
+  --hgrid-drop-indicator: #2dd4bf;
+  --hgrid-selection-bg: rgba(45, 212, 191, 0.18);
+  --hgrid-row-selection-bg: rgba(45, 212, 191, 0.1);
+  --hgrid-active-border: rgba(94, 234, 212, 0.92);
+  --hgrid-editor-border: #5eead4;
+  --hgrid-editor-bg: #0b1220;
+  --hgrid-editor-shadow: 0 8px 24px rgba(2, 6, 23, 0.45);
+  --hgrid-state-updated: #67e8f9;
+  --hgrid-state-clean: #86efac;
+  --hgrid-state-inserted: #93c5fd;
+  --hgrid-status-bar-bg: #111b2d;
+  --hgrid-status-bar-item-bg: rgba(9, 15, 27, 0.92);
+  --hgrid-fill-handle-shadow: 0 0 0 1px rgba(2, 6, 23, 0.18);
+  --hgrid-tool-panel-preset-bg: rgba(12, 18, 32, 0.74);
+  --hgrid-tool-panel-preset-border: rgba(71, 85, 105, 0.24);
+  --hgrid-tool-panel-caption-text: rgba(148, 163, 184, 0.92);
+  --hgrid-tool-panel-rule-bg: rgba(12, 18, 32, 0.82);
+  --hgrid-tool-panel-rule-border: rgba(71, 85, 105, 0.24);
+  --hgrid-tool-panel-rule-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+  --hgrid-tool-panel-action-bg: rgba(12, 18, 32, 0.94);
+  --hgrid-tool-panel-action-border: rgba(71, 85, 105, 0.32);
+  --hgrid-tool-panel-action-text: rgba(148, 163, 184, 0.92);
+  --hgrid-tool-panel-action-hover-border: rgba(94, 234, 212, 0.3);
+  --hgrid-tool-panel-action-hover-text: rgba(219, 247, 243, 0.94);
 }
 
 .hgrid__header {
@@ -231,8 +462,8 @@
 .hgrid__filter-row {
   display: block;
   height: var(--hgrid-filter-row-height);
-  background: rgba(248, 250, 252, 0.92);
-  border-top: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.14);
+  background: var(--hgrid-filter-row-bg);
+  border-top: var(--hgrid-line-width) solid var(--hgrid-filter-row-border);
 }
 
 .hgrid__filter-row--center {
@@ -527,9 +758,9 @@
   height: 100%;
   min-height: 24px;
   min-width: 0;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.22);
+  border: var(--hgrid-line-width) solid var(--hgrid-filter-input-border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--hgrid-filter-input-bg);
   color: inherit;
   font: inherit;
   padding: 0 10px;
@@ -541,18 +772,18 @@
 }
 
 .hgrid__filter-row-input::placeholder {
-  color: rgba(100, 116, 139, 0.86);
+  color: var(--hgrid-filter-input-placeholder);
 }
 
 .hgrid__filter-row-input:hover,
 .hgrid__filter-row-input:focus-visible {
-  border-color: rgba(59, 130, 246, 0.34);
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.16);
+  border-color: var(--hgrid-filter-input-hover-border);
+  box-shadow: 0 0 0 1px var(--hgrid-filter-input-hover-ring);
 }
 
 .hgrid__filter-row-input--active {
-  border-color: rgba(37, 99, 235, 0.52);
-  background: rgba(239, 246, 255, 0.98);
+  border-color: var(--hgrid-filter-input-active-border);
+  background: var(--hgrid-filter-input-active-bg);
 }
 
 .hgrid__filter-row-date-shell {
@@ -576,9 +807,9 @@
   width: 100%;
   min-width: 0;
   min-height: 24px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.22);
+  border: var(--hgrid-line-width) solid var(--hgrid-filter-input-border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--hgrid-filter-input-bg);
   color: inherit;
   font: inherit;
   outline: 0;
@@ -606,14 +837,14 @@
 .hgrid__filter-row-date-shell:hover .hgrid__filter-row-date-input,
 .hgrid__filter-row-date-operator:focus-visible,
 .hgrid__filter-row-date-input:focus-visible {
-  border-color: rgba(59, 130, 246, 0.34);
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.16);
+  border-color: var(--hgrid-filter-input-hover-border);
+  box-shadow: 0 0 0 1px var(--hgrid-filter-input-hover-ring);
 }
 
 .hgrid__filter-row-date-shell--active .hgrid__filter-row-date-operator,
 .hgrid__filter-row-date-shell--active .hgrid__filter-row-date-input {
-  border-color: rgba(37, 99, 235, 0.52);
-  background: rgba(239, 246, 255, 0.98);
+  border-color: var(--hgrid-filter-input-active-border);
+  background: var(--hgrid-filter-input-active-bg);
 }
 
 .hgrid__cell--indicator {
@@ -758,7 +989,7 @@
   border: 2px solid var(--hgrid-surface);
   border-radius: 3px;
   background: var(--hgrid-active-border);
-  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--hgrid-fill-handle-shadow);
   pointer-events: auto;
   cursor: crosshair;
   z-index: 3;
@@ -781,7 +1012,7 @@
   box-sizing: border-box;
   padding: 8px 10px;
   border-top: var(--hgrid-line-width) solid var(--hgrid-border-color);
-  background: color-mix(in srgb, var(--hgrid-status-bar-bg) 88%, white);
+  background: var(--hgrid-edit-action-bar-bg);
 }
 
 .hgrid__edit-action-bar-main {
@@ -821,7 +1052,7 @@
 .hgrid__edit-action-bar-button {
   border: var(--hgrid-line-width) solid var(--hgrid-border-color);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--hgrid-edit-action-button-bg);
   color: inherit;
   font: inherit;
   font-size: 12px;
@@ -832,7 +1063,7 @@
 
 .hgrid__edit-action-bar-button--primary {
   border-color: var(--hgrid-active-border);
-  background: color-mix(in srgb, var(--hgrid-selection-bg) 70%, white);
+  background: var(--hgrid-edit-action-button-primary-bg);
 }
 
 .hgrid__edit-action-bar-button:hover:not(:disabled),
@@ -885,7 +1116,7 @@
   align-items: center;
   min-width: 0;
   padding: 5px 10px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-status-bar-item-border);
   border-radius: 999px;
   background: var(--hgrid-status-bar-item-bg);
   color: var(--hgrid-muted-text);
@@ -911,8 +1142,8 @@
   display: none;
   align-items: stretch;
   border-left: var(--hgrid-line-width) solid var(--hgrid-border-color);
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.98) 100%);
-  box-shadow: -12px 0 26px rgba(15, 23, 42, 0.08);
+  background: var(--hgrid-side-bar-bg);
+  box-shadow: var(--hgrid-side-bar-shadow);
   z-index: 12;
 }
 
@@ -1047,7 +1278,7 @@
 }
 
 .hgrid__column-menu-item--danger {
-  color: #a4252c;
+  color: var(--hgrid-menu-danger-text);
 }
 
 .hgrid__column-menu-item:disabled {
@@ -1071,8 +1302,8 @@
   box-sizing: border-box;
   border: var(--hgrid-editor-border-width) solid var(--hgrid-border-color);
   border-radius: 16px;
-  background: var(--hgrid-editor-bg);
-  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+  background: var(--hgrid-filter-panel-bg);
+  box-shadow: var(--hgrid-floating-panel-shadow);
   overflow: hidden;
   z-index: 21;
   pointer-events: auto;
@@ -1091,7 +1322,7 @@
   gap: 12px;
   padding: 14px;
   overflow: auto;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.96) 100%);
+  background: var(--hgrid-filter-panel-body-bg);
 }
 
 .hgrid__filter-panel-header {
@@ -1100,7 +1331,7 @@
   justify-content: space-between;
   gap: 12px;
   padding-bottom: 10px;
-  border-bottom: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.22);
+  border-bottom: var(--hgrid-line-width) solid var(--hgrid-filter-panel-header-border);
 }
 
 .hgrid__filter-panel-title {
@@ -1143,10 +1374,10 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.2);
+  border: var(--hgrid-line-width) solid var(--hgrid-filter-panel-clause-border);
   border-radius: 14px;
-  background: rgba(248, 250, 252, 0.92);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  background: var(--hgrid-filter-panel-clause-bg);
+  box-shadow: var(--hgrid-filter-panel-clause-shadow);
 }
 
 .hgrid__filter-panel-clause-title {
@@ -1216,7 +1447,7 @@
   border: var(--hgrid-line-width) solid var(--hgrid-border-color);
   border-radius: 12px;
   padding: 6px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--hgrid-filter-panel-set-list-bg);
 }
 
 .hgrid__filter-panel-set-option {
@@ -1231,7 +1462,7 @@
   justify-content: flex-end;
   gap: 6px;
   padding-top: 8px;
-  border-top: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.22);
+  border-top: var(--hgrid-line-width) solid var(--hgrid-filter-panel-actions-border);
 }
 
 .hgrid__filter-panel-action {
@@ -1241,7 +1472,7 @@
 .hgrid__filter-panel-action--primary {
   background: var(--hgrid-active-border);
   border-color: var(--hgrid-active-border);
-  color: #ffffff;
+  color: var(--hgrid-filter-panel-primary-text);
 }
 
 .hgrid__tool-panel-rail {
@@ -1277,8 +1508,8 @@
   min-height: 36px;
   padding: 8px 0;
   border-radius: 999px;
-  border-color: rgba(148, 163, 184, 0.28);
-  background: rgba(248, 250, 252, 0.98);
+  border-color: var(--hgrid-tool-panel-toggle-border);
+  background: var(--hgrid-tool-panel-toggle-bg);
   box-shadow: none;
   cursor: pointer;
 }
@@ -1295,7 +1526,7 @@
 
 .hgrid__tool-panel-toggle:hover,
 .hgrid__tool-panel-toggle:focus-visible {
-  background: rgba(241, 245, 249, 1);
+  background: var(--hgrid-tool-panel-toggle-hover-bg);
   border-color: var(--hgrid-active-border);
   outline: 0;
 }
@@ -1307,8 +1538,8 @@
   flex-direction: column;
   box-sizing: border-box;
   min-width: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%);
-  border-left: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.18);
+  background: var(--hgrid-tool-panel-surface-bg);
+  border-left: var(--hgrid-line-width) solid var(--hgrid-tool-panel-border);
   pointer-events: auto;
   overflow: hidden;
 }
@@ -1322,7 +1553,7 @@
   flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.98) 100%);
+  background: var(--hgrid-tool-panel-body-bg);
 }
 
 .hgrid__tool-panel-header {
@@ -1331,9 +1562,9 @@
   justify-content: space-between;
   gap: 12px;
   padding: 14px 16px 12px;
-  border-bottom: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.2);
-  background: rgba(248, 250, 252, 0.94);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.72);
+  border-bottom: var(--hgrid-line-width) solid var(--hgrid-tool-panel-header-border);
+  background: var(--hgrid-tool-panel-header-bg);
+  box-shadow: var(--hgrid-tool-panel-header-shadow);
 }
 
 .hgrid__tool-panel-title {
@@ -1347,9 +1578,9 @@
   min-width: 0;
   gap: 6px;
   padding: 4px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.18);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-tabs-border);
   border-radius: 16px;
-  background: rgba(241, 245, 249, 0.9);
+  background: var(--hgrid-tool-panel-tabs-bg);
   overflow: auto;
 }
 
@@ -1367,10 +1598,10 @@
 .hgrid__tool-panel-tab--active,
 .hgrid__tool-panel-tab:hover,
 .hgrid__tool-panel-tab:focus-visible {
-  background: rgba(255, 255, 255, 0.98);
-  border-color: rgba(37, 99, 235, 0.24);
+  background: var(--hgrid-tool-panel-tab-active-bg);
+  border-color: var(--hgrid-tool-panel-tab-active-border);
   color: var(--hgrid-text);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--hgrid-tool-panel-tab-active-shadow);
   outline: 0;
 }
 
@@ -1382,7 +1613,8 @@
   height: 30px;
   padding: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--hgrid-tool-panel-close-bg);
+  box-shadow: var(--hgrid-tool-panel-close-shadow);
   line-height: 1;
   font-size: 20px;
   cursor: pointer;
@@ -1402,16 +1634,16 @@
   top: 0;
   z-index: 1;
   padding-bottom: 2px;
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(248, 250, 252, 0.92) 100%);
+  background: var(--hgrid-tool-panel-body-bg);
 }
 
 .hgrid__tool-panel-search-input {
   width: 100%;
   min-height: 38px;
   padding: 0 14px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.24);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-search-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--hgrid-tool-panel-search-bg);
   color: var(--hgrid-text);
   font: inherit;
   box-sizing: border-box;
@@ -1432,10 +1664,10 @@
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-card-border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+  background: var(--hgrid-tool-panel-card-bg);
+  box-shadow: var(--hgrid-tool-panel-card-shadow);
 }
 
 .hgrid__tool-panel-column-label {
@@ -1452,8 +1684,8 @@
   width: 22px;
   height: 22px;
   border-radius: 999px;
-  background: rgba(226, 232, 240, 0.92);
-  color: rgba(71, 85, 105, 0.92);
+  background: var(--hgrid-tool-panel-badge-bg);
+  color: var(--hgrid-tool-panel-badge-text);
   font-size: 12px;
   font-weight: 700;
   flex: 0 0 auto;
@@ -1476,7 +1708,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(100, 116, 139, 0.92);
+  color: var(--hgrid-tool-panel-empty-text);
   font-size: 12px;
 }
 
@@ -1499,10 +1731,10 @@
 
 .hgrid__tool-panel-empty {
   padding: 18px 16px;
-  border: var(--hgrid-line-width) dashed rgba(148, 163, 184, 0.3);
+  border: var(--hgrid-line-width) dashed var(--hgrid-tool-panel-empty-border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
-  color: rgba(100, 116, 139, 0.92);
+  background: var(--hgrid-tool-panel-empty-bg);
+  color: var(--hgrid-tool-panel-empty-text);
   text-align: center;
 }
 
@@ -1519,9 +1751,9 @@
   display: inline-flex;
   gap: 8px;
   padding: 4px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.18);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-tabs-border);
   border-radius: 999px;
-  background: rgba(241, 245, 249, 0.78);
+  background: var(--hgrid-tool-panel-pill-bg);
   align-self: flex-start;
 }
 
@@ -1529,7 +1761,7 @@
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: rgba(51, 65, 85, 0.88);
+  color: var(--hgrid-tool-panel-pill-text);
   font: inherit;
   font-weight: 700;
   padding: 8px 12px;
@@ -1539,9 +1771,9 @@
 .hgrid__tool-panel-filter-surface-tab--active,
 .hgrid__tool-panel-filter-surface-tab:hover,
 .hgrid__tool-panel-filter-surface-tab:focus-visible {
-  background: rgba(255, 255, 255, 0.96);
-  color: rgba(15, 23, 42, 0.96);
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  background: var(--hgrid-tool-panel-tab-active-bg);
+  color: var(--hgrid-text);
+  box-shadow: var(--hgrid-tool-panel-tab-active-shadow);
   outline: 0;
 }
 
@@ -1558,16 +1790,16 @@
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-subtle-border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--hgrid-tool-panel-subtle-bg);
   overflow: auto;
 }
 
 .hgrid__tool-panel-filter-column {
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-subtle-border);
   border-radius: 12px;
-  background: rgba(248, 250, 252, 0.92);
+  background: var(--hgrid-tool-panel-subtle-bg);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -1594,10 +1826,10 @@
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-card-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+  background: var(--hgrid-tool-panel-card-bg);
+  box-shadow: var(--hgrid-tool-panel-card-shadow);
   overflow: auto;
 }
 
@@ -1608,10 +1840,10 @@
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-card-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+  background: var(--hgrid-tool-panel-card-bg);
+  box-shadow: var(--hgrid-tool-panel-card-shadow);
   overflow: auto;
 }
 
@@ -1620,9 +1852,9 @@
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.14);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-preset-border);
   border-radius: 16px;
-  background: rgba(248, 250, 252, 0.72);
+  background: var(--hgrid-tool-panel-preset-bg);
 }
 
 .hgrid__advanced-filter-presets-title {
@@ -1630,7 +1862,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(71, 85, 105, 0.92);
+  color: var(--hgrid-tool-panel-caption-text);
 }
 
 .hgrid__advanced-filter-match-row {
@@ -1647,11 +1879,11 @@
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.14);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-rule-border);
   border-radius: 16px;
-  background: rgba(248, 250, 252, 0.84);
+  background: var(--hgrid-tool-panel-rule-bg);
   margin-inline-start: calc(var(--hgrid-advanced-filter-depth, 0) * 12px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  box-shadow: var(--hgrid-tool-panel-rule-shadow);
 }
 
 .hgrid__advanced-filter-rule-header {
@@ -1662,10 +1894,10 @@
 }
 
 .hgrid__advanced-filter-remove {
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.2);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-action-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.94);
-  color: rgba(100, 116, 139, 0.92);
+  background: var(--hgrid-tool-panel-action-bg);
+  color: var(--hgrid-tool-panel-action-text);
   font: inherit;
   font-weight: 700;
   padding: 10px 12px;
@@ -1674,8 +1906,8 @@
 
 .hgrid__advanced-filter-remove:hover,
 .hgrid__advanced-filter-remove:focus-visible {
-  border-color: rgba(59, 130, 246, 0.28);
-  color: rgba(15, 23, 42, 0.94);
+  border-color: var(--hgrid-tool-panel-action-hover-border);
+  color: var(--hgrid-tool-panel-action-hover-text);
   outline: 0;
 }
 
@@ -1684,13 +1916,10 @@
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-rule-border);
   border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.92) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.82),
-    0 10px 18px rgba(15, 23, 42, 0.04);
+  background: var(--hgrid-tool-panel-group-bg);
+  box-shadow: var(--hgrid-tool-panel-group-shadow);
   margin-inline-start: calc(var(--hgrid-advanced-filter-depth, 0) * 12px);
 }
 
@@ -1707,8 +1936,8 @@
   min-height: 40px;
   padding: 0 12px;
   border-radius: 999px;
-  background: rgba(219, 234, 254, 0.72);
-  color: rgba(30, 64, 175, 0.9);
+  background: var(--hgrid-tool-panel-group-title-bg);
+  color: var(--hgrid-tool-panel-group-title-text);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1729,10 +1958,10 @@
 
 .hgrid__advanced-filter-empty {
   padding: 18px;
-  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border: 1px dashed var(--hgrid-tool-panel-empty-border);
   border-radius: 16px;
-  background: rgba(248, 250, 252, 0.7);
-  color: rgba(100, 116, 139, 0.88);
+  background: var(--hgrid-tool-panel-empty-bg);
+  color: var(--hgrid-tool-panel-empty-text);
 }
 
 .hgrid__tool-panel-filter-set-list {
@@ -1755,10 +1984,10 @@
   flex-direction: column;
   gap: 10px;
   padding: 14px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-card-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+  background: var(--hgrid-tool-panel-card-bg);
+  box-shadow: var(--hgrid-tool-panel-card-shadow);
 }
 
 .hgrid__tool-panel-section-title {
@@ -1786,9 +2015,9 @@
   gap: 8px;
   align-items: center;
   padding: 10px 12px;
-  border: var(--hgrid-line-width) solid rgba(148, 163, 184, 0.16);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-rule-border);
   border-radius: 14px;
-  background: rgba(248, 250, 252, 0.92);
+  background: var(--hgrid-tool-panel-rule-bg);
 }
 
 .hgrid__tool-panel-order-label {
@@ -1804,10 +2033,10 @@
 }
 
 .hgrid__tool-panel-order-button {
-  border: var(--hgrid-line-width) solid var(--hgrid-border-color);
+  border: var(--hgrid-line-width) solid var(--hgrid-tool-panel-action-border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
-  color: inherit;
+  background: var(--hgrid-tool-panel-action-bg);
+  color: var(--hgrid-tool-panel-action-text);
   font: inherit;
   padding: 6px 9px;
   cursor: pointer;
@@ -1815,10 +2044,10 @@
 
 .hgrid__tool-panel-empty {
   padding: 10px 12px;
-  border: var(--hgrid-line-width) dashed rgba(148, 163, 184, 0.32);
+  border: var(--hgrid-line-width) dashed var(--hgrid-tool-panel-empty-border);
   border-radius: 10px;
-  color: var(--hgrid-muted-text);
-  background: rgba(148, 163, 184, 0.04);
+  color: var(--hgrid-tool-panel-empty-text);
+  background: var(--hgrid-tool-panel-empty-bg);
 }
 
 .hgrid__tool-panel-toggle:focus-visible,

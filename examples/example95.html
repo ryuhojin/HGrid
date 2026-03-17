@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 95 - Analyst Workspace Presets</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 26px;
+        background: #f3f6fb;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 26px;
+      }
+
+      p {
+        margin: 0;
+        color: #475569;
+        line-height: 1.55;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(860px, 1fr) 360px;
+        gap: 18px;
+        margin-top: 20px;
+      }
+
+      .surface {
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 16px 38px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #e2e8f0;
+        background: linear-gradient(180deg, #fcfdff 0%, #f8fafc 100%);
+      }
+
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: #ffffff;
+        color: inherit;
+        font: inherit;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      button.primary {
+        border-color: #0f766e;
+        background: #0f766e;
+        color: #ffffff;
+      }
+
+      button:hover {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      #grid {
+        width: 100%;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 16px;
+      }
+
+      .card {
+        border: 1px solid #d5dbe3;
+        border-radius: 16px;
+        background: #ffffff;
+        padding: 14px;
+      }
+
+      .card h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        color: #475569;
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #0f172a;
+      }
+
+      .meta-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13px;
+      }
+
+      .meta-row span:first-child {
+        color: #64748b;
+      }
+
+      .note {
+        font-size: 13px;
+        line-height: 1.5;
+        color: #475569;
+      }
+
+      @media (max-width: 1320px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 95 - Analyst Workspace Presets</h1>
+    <p>
+      운영/분석/리더십 역할별 workspace preset과 개인 저장 workspace를 함께 보여주는 업무형 예제입니다.
+      preset은 theme + layout + state(filter/sort/scroll)를 같이 바꾸고, 사용자는 자신의 workspace를 따로 저장/복원할 수 있습니다.
+    </p>
+
+    <div class="layout">
+      <section class="surface">
+        <div class="toolbar">
+          <button id="opsWorkspace" class="primary" type="button">Ops Workspace</button>
+          <button id="analystWorkspace" type="button">Analyst Workspace</button>
+          <button id="leadWorkspace" type="button">Lead Dark Workspace</button>
+          <button id="saveWorkspace" type="button">Save Personal Workspace</button>
+          <button id="loadWorkspace" type="button">Load Personal Workspace</button>
+          <button id="clearWorkspace" type="button">Clear Saved Workspace</button>
+        </div>
+        <div id="grid"></div>
+      </section>
+
+      <aside class="surface panel">
+        <div class="card">
+          <h2>Current Workspace</h2>
+          <div class="meta-row"><span>Name</span><span id="workspaceNameText"></span></div>
+          <div class="meta-row"><span>Theme</span><span id="themeText"></span></div>
+          <div class="meta-row"><span>Visible</span><span id="visibleText"></span></div>
+          <div class="meta-row"><span>Hidden</span><span id="hiddenText"></span></div>
+          <div class="meta-row"><span>Filtered</span><span id="filterText"></span></div>
+          <div class="meta-row"><span>Saved</span><span id="savedText"></span></div>
+        </div>
+        <div class="card">
+          <h2>Workspace Snapshot</h2>
+          <pre id="workspaceJson"></pre>
+        </div>
+        <div class="card">
+          <h2>Saved Storage</h2>
+          <pre id="storageJson"></pre>
+        </div>
+        <div class="note">
+          추천 체험:
+          <br />
+          1. <strong>Ops Workspace</strong>로 작업 큐 레이아웃을 불러옵니다.
+          <br />
+          2. 필터나 컬럼을 조금 바꾼 뒤 <strong>Save Personal Workspace</strong>를 누릅니다.
+          <br />
+          3. 다른 preset으로 이동했다가 <strong>Load Personal Workspace</strong>로 다시 복원합니다.
+        </div>
+      </aside>
+    </div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const STORAGE_KEY = 'hgrid-example95-personal-workspace';
+
+      const columns = [
+        { id: 'accountId', header: 'Account ID', width: 110, type: 'number' },
+        { id: 'customer', header: 'Customer', width: 220, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text', filterMode: 'set' },
+        { id: 'desk', header: 'Desk', width: 150, type: 'text', filterMode: 'set' },
+        { id: 'risk', header: 'Risk', width: 120, type: 'number' },
+        { id: 'exposure', header: 'Exposure', width: 170, type: 'number' },
+        { id: 'status', header: 'Status', width: 150, type: 'text', filterMode: 'set' },
+        { id: 'updatedAt', header: 'Updated At', width: 190, type: 'date' }
+      ];
+
+      const baseRows = [
+        ['Northwind', 'APAC', 'Ops', 12, 4800, 'active'],
+        ['Contoso', 'EMEA', 'Fraud', 24, 7600, 'review'],
+        ['Fabrikam', 'AMER', 'Ops', 31, 9200, 'active'],
+        ['Adventure', 'APAC', 'Risk', 18, 5600, 'watch'],
+        ['Litware', 'EMEA', 'Compliance', 27, 8100, 'review'],
+        ['Tailspin', 'AMER', 'Risk', 42, 10300, 'watch']
+      ];
+
+      const rowData = Array.from({ length: 36 }, (_value, index) => {
+        const seed = baseRows[index % baseRows.length];
+        const day = String((index % 9) + 10).padStart(2, '0');
+        return {
+          accountId: 5000 + index,
+          customer: seed[0] + ' ' + (index + 1),
+          region: seed[1],
+          desk: seed[2],
+          risk: seed[3] + (index % 4),
+          exposure: seed[4] + index * 95,
+          status: seed[5],
+          updatedAt: '2026-03-' + day + 'T0' + (index % 8) + ':20:00.000Z'
+        };
+      });
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns: columns.map((column) => ({ ...column })),
+        rowData,
+        theme: {
+          preset: 'enterprise',
+          mode: 'light'
+        },
+        height: 560,
+        rowHeight: 30,
+        overscan: 8,
+        filterRow: {
+          enabled: true
+        },
+        sideBar: {
+          enabled: true,
+          panels: ['filters', 'columns'],
+          defaultPanel: 'filters',
+          initialOpen: false,
+          width: 400
+        },
+        statusBar: {
+          enabled: true,
+          items: ['selection', 'rows', 'aggregates']
+        }
+      });
+
+      const workspaceNameText = document.getElementById('workspaceNameText');
+      const themeText = document.getElementById('themeText');
+      const visibleText = document.getElementById('visibleText');
+      const hiddenText = document.getElementById('hiddenText');
+      const filterText = document.getElementById('filterText');
+      const savedText = document.getElementById('savedText');
+      const workspaceJson = document.getElementById('workspaceJson');
+      const storageJson = document.getElementById('storageJson');
+
+      let activeWorkspaceName = 'ops';
+
+      function clone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function createWorkspace(name, preset, mode, layout, state) {
+        return {
+          name,
+          theme: { preset, mode },
+          layout,
+          state
+        };
+      }
+
+      const opsWorkspace = createWorkspace(
+        'ops',
+        'enterprise',
+        'light',
+        {
+          columnOrder: ['accountId', 'customer', 'desk', 'status', 'risk', 'region', 'updatedAt', 'exposure'],
+          hiddenColumnIds: ['exposure'],
+          pinnedColumns: {
+            accountId: 'left',
+            customer: 'left'
+          },
+          columnWidths: {
+            accountId: 104,
+            customer: 230,
+            region: 138,
+            desk: 146,
+            risk: 116,
+            exposure: 164,
+            status: 148,
+            updatedAt: 186
+          }
+        },
+        {
+          sortModel: [{ columnId: 'risk', direction: 'desc' }],
+          filterModel: {
+            status: { kind: 'set', values: ['active', 'watch'] }
+          }
+        }
+      );
+
+      const analystWorkspace = createWorkspace(
+        'analyst',
+        'default',
+        'light',
+        {
+          columnOrder: ['customer', 'region', 'risk', 'exposure', 'status', 'desk', 'updatedAt', 'accountId'],
+          hiddenColumnIds: [],
+          pinnedColumns: {
+            customer: 'left',
+            risk: 'right',
+            exposure: 'right'
+          },
+          columnWidths: {
+            accountId: 110,
+            customer: 248,
+            region: 144,
+            desk: 148,
+            risk: 124,
+            exposure: 184,
+            status: 150,
+            updatedAt: 194
+          }
+        },
+        {
+          sortModel: [{ columnId: 'exposure', direction: 'desc' }],
+          filterModel: {
+            region: { kind: 'set', values: ['EMEA', 'AMER'] }
+          }
+        }
+      );
+
+      const leadWorkspace = createWorkspace(
+        'lead-dark',
+        'enterprise',
+        'dark',
+        {
+          columnOrder: ['customer', 'status', 'region', 'risk', 'updatedAt', 'desk', 'accountId', 'exposure'],
+          hiddenColumnIds: ['desk', 'accountId'],
+          pinnedColumns: {
+            customer: 'left'
+          },
+          columnWidths: {
+            accountId: 104,
+            customer: 240,
+            region: 140,
+            desk: 148,
+            risk: 122,
+            exposure: 180,
+            status: 150,
+            updatedAt: 190
+          }
+        },
+        {
+          sortModel: [{ columnId: 'updatedAt', direction: 'desc' }],
+          filterModel: {
+            status: { kind: 'set', values: ['review'] }
+          }
+        }
+      );
+
+      function applyWorkspace(workspace) {
+        activeWorkspaceName = workspace.name;
+        grid.clearTheme();
+        grid.setThemePreset(workspace.theme.preset);
+        grid.setThemeMode(workspace.theme.mode);
+        grid.setColumnLayout(workspace.layout);
+        grid.setState(workspace.state);
+        renderMeta();
+      }
+
+      function savePersonalWorkspace() {
+        const payload = {
+          theme: grid.getThemeState(),
+          layout: grid.getColumnLayout(),
+          state: grid.getState()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        renderMeta();
+      }
+
+      function loadPersonalWorkspace() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          return;
+        }
+        const saved = JSON.parse(raw);
+        activeWorkspaceName = 'personal';
+        grid.clearTheme();
+        if (saved.theme && saved.theme.preset) {
+          grid.setThemePreset(saved.theme.preset);
+        }
+        if (saved.theme && saved.theme.mode) {
+          grid.setThemeMode(saved.theme.mode);
+        }
+        if (saved.theme && saved.theme.tokens) {
+          grid.setTheme(saved.theme.tokens);
+        }
+        if (saved.layout) {
+          grid.setColumnLayout(saved.layout);
+        }
+        if (saved.state) {
+          grid.setState(saved.state);
+        }
+        renderMeta();
+      }
+
+      function clearPersonalWorkspace() {
+        localStorage.removeItem(STORAGE_KEY);
+        renderMeta();
+      }
+
+      function getSnapshot() {
+        const columnsState = grid.getColumns();
+        return {
+          workspaceName: activeWorkspaceName,
+          themeState: grid.getThemeState(),
+          visibleColumns: grid.getVisibleColumns().map((column) => column.id),
+          hiddenColumns: columnsState.filter((column) => column.visible === false).map((column) => column.id),
+          filterModel: clone(grid.getFilterModel()),
+          sortModel: clone(grid.getSortModel()),
+          savedWorkspaceExists: Boolean(localStorage.getItem(STORAGE_KEY))
+        };
+      }
+
+      function renderMeta() {
+        const snapshot = getSnapshot();
+        workspaceNameText.textContent = snapshot.workspaceName;
+        themeText.textContent = snapshot.themeState.preset + ' / ' + snapshot.themeState.resolvedMode;
+        visibleText.textContent = snapshot.visibleColumns.join(', ');
+        hiddenText.textContent = snapshot.hiddenColumns.join(', ') || 'none';
+        filterText.textContent = JSON.stringify(snapshot.filterModel);
+        savedText.textContent = snapshot.savedWorkspaceExists ? 'yes' : 'no';
+        workspaceJson.textContent = JSON.stringify(snapshot, null, 2);
+        storageJson.textContent = localStorage.getItem(STORAGE_KEY) || 'No saved personal workspace.';
+      }
+
+      document.getElementById('opsWorkspace').addEventListener('click', () => {
+        applyWorkspace(opsWorkspace);
+      });
+      document.getElementById('analystWorkspace').addEventListener('click', () => {
+        applyWorkspace(analystWorkspace);
+      });
+      document.getElementById('leadWorkspace').addEventListener('click', () => {
+        applyWorkspace(leadWorkspace);
+      });
+      document.getElementById('saveWorkspace').addEventListener('click', () => {
+        savePersonalWorkspace();
+      });
+      document.getElementById('loadWorkspace').addEventListener('click', () => {
+        loadPersonalWorkspace();
+      });
+      document.getElementById('clearWorkspace').addEventListener('click', () => {
+        clearPersonalWorkspace();
+      });
+
+      applyWorkspace(opsWorkspace);
+
+      window.__example95 = {
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

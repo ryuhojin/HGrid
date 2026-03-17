@@ -40,6 +40,11 @@ import type {
   GridOptions,
   GridState,
   GridTheme,
+  GridThemeMode,
+  GridThemeOptions,
+  GridThemePreset,
+  GridResolvedThemeMode,
+  GridResolvedThemeState,
   GridWorkerRuntimeOptions,
   GridWorkerFallbackPolicy,
   GridUnsafeHtmlPolicy,
@@ -133,6 +138,8 @@ const MIN_INDICATOR_WIDTH = 44;
 const MAX_INDICATOR_WIDTH = 180;
 const DEFAULT_STATE_COLUMN_WIDTH = 108;
 const DEFAULT_LOCALE = 'en-US';
+const DEFAULT_THEME_PRESET: GridThemePreset = 'default';
+const DEFAULT_THEME_MODE: GridThemeMode = 'light';
 const DEFAULT_SIDE_BAR_WIDTH = 300;
 const DEFAULT_RANGE_HANDLE_MODE: GridRangeHandleMode = 'fill';
 const DEFAULT_WORKER_TIMEOUT_MS = 15_000;
@@ -990,6 +997,66 @@ function cloneDateTimeFormatOptions(options?: Intl.DateTimeFormatOptions): Intl.
   return { ...options };
 }
 
+function cloneThemeTokens(themeTokens?: GridTheme): GridTheme | undefined {
+  if (!themeTokens || typeof themeTokens !== 'object') {
+    return undefined;
+  }
+
+  const nextTokens: GridTheme = {};
+  const tokenNames = Object.keys(themeTokens);
+  for (let index = 0; index < tokenNames.length; index += 1) {
+    const tokenName = tokenNames[index];
+    const tokenValue = themeTokens[tokenName];
+    if (typeof tokenValue === 'string') {
+      nextTokens[tokenName] = tokenValue;
+    }
+  }
+
+  return Object.keys(nextTokens).length > 0 ? nextTokens : undefined;
+}
+
+function normalizeThemePreset(preset: GridThemePreset | undefined): GridThemePreset {
+  if (preset === 'enterprise') {
+    return 'enterprise';
+  }
+
+  return DEFAULT_THEME_PRESET;
+}
+
+function normalizeThemeMode(mode: GridThemeMode | undefined): GridThemeMode {
+  if (mode === 'dark' || mode === 'system') {
+    return mode;
+  }
+
+  return DEFAULT_THEME_MODE;
+}
+
+function mergeThemeOptions(currentTheme: GridThemeOptions | undefined, nextTheme: GridThemeOptions | undefined): GridThemeOptions {
+  const base: GridThemeOptions = {
+    preset: normalizeThemePreset(currentTheme?.preset),
+    mode: normalizeThemeMode(currentTheme?.mode),
+    tokens: cloneThemeTokens(currentTheme?.tokens)
+  };
+
+  if (!nextTheme) {
+    return base;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextTheme, 'preset')) {
+    base.preset = normalizeThemePreset(nextTheme.preset);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextTheme, 'mode')) {
+    base.mode = normalizeThemeMode(nextTheme.mode);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextTheme, 'tokens')) {
+    base.tokens = cloneThemeTokens(nextTheme.tokens);
+  }
+
+  return base;
+}
+
 function normalizeOptionalLocale(locale: string | undefined): string | undefined {
   if (typeof locale !== 'string') {
     return undefined;
@@ -1507,6 +1574,7 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     rowModel,
     locale: normalizeOptionalLocale(config?.locale),
     localeText: cloneLocaleText(config?.localeText),
+    theme: mergeThemeOptions(undefined, config?.theme),
     htmlRendering: mergeHtmlRenderingOptions(undefined, config?.htmlRendering),
     styleNonce: normalizeStyleNonce(config?.styleNonce),
     sanitizeHtml: cloneSanitizeHtmlHook(config?.sanitizeHtml),
@@ -1601,6 +1669,8 @@ export class Grid {
   private editPolicyUnsubscribe: (() => void) | null = null;
   private columnValueFormatContext: ColumnValueFormatContext | null = null;
   private readonly workerProjectionCache = new WorkerProjectionCache();
+  private themeMediaQueryList: MediaQueryList | null = null;
+  private themeMediaQueryListener: ((event: MediaQueryListEvent) => void) | null = null;
 
   public constructor(container: HTMLElement, config?: GridConfig) {
     const normalizedOptions = normalizeOptions(config);
@@ -1761,6 +1831,8 @@ export class Grid {
       setAdvancedFilterModel: (advancedFilterModel) => this.setAdvancedFilterModel(advancedFilterModel),
       setColumnLayout: (layout) => this.setColumnLayout(layout)
     });
+    this.bindThemeModeListener();
+    this.applyThemeStateToRenderer();
     this.renderer.setColumnCatalog(this.columnModel.getColumns());
     this.renderer.setFilterModel(this.filterModel);
     this.renderer.setAdvancedFilterModel(this.advancedFilterModel);
@@ -1826,6 +1898,7 @@ export class Grid {
     const nextGrouping = mergeGroupingOptions(this.options.grouping, options.grouping);
     const nextPivoting = mergePivotingOptions(this.options.pivoting, options.pivoting);
     const nextWorkerRuntime = mergeWorkerRuntimeOptions(this.options.workerRuntime, options.workerRuntime);
+    const nextTheme = mergeThemeOptions(this.options.theme, options.theme);
     const mergedTreeData = mergeTreeDataOptions(this.treeDataOptions, options.treeData);
     const hasLocaleOption = Object.prototype.hasOwnProperty.call(options, 'locale');
     const hasLocaleTextOption = Object.prototype.hasOwnProperty.call(options, 'localeText');
@@ -1932,6 +2005,7 @@ export class Grid {
       ...this.options,
       locale: nextLocale,
       localeText: nextLocaleText,
+      theme: nextTheme,
       htmlRendering: nextHtmlRendering,
       styleNonce: nextStyleNonce,
       sanitizeHtml: nextSanitizeHtml,
@@ -1974,6 +2048,8 @@ export class Grid {
       columns: this.columnModel.getColumns()
     };
     this.rebuildColumnValueFormatContext();
+    this.bindThemeModeListener();
+    this.applyThemeStateToRenderer();
     this.renderer.setFilterModel(this.filterModel);
     this.renderer.setAdvancedFilterModel(this.advancedFilterModel);
     this.prewarmWorkerExecutors();
@@ -2616,7 +2692,64 @@ export class Grid {
   }
 
   public setTheme(themeTokens: GridTheme): void {
+    const mergedThemeTokens: GridTheme = {
+      ...(cloneThemeTokens(this.options.theme?.tokens) ?? {}),
+      ...(cloneThemeTokens(themeTokens) ?? {})
+    };
+    this.options = {
+      ...this.options,
+      theme: {
+        ...this.options.theme,
+        preset: normalizeThemePreset(this.options.theme?.preset),
+        mode: normalizeThemeMode(this.options.theme?.mode),
+        tokens: mergedThemeTokens
+      }
+    };
     this.renderer.setTheme(themeTokens);
+  }
+
+  public clearTheme(): void {
+    this.options = {
+      ...this.options,
+      theme: {
+        ...this.options.theme,
+        preset: normalizeThemePreset(this.options.theme?.preset),
+        mode: normalizeThemeMode(this.options.theme?.mode),
+        tokens: undefined
+      }
+    };
+    this.renderer.clearTheme();
+  }
+
+  public setThemePreset(preset: GridThemePreset): void {
+    this.options = {
+      ...this.options,
+      theme: {
+        ...this.options.theme,
+        preset: normalizeThemePreset(preset),
+        mode: normalizeThemeMode(this.options.theme?.mode),
+        tokens: cloneThemeTokens(this.options.theme?.tokens)
+      }
+    };
+    this.applyThemeStateToRenderer();
+  }
+
+  public setThemeMode(mode: GridThemeMode): void {
+    this.options = {
+      ...this.options,
+      theme: {
+        ...this.options.theme,
+        preset: normalizeThemePreset(this.options.theme?.preset),
+        mode: normalizeThemeMode(mode),
+        tokens: cloneThemeTokens(this.options.theme?.tokens)
+      }
+    };
+    this.bindThemeModeListener();
+    this.applyThemeStateToRenderer();
+  }
+
+  public getThemeState(): GridResolvedThemeState {
+    return this.resolveThemeState();
   }
 
   public getState(): GridState {
@@ -2794,6 +2927,7 @@ export class Grid {
   }
 
   public destroy(): void {
+    this.teardownThemeModeListener();
     this.dataProviderUnsubscribe = this.providerLifecycleService.disconnectRowsChangedListener(this.dataProviderUnsubscribe);
     this.commandEventUnsubscribe?.();
     this.commandEventUnsubscribe = null;
@@ -2806,6 +2940,86 @@ export class Grid {
     this.pivotExecutor.destroy();
     this.treeExecutor.destroy();
     this.renderer.destroy();
+  }
+
+  private resolveThemeState(): GridResolvedThemeState {
+    const themeOptions = this.options.theme;
+    const preset = normalizeThemePreset(themeOptions?.preset);
+    const mode = normalizeThemeMode(themeOptions?.mode);
+    let resolvedMode: GridResolvedThemeMode = 'light';
+
+    if (mode === 'dark') {
+      resolvedMode = 'dark';
+    } else if (mode === 'system') {
+      resolvedMode = this.matchesSystemDarkMode() ? 'dark' : 'light';
+    }
+
+    return {
+      preset,
+      mode,
+      resolvedMode,
+      tokens: cloneThemeTokens(themeOptions?.tokens) ?? {}
+    };
+  }
+
+  private applyThemeStateToRenderer(): void {
+    const themeState = this.resolveThemeState();
+    this.renderer.setThemeAppearance(themeState.preset, themeState.resolvedMode);
+    if (Object.keys(themeState.tokens).length > 0) {
+      this.renderer.setTheme(themeState.tokens);
+      return;
+    }
+
+    this.renderer.clearTheme();
+  }
+
+  private matchesSystemDarkMode(): boolean {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+
+  private bindThemeModeListener(): void {
+    this.teardownThemeModeListener();
+    if (normalizeThemeMode(this.options.theme?.mode) !== 'system') {
+      return;
+    }
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)');
+    const listener = () => {
+      this.applyThemeStateToRenderer();
+    };
+
+    if (typeof mediaQueryList.addEventListener === 'function') {
+      mediaQueryList.addEventListener('change', listener);
+    } else if (typeof mediaQueryList.addListener === 'function') {
+      mediaQueryList.addListener(listener);
+    }
+
+    this.themeMediaQueryList = mediaQueryList;
+    this.themeMediaQueryListener = listener;
+  }
+
+  private teardownThemeModeListener(): void {
+    if (!this.themeMediaQueryList || !this.themeMediaQueryListener) {
+      this.themeMediaQueryList = null;
+      this.themeMediaQueryListener = null;
+      return;
+    }
+
+    if (typeof this.themeMediaQueryList.removeEventListener === 'function') {
+      this.themeMediaQueryList.removeEventListener('change', this.themeMediaQueryListener);
+    } else if (typeof this.themeMediaQueryList.removeListener === 'function') {
+      this.themeMediaQueryList.removeListener(this.themeMediaQueryListener);
+    }
+
+    this.themeMediaQueryList = null;
+    this.themeMediaQueryListener = null;
   }
 
   private prewarmWorkerExecutors(): void {

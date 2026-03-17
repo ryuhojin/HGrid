@@ -107,4 +107,42 @@ describe('dom-renderer-cell-binding', () => {
     expect(cell.classList.contains('hgrid__cell--selected')).toBe(false);
     expect(cell.classList.contains('hgrid__cell--active')).toBe(false);
   });
+
+  it('uses trustedTypes policy when trustedTypesPolicyName is provided', () => {
+    const originalTrustedTypes = (globalThis as typeof globalThis & { trustedTypes?: unknown }).trustedTypes;
+    const createPolicyCalls: string[] = [];
+    try {
+      (globalThis as typeof globalThis & { trustedTypes?: { createPolicy(name: string, rules: { createHTML(value: string): string }): { createHTML(value: string): string } } }).trustedTypes = {
+        createPolicy(name, rules) {
+          createPolicyCalls.push(name);
+          return {
+            createHTML(value: string) {
+              return rules.createHTML(value);
+            }
+          };
+        }
+      };
+
+      const cell = document.createElement('div');
+      const cellState = createCellRenderState(true, 'name', 160);
+
+      bindCell(cell, cellState, {
+        isVisible: true,
+        columnId: 'name',
+        textContent: 'Beta',
+        contentMode: 'html',
+        htmlContent: '<strong>Beta</strong>',
+        trustedTypesPolicyName: 'hgrid-test-policy'
+      });
+
+      expect(createPolicyCalls).toEqual(['hgrid-test-policy']);
+      expect(cell.innerHTML).toBe('<strong>Beta</strong>');
+    } finally {
+      if (originalTrustedTypes === undefined) {
+        delete (globalThis as typeof globalThis & { trustedTypes?: unknown }).trustedTypes;
+      } else {
+        (globalThis as typeof globalThis & { trustedTypes?: unknown }).trustedTypes = originalTrustedTypes;
+      }
+    }
+  });
 });

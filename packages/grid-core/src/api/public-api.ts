@@ -36,6 +36,7 @@ export type {
   GridDirtyChangeOptions,
   GridDirtyChangeSummary,
   GridDirtyRowChange,
+  GridHtmlRenderingOptions,
   GridContextMenuContext,
   GridContextMenuOptions,
   GridEditPolicyOptions,
@@ -103,6 +104,7 @@ export type {
   StateColumnRenderResult,
   GridState,
   GridTheme,
+  GridUnsafeHtmlPolicy,
   GridWorkerFallbackPolicy,
   GridWorkerAssetUrls,
   GridWorkerOperationType,
@@ -133,6 +135,7 @@ export type {
   EditTransactionKind,
   EditTransactionStep
 } from '../core/edit-events';
+export { EDIT_COMMIT_AUDIT_SCHEMA_VERSION } from '../core/edit-events';
 export { LocalDataProvider } from '../data/local-data-provider';
 export { ColumnarDataProvider } from '../data/columnar-data-provider';
 export { CooperativeFilterExecutor } from '../data/filter-executor';

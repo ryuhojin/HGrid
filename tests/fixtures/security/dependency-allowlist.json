@@ -1,0 +1,14 @@
+{
+  "advisories": [
+    {
+      "id": "1108110",
+      "module": "xlsx",
+      "reason": "SheetJS CE advisory has no patched npm release. HGrid keeps the issue documented, constrains import usage, and tracks replacement/vendoring separately."
+    },
+    {
+      "id": "1108111",
+      "module": "xlsx",
+      "reason": "SheetJS CE advisory has no patched npm release. HGrid keeps the issue documented, constrains import usage, and tracks replacement/vendoring separately."
+    }
+  ]
+}

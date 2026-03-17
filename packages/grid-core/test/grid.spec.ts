@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Grid } from '../src';
+import { EDIT_COMMIT_AUDIT_SCHEMA_VERSION } from '../src/core/edit-events';
 import { LocalDataProvider } from '../src/data/local-data-provider';
 import { RemoteDataProvider } from '../src/data/remote-data-provider';
 import type { DataProvider, DataTransaction, GridRowData } from '../src/data/data-provider';
@@ -3987,6 +3988,41 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
+  it('renders unsafeHtml columns as literal text when no sanitizer is provided by default', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const rawHtml = '<strong class="safe-name">Safe</strong><img src=x onerror="window.__xss=true" />';
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'unsafeName', header: 'Unsafe Name', width: 220, type: 'text', unsafeHtml: true }
+      ],
+      rowData: [
+        {
+          id: 101,
+          unsafeName: rawHtml
+        }
+      ],
+      height: 150,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await waitForFrame();
+
+    const unsafeCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="unsafeName"]'
+    ) as HTMLDivElement;
+
+    expect(unsafeCell.textContent).toBe(rawHtml);
+    expect(unsafeCell.querySelector('strong')).toBeNull();
+    expect(unsafeCell.querySelector('img')).toBeNull();
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('renders unsafe HTML only when opt-in is enabled and sanitize hook is provided', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -4033,6 +4069,42 @@ describe('Grid DOM pooling', () => {
     expect(plainCell.textContent).toBe('<strong>Literal</strong>');
     expect(plainCell.querySelector('strong')).toBeNull();
     expect(sanitizeCalls.some((call) => call.columnId === 'unsafeName' && call.rowKey === 101)).toBe(true);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('allows legacy raw HTML rendering only when htmlRendering.unsafeHtmlPolicy is allowRaw', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 90, type: 'number' },
+        { id: 'unsafeName', header: 'Unsafe Name', width: 220, type: 'text', unsafeHtml: true }
+      ],
+      rowData: [
+        {
+          id: 101,
+          unsafeName: '<strong class="safe-name">Safe</strong><img src=x onerror="window.__xss=true" />'
+        }
+      ],
+      htmlRendering: {
+        unsafeHtmlPolicy: 'allowRaw'
+      },
+      height: 150,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    await waitForFrame();
+
+    const unsafeCell = container.querySelector(
+      '.hgrid__row[data-row-index="0"] .hgrid__cell[data-column-id="unsafeName"]'
+    ) as HTMLDivElement;
+
+    expect(unsafeCell.querySelector('strong.safe-name')).not.toBeNull();
+    expect(unsafeCell.querySelector('img')).not.toBeNull();
 
     grid.destroy();
     container.remove();
@@ -5343,6 +5415,7 @@ describe('Grid DOM pooling', () => {
     expect(typeof editCommitEvents[0].timestampMs).toBe('number');
     expect(auditLogs.length).toBe(1);
     expect(auditLogs[0]).toMatchObject({
+      schemaVersion: EDIT_COMMIT_AUDIT_SCHEMA_VERSION,
       eventName: 'editCommit',
       rowIndex: 0,
       rowKey: 1,

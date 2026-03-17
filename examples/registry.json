@@ -1152,6 +1152,48 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 89,
+      "file": "example89.html",
+      "title": "Example 89 - HTML Render Security Policy",
+      "tags": [
+        "phase13",
+        "phase-e5",
+        "security",
+        "xss",
+        "sanitize",
+        "migration",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 90,
+      "file": "example90.html",
+      "title": "Example 90 - Trusted Types HTML Rendering",
+      "tags": [
+        "phase13",
+        "phase-e5",
+        "security",
+        "trusted-types",
+        "csp",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 91,
+      "file": "example91.html",
+      "title": "Example 91 - Audit Schema and Masking",
+      "tags": [
+        "phase-e5",
+        "security",
+        "audit",
+        "masking",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

@@ -7,6 +7,7 @@ export interface CellRenderState {
   contentMode: 'text' | 'html';
   textContent: string;
   htmlContent: string;
+  trustedTypesPolicyName: string;
   left: number;
   width: number;
   isSelected: boolean;
@@ -103,6 +104,7 @@ export function createCellRenderState(
     contentMode: 'text',
     textContent: '',
     htmlContent: '',
+    trustedTypesPolicyName: '',
     left: Number.NaN,
     width,
     isSelected: false,

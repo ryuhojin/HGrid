@@ -3,6 +3,7 @@ import type { RowKey } from '../data/data-provider';
 export type EditCommitSource = 'editor' | 'clipboard' | 'fillHandle' | 'undo' | 'redo';
 export type EditTransactionKind = 'singleCell' | 'clipboardRange' | 'fillRange' | 'historyReplay';
 export type EditTransactionStep = 'apply' | 'undo' | 'redo';
+export const EDIT_COMMIT_AUDIT_SCHEMA_VERSION = 1 as const;
 
 export interface EditCommitChangePayload {
   rowIndex: number;
@@ -28,6 +29,7 @@ export interface EditCommitEventPayload extends EditCommitChangePayload {
 }
 
 export interface EditCommitAuditPayload extends EditCommitEventPayload {
+  schemaVersion: typeof EDIT_COMMIT_AUDIT_SCHEMA_VERSION;
   eventName: 'editCommit';
   changeIndex?: number;
 }

@@ -27,6 +27,7 @@ import type {
 } from './grid-internal-contracts';
 import type { AdvancedFilterModel, ColumnFilterInput } from '../data/filter-executor';
 import type { GroupAggregationDef, GroupModelItem, PivotModelItem, PivotValueDef } from './grid-options';
+import { EDIT_COMMIT_AUDIT_SCHEMA_VERSION } from './edit-events';
 
 export interface GridCommandEventServiceParams
   extends GridColumnMutationPort,
@@ -434,6 +435,7 @@ export class GridCommandEventService {
     for (let changeIndex = 0; changeIndex < changes.length; changeIndex += 1) {
       const change = changes[changeIndex];
       onAuditLog({
+        schemaVersion: EDIT_COMMIT_AUDIT_SCHEMA_VERSION,
         eventName: 'editCommit',
         rowIndex: change.rowIndex,
         dataIndex: change.dataIndex,

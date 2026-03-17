@@ -3530,35 +3530,115 @@ async function runExample41Checks(page, serverUrl, pageErrors) {
     }
     return api.getSnapshot();
   });
-  assert.equal(initialSnapshot.sanitizeMode, 'on', 'example41 should start in sanitize on mode');
+  assert.equal(initialSnapshot.mode, 'strict-sanitize', 'example41 should start in strict sanitize mode');
+  assert.equal(initialSnapshot.unsafeHtmlPolicy, 'sanitizedOnly', 'example41 should default to sanitizedOnly policy');
   assert.equal(initialSnapshot.safeTextCell, '<strong>Literal</strong>', 'example41 default text cell should stay literal');
   assert.equal(initialSnapshot.hasUnsafeBold, true, 'example41 unsafeHtml opt-in should render strong element');
   assert.equal(initialSnapshot.hasUnsafeImage, false, 'example41 sanitize-on should remove unsafe img');
 
   await page.evaluate(() => {
     const api = window.__example41;
-    api.setSanitizeMode('off');
+    api.setMode('strict-no-sanitize');
   });
   await page.waitForFunction(() => {
     const api = window.__example41;
-    return api && api.getSnapshot().hasUnsafeImage === true;
+    const snapshot = api && api.getSnapshot();
+    return snapshot && snapshot.mode === 'strict-no-sanitize' && snapshot.hasUnsafeBold === false && snapshot.hasUnsafeImage === false;
   });
-  const unsafeSnapshot = await page.evaluate(() => window.__example41.getSnapshot());
-  assert.equal(unsafeSnapshot.sanitizeMode, 'off', 'example41 should switch sanitize mode off');
-  assert.equal(unsafeSnapshot.hasUnsafeImage, true, 'example41 sanitize-off should expose img element');
+  const strictFallbackSnapshot = await page.evaluate(() => window.__example41.getSnapshot());
+  assert.equal(strictFallbackSnapshot.mode, 'strict-no-sanitize', 'example41 should switch to strict no sanitizer mode');
+  assert.equal(strictFallbackSnapshot.unsafeHtmlPolicy, 'sanitizedOnly', 'example41 strict fallback should keep sanitizedOnly policy');
+  assert.equal(strictFallbackSnapshot.hasUnsafeBold, false, 'example41 strict fallback should render literal text instead of strong');
+  assert.equal(strictFallbackSnapshot.hasUnsafeImage, false, 'example41 strict fallback should not expose img element');
 
   await page.evaluate(() => {
     const api = window.__example41;
-    api.setSanitizeMode('on');
+    api.setMode('legacy-raw');
   });
   await page.waitForFunction(() => {
     const api = window.__example41;
-    return api && api.getSnapshot().hasUnsafeImage === false;
+    const snapshot = api && api.getSnapshot();
+    return snapshot && snapshot.mode === 'legacy-raw' && snapshot.hasUnsafeImage === true;
+  });
+  const legacySnapshot = await page.evaluate(() => window.__example41.getSnapshot());
+  assert.equal(legacySnapshot.mode, 'legacy-raw', 'example41 should switch to legacy raw mode');
+  assert.equal(legacySnapshot.unsafeHtmlPolicy, 'allowRaw', 'example41 legacy mode should use allowRaw policy');
+  assert.equal(legacySnapshot.hasUnsafeImage, true, 'example41 legacy mode should expose img element');
+
+  await page.evaluate(() => {
+    const api = window.__example41;
+    api.setMode('strict-sanitize');
+  });
+  await page.waitForFunction(() => {
+    const api = window.__example41;
+    const snapshot = api && api.getSnapshot();
+    return snapshot && snapshot.mode === 'strict-sanitize' && snapshot.hasUnsafeImage === false;
   });
   const restoredSnapshot = await page.evaluate(() => window.__example41.getSnapshot());
-  assert.equal(restoredSnapshot.sanitizeMode, 'on', 'example41 should switch sanitize mode on');
+  assert.equal(restoredSnapshot.mode, 'strict-sanitize', 'example41 should switch sanitize mode on');
   assert.equal(restoredSnapshot.hasUnsafeImage, false, 'example41 sanitize-on should remove img again');
 
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample89Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example89.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example89?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.waitForFunction(() => {
+    const snapshot = window.__example89?.refresh?.();
+    return snapshot && snapshot.strict && snapshot.sanitized && snapshot.legacy;
+  }, null, { timeout: 10_000 });
+
+  const snapshot = await page.evaluate(() => window.__example89.getSnapshot());
+  assert.equal(snapshot.strict.hasStrong, false, 'example89 strict policy should not render strong element without sanitizer');
+  assert.equal(snapshot.strict.hasImage, false, 'example89 strict policy should not render image without sanitizer');
+  assert.equal(snapshot.sanitized.hasStrong, true, 'example89 sanitized policy should render allowed strong element');
+  assert.equal(snapshot.sanitized.hasImage, false, 'example89 sanitized policy should strip image');
+  assert.equal(snapshot.legacy.hasStrong, true, 'example89 legacy policy should render raw strong element');
+  assert.equal(snapshot.legacy.hasImage, true, 'example89 legacy policy should render raw image element');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample90Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example90.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example90?.getSnapshot), null, { timeout: 15_000 });
+
+  const snapshot = await page.evaluate(() => window.__example90.getSnapshot());
+  assert.equal(snapshot.policyName, 'hgrid-example90', 'example90 should expose the configured TT policy name');
+  assert.equal(snapshot.hasStrong, true, 'example90 should render sanitized strong element');
+  assert.equal(snapshot.hasImage, false, 'example90 should strip unsafe image');
+  assert.equal(snapshot.hasLink, true, 'example90 should keep safe anchor element');
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample91Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example91.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__example91?.getSnapshot), null, { timeout: 15_000 });
+
+  await page.evaluate(async () => window.__example91.applyEmailEdit());
+  await page.waitForFunction(() => {
+    const snapshot = window.__example91?.getSnapshot?.();
+    return snapshot && Array.isArray(snapshot.auditLogs) && snapshot.auditLogs.length >= 1;
+  }, null, { timeout: 10_000 });
+
+  const snapshot = await page.evaluate(() => window.__example91.getSnapshot());
+  assert.equal(snapshot.auditSchemaVersion, 1, 'example91 should expose audit schema version 1');
+  assert.equal(snapshot.auditLogs[0].schemaVersion, 1, 'example91 latest audit log should carry schemaVersion=1');
+  assert.equal(snapshot.auditLogs[0].columnId, 'email', 'example91 first audit log should track email edit');
+  assert.equal(snapshot.auditLogs[0].maskedValue, 'ah***@example.com', 'example91 should mask email values in consumer');
+  assert.equal(snapshot.auditLogs[0].maskedPreviousValue, 'ah***@example.com', 'example91 should mask previous email values in consumer');
+
+  await page.evaluate(async () => window.__example91.applyPhoneEdit());
+  await page.waitForFunction(() => {
+    const currentSnapshot = window.__example91?.getSnapshot?.();
+    return currentSnapshot && currentSnapshot.auditLogs && currentSnapshot.auditLogs[0] && currentSnapshot.auditLogs[0].columnId === 'phone';
+  }, null, { timeout: 10_000 });
+
+  const phoneSnapshot = await page.evaluate(() => window.__example91.getSnapshot());
+  assert.equal(phoneSnapshot.auditLogs[0].maskedValue, '***-***-9900', 'example91 should mask phone values in consumer');
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
@@ -5823,6 +5903,12 @@ async function main() {
     await runExample87Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample88Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample89Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample90Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample91Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample64Checks(page, server.url, pageErrors);
     pageErrors.length = 0;

@@ -10,10 +10,12 @@
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:csp": "node scripts/csp-smoke-test.mjs",
     "test:security": "node scripts/security-scan.mjs",
+    "test:deps": "node scripts/dependency-scan.mjs",
+    "test:security:fuzz": "node scripts/security-fuzz.mjs",
     "check:naming": "node scripts/check-naming.mjs",
     "bench:data": "node scripts/generate-bench-data.mjs --rows 20000 --seed 20260309 --out tests/fixtures/generated/bench-data-20k.json",
     "bench": "node scripts/bench.mjs",
-    "ci:phase0": "pnpm typecheck && pnpm build && pnpm test && pnpm test:e2e && pnpm verify:examples && pnpm test:csp && pnpm test:security && pnpm check:naming && pnpm bench",
+    "ci:phase0": "pnpm typecheck && pnpm build && pnpm test && pnpm test:e2e && pnpm verify:examples && pnpm test:csp && pnpm test:security && pnpm test:deps && pnpm test:security:fuzz && pnpm check:naming && pnpm bench",
     "new:example": "node scripts/new-example.mjs",
     "verify:examples": "node scripts/verify-examples.mjs"
   },

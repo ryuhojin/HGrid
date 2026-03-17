@@ -84,4 +84,4 @@
 ## Current Limits
 - arbitrary transaction rollback API는 아직 없다.
 - save/discard action bar는 E4 close-out에서 들어갔지만, distributed transaction rollback과 conflict merge dialog는 여전히 범위 밖이다.
-- audit payload는 transaction metadata까지 올라왔지만, domain-specific audit schema versioning은 E5/E9 운영 범위다.
+- audit payload는 `schemaVersion = 1`까지 고정됐지만, domain-specific field mask policy와 incident runbook은 운영 문서에서 추가로 가져가야 한다.

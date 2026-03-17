@@ -92,6 +92,23 @@ describe('dom-renderer-selection-clipboard', () => {
     expect(parseClipboardTsv('')).toEqual([]);
   });
 
+  it('keeps malicious-looking clipboard payloads as inert text while normalizing separators', () => {
+    const payloads = [
+      '<img src=x onerror=alert(1)>\tactive\r\n<script>alert(1)</script>\tidle',
+      'A\u0000\tB\r\njavascript:alert(1)\t<svg onload=alert(1)>',
+      '<b>unsafe</b>\tactive\nLiteral\tidle\n'
+    ];
+
+    for (let index = 0; index < payloads.length; index += 1) {
+      const sanitized = sanitizeClipboardText(payloads[index]);
+      const matrix = parseClipboardTsv(payloads[index]);
+      expect(sanitized.includes('\u0000')).toBe(false);
+      expect(Array.isArray(matrix)).toBe(true);
+      expect(matrix.length).toBeGreaterThan(0);
+      expect(matrix[0].length).toBeGreaterThan(0);
+    }
+  });
+
   it('builds TSV output from a selection rectangle through a cell reader callback', () => {
     expect(
       buildSelectionTsv(

@@ -76,10 +76,21 @@
 - `ColumnDef`: includes formatter/comparator/valueGetter/valueSetter hooks.
   - `filterMode?: "auto" | "text" | "set"`
   - `editor?: GridCellEditorOptions`
+  - `unsafeHtml?: boolean`
+  - `sanitizeHtml?: UnsafeHtmlSanitizer`
   - E4.4 current scope:
     - derived value = `valueGetter`
     - edit write-back hook = `valueSetter`
     - formula/expression authoring language is not part of `grid-core`
+- `GridOptions.htmlRendering?` (Phase E5.1):
+  - `unsafeHtmlPolicy?: "sanitizedOnly" | "allowRaw"`
+  - `trustedTypesPolicyName?: string`
+  - default: `"sanitizedOnly"`
+  - when `unsafeHtml === true` and no sanitizer exists:
+    - `"sanitizedOnly"` => literal text fallback
+    - `"allowRaw"` => raw HTML render (legacy migration escape hatch)
+  - when `trustedTypesPolicyName` is set and browser supports Trusted Types:
+    - HGrid creates that policy name once and uses it for HTML cell sinks
 - `GridOptions.editPolicy?` (Phase E4.1):
   - `dirtyTracking.enabled?: boolean`
 - `GridColumnLayout` (Phase E3.6):
@@ -359,6 +370,12 @@
 - `editCommit`:
   - `{ rowIndex, dataIndex, rowKey, columnId, previousValue, value, source, commitId, transactionId, rootTransactionId, transactionKind, transactionStep, timestampMs, timestamp, rowCount, cellCount, changes[] }`
   - `source`: `"editor" | "clipboard" | "fillHandle" | "undo" | "redo"`
+- `onAuditLog(payload: EditCommitAuditPayload)`:
+  - `schemaVersion: 1`
+  - `eventName: "editCommit"`
+  - `changeIndex?: number`
+  - `editCommit` payload의 transaction metadata를 그대로 포함
+  - row/cell value masking은 core가 아니라 app-owned audit consumer 책임
 - transaction metadata (Phase E4.2):
   - `transactionId: string`
   - `rootTransactionId: string`

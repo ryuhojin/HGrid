@@ -33,6 +33,7 @@ describe('dom-renderer-row-pool', () => {
       contentMode: 'text',
       textContent: '',
       htmlContent: '',
+      trustedTypesPolicyName: '',
       left: Number.NaN,
       width: 120,
       isSelected: false,

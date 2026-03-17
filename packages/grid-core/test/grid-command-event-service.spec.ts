@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { EDIT_COMMIT_AUDIT_SCHEMA_VERSION } from '../src/core/edit-events';
 import {
   GridCommandEventService,
   type GridCommandEventServiceParams
@@ -382,6 +383,7 @@ describe('GridCommandEventService', () => {
     expect(applyGroupingView).toHaveBeenCalledTimes(1);
     expect(invalidateWorkerProjectionCache).toHaveBeenCalledTimes(1);
     expect(onAuditLog).toHaveBeenCalledWith({
+      schemaVersion: EDIT_COMMIT_AUDIT_SCHEMA_VERSION,
       eventName: 'editCommit',
       rowIndex: 1,
       dataIndex: 0,
@@ -546,6 +548,7 @@ describe('GridCommandEventService', () => {
 
     expect(onAuditLog).toHaveBeenCalledTimes(2);
     expect(onAuditLog).toHaveBeenNthCalledWith(1, {
+      schemaVersion: EDIT_COMMIT_AUDIT_SCHEMA_VERSION,
       eventName: 'editCommit',
       rowIndex: 0,
       dataIndex: 0,
@@ -584,6 +587,7 @@ describe('GridCommandEventService', () => {
       changeIndex: 0
     });
     expect(onAuditLog).toHaveBeenNthCalledWith(2, {
+      schemaVersion: EDIT_COMMIT_AUDIT_SCHEMA_VERSION,
       eventName: 'editCommit',
       rowIndex: 1,
       dataIndex: 1,

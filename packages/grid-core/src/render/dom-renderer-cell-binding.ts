@@ -12,6 +12,7 @@ export interface CellBindingState {
   textContent: string;
   contentMode?: 'text' | 'html';
   htmlContent?: string;
+  trustedTypesPolicyName?: string;
   role?: string;
   left?: number;
   width?: number;
@@ -57,6 +58,7 @@ export function bindCell(cell: HTMLDivElement, cellState: CellRenderState, nextS
   const cellId = nextState.cellId ?? '';
   const contentMode = nextState.contentMode ?? 'text';
   const htmlContent = nextState.htmlContent ?? '';
+  const trustedTypesPolicyName = nextState.trustedTypesPolicyName;
 
   if (cellState.isVisible !== nextState.isVisible) {
     cell.style.display = nextState.isVisible ? '' : 'none';
@@ -89,7 +91,7 @@ export function bindCell(cell: HTMLDivElement, cellState: CellRenderState, nextS
 
   if (cellState.contentMode !== contentMode) {
     if (contentMode === 'html') {
-      cell.innerHTML = htmlContent;
+      applyCellHtml(cell, htmlContent, trustedTypesPolicyName);
       cellState.htmlContent = htmlContent;
     } else {
       cell.textContent = nextState.textContent;
@@ -98,8 +100,8 @@ export function bindCell(cell: HTMLDivElement, cellState: CellRenderState, nextS
     cellState.textContent = nextState.textContent;
     cellState.contentMode = contentMode;
   } else if (contentMode === 'html') {
-    if (cellState.htmlContent !== htmlContent) {
-      cell.innerHTML = htmlContent;
+    if (cellState.htmlContent !== htmlContent || cellState.trustedTypesPolicyName !== (trustedTypesPolicyName ?? '')) {
+      applyCellHtml(cell, htmlContent, trustedTypesPolicyName);
       cellState.htmlContent = htmlContent;
     }
     if (cellState.textContent !== nextState.textContent) {
@@ -113,6 +115,10 @@ export function bindCell(cell: HTMLDivElement, cellState: CellRenderState, nextS
     if (cellState.htmlContent.length > 0) {
       cellState.htmlContent = '';
     }
+  }
+
+  if (cellState.trustedTypesPolicyName !== (trustedTypesPolicyName ?? '')) {
+    cellState.trustedTypesPolicyName = trustedTypesPolicyName ?? '';
   }
 
   if (cellState.extraClassName !== extraClassName) {
@@ -193,6 +199,64 @@ export function bindCell(cell: HTMLDivElement, cellState: CellRenderState, nextS
     cell.classList.toggle('hgrid__cell--active', isActive);
     cellState.isActive = isActive;
   }
+}
+
+interface TrustedTypesPolicyLike {
+  createHTML(value: string): unknown;
+}
+
+interface TrustedTypesFactoryLike {
+  createPolicy(name: string, rules: { createHTML(value: string): string }): TrustedTypesPolicyLike;
+}
+
+const trustedTypesPolicyCache = new Map<string, TrustedTypesPolicyLike | null>();
+
+function applyCellHtml(cell: HTMLDivElement, htmlContent: string, trustedTypesPolicyName?: string): void {
+  const htmlValue = createTrustedHtmlValue(htmlContent, trustedTypesPolicyName);
+  (cell as unknown as { innerHTML: string }).innerHTML = htmlValue as string;
+}
+
+function createTrustedHtmlValue(htmlContent: string, trustedTypesPolicyName?: string): unknown {
+  if (!trustedTypesPolicyName) {
+    return htmlContent;
+  }
+
+  const policy = getOrCreateTrustedTypesPolicy(trustedTypesPolicyName);
+  return policy ? policy.createHTML(htmlContent) : htmlContent;
+}
+
+function getOrCreateTrustedTypesPolicy(policyName: string): TrustedTypesPolicyLike | null {
+  if (trustedTypesPolicyCache.has(policyName)) {
+    return trustedTypesPolicyCache.get(policyName) ?? null;
+  }
+
+  const factory = getTrustedTypesFactory();
+  if (!factory) {
+    trustedTypesPolicyCache.set(policyName, null);
+    return null;
+  }
+
+  try {
+    const policy = factory.createPolicy(policyName, {
+      createHTML(value: string) {
+        return value;
+      }
+    });
+    trustedTypesPolicyCache.set(policyName, policy);
+    return policy;
+  } catch {
+    trustedTypesPolicyCache.set(policyName, null);
+    return null;
+  }
+}
+
+function getTrustedTypesFactory(): TrustedTypesFactoryLike | null {
+  const globalValue = globalThis as typeof globalThis & { trustedTypes?: TrustedTypesFactoryLike };
+  if (!globalValue.trustedTypes || typeof globalValue.trustedTypes.createPolicy !== 'function') {
+    return null;
+  }
+
+  return globalValue.trustedTypes;
 }
 
 function escapeHtmlText(value: string): string {

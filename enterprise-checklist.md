@@ -306,31 +306,31 @@
 > 보안은 “기본 안전”이어야 한다.
 
 ## E5.1 HTML 렌더 보안 정책 재설계
-- [ ] `unsafeHtml` 기본 정책 재검토
-- [ ] sanitizer 미제공 시 raw HTML 허용 여부 결정
-- [ ] secure-by-default 정책으로 전환 여부 결정
-- [ ] sanitizer reference implementation 문서화
+- [x] `unsafeHtml` 기본 정책 재검토
+- [x] sanitizer 미제공 시 raw HTML 허용 여부 결정
+- [x] secure-by-default 정책으로 전환 여부 결정
+- [x] sanitizer reference implementation 문서화
 
 ## E5.2 CSP / Trusted Types
-- [ ] strict CSP 지원 범위 문서화
-- [ ] Trusted Types 대응 여부 결정
-- [ ] `styleNonce` 실제 적용 경로가 필요한지 결정
-- [ ] 플러그인 CSP 규칙 작성
+- [x] strict CSP 지원 범위 문서화
+- [x] Trusted Types 대응 여부 결정
+- [x] `styleNonce` 실제 적용 경로가 필요한지 결정
+- [x] 플러그인 CSP 규칙 작성
 
 ## E5.3 보안 검증 체계
-- [ ] static scan 규칙 확대
-- [ ] dependency scan 도입
-- [ ] XSS regression fixture 확대
-- [ ] clipboard / paste / import 경로 fuzz test 검토
+- [x] static scan 규칙 확대
+- [x] dependency scan 도입
+- [x] XSS regression fixture 확대
+- [x] clipboard / paste / import 경로 fuzz test 검토
 
 ## E5.4 감사 / 운영 보안
-- [ ] audit payload schema versioning
-- [ ] security incident 대응 로그 포인트 정의
-- [ ] 개인정보/민감정보 masking 가이드 추가
+- [x] audit payload schema versioning
+- [x] security incident 대응 로그 포인트 정의
+- [x] 개인정보/민감정보 masking 가이드 추가
 
 ### 수용 기준
-- [ ] “옵션을 잘 주면 안전”이 아니라 “기본이 안전” 상태가 된다.
-- [ ] 보안 정책이 core, adapter, plugin 전체에 일관 적용된다.
+- [x] “옵션을 잘 주면 안전”이 아니라 “기본이 안전” 상태가 된다.
+- [x] 보안 정책이 core, adapter, plugin 전체에 일관 적용된다.
 
 ---
 
@@ -520,13 +520,13 @@
 ---
 
 # 14. 권장 수행 순서
-- [ ] Step 1: `1. 현재 상태 진단 고정`
-- [ ] Step 2: `2. Phase E0 — Architecture Hardening`
+- [x] Step 1: `1. 현재 상태 진단 고정`
+- [x] Step 2: `2. Phase E0 — Architecture Hardening`
 - [x] Step 3: `3. Phase E1 — Actual Worker Runtime`
-- [ ] Step 4: `4. Phase E2 — Enterprise Server-Side Data Model`
+- [x] Step 4: `4. Phase E2 — Enterprise Server-Side Data Model`
 - [x] Step 5: `5. Phase E3 — Enterprise Product Surface`
 - [x] Step 6: `6. Phase E4 — Data Workflow / Editing Productization`
-- [ ] Step 7: `7. Phase E5 — Security / CSP / Compliance`
+- [x] Step 7: `7. Phase E5 — Security / CSP / Compliance`
 - [ ] Step 8: `8. Phase E6 — Accessibility / i18n / RTL`
 - [ ] Step 9: `9. Phase E7 — Framework Packages Productization`
 - [ ] Step 10: `10. Phase E8 — Plugin SDK / Extension Platform`

@@ -42,7 +42,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - ARIA Grid semantics pipeline (`aria-rowcount/colcount/rowindex/colindex` + `aria-activedescendant` focus strategy)
 - Keyboard-only pipeline (navigation/selection/editing, `Ctrl/Cmd+A`, `F2`, editor `Tab/Shift+Tab`)
 - i18n pipeline (`localeText` externalization, Intl number/date formatting, RTL direction option)
-- Security/CSP baseline (`unsafeHtml` opt-in + sanitize hook, `editCommit` audit payload 표준화, CSP/정적 보안 스캔)
+- Security/CSP baseline (`unsafeHtml` opt-in + secure-by-default HTML policy + sanitize hook + Trusted Types opt-in, `editCommit` audit payload 표준화, CSP/정적 보안 스캔)
 - Performance baseline policy (`Phase 14.1` 참조 환경 문서화 + 벤치 데이터 생성 스크립트)
 - Performance scenarios (`Phase 14.2` initial render/FPS/100M mapping/sort/filter/create-destroy/scroll regression)
 - Performance gates (`Phase 14.3` long-task rate/p95/dom-pool 고정 기준 강제)
@@ -63,7 +63,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - 이벤트 위임 + rAF 배치 렌더
 - CSP 친화 (`eval`, `new Function`, `setTimeout("string")` 금지)
 - 기본 셀 렌더는 `textContent` 사용
-- HTML 렌더는 컬럼 opt-in(`unsafeHtml`) + sanitize hook으로만 허용
+- HTML 렌더는 컬럼 opt-in(`unsafeHtml`) + secure-by-default 정책으로 동작하며, sanitizer가 없으면 literal text fallback이다.
 
 ## Monorepo 구조
 
@@ -140,16 +140,21 @@ const grid = new HGrid.Grid(container, {
     { id: 'bioHtml', header: 'Bio', width: 320, type: 'text', unsafeHtml: true }
   ],
   rowData,
+  htmlRendering: {
+    unsafeHtmlPolicy: 'sanitizedOnly',
+    trustedTypesPolicyName: 'hgrid-html'
+  },
   styleNonce: 'nonce-from-server',
   sanitizeHtml(unsafeHtml, context) {
-    // 기본은 textContent이며, unsafeHtml=true 컬럼에서만 호출됩니다.
+    // 기본은 secure-by-default이며, sanitizer가 없으면 literal text fallback이다.
+    // unsafeHtml=true 컬럼 + sanitizedOnly policy에서만 safe HTML을 반환한다.
     return unsafeHtml
       .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
       .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
   },
   onAuditLog(payload) {
-    // editCommit 표준 payload: rowKey/source/commitId/timestamp + cellCount/changes 포함
-    console.log(payload.eventName, payload.rowKey, payload.source, payload.commitId);
+    // schemaVersion=1 audit payload. 값 masking은 app-owned consumer에서 수행한다.
+    console.log(payload.schemaVersion, payload.eventName, payload.rowKey, payload.source, payload.commitId);
   }
 });
 ```
@@ -324,7 +329,10 @@ pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 - `example38`: ARIA grid semantics(role/row/col index + active descendant)
 - `example39`: keyboard-only flow(navigation/selection/editing)
 - `example40`: i18n(localeText/Intl formatting/RTL)
-- `example41`: security/csp hardening(unsafeHtml opt-in + sanitize + audit payload snapshot)
+- `example41`: security/csp hardening(strict fallback + sanitizer + legacy raw migration + audit payload snapshot)
+- `example89`: HTML render security policy matrix(strict default / sanitized / legacy raw)
+- `example90`: Trusted Types HTML rendering(`trustedTypesPolicyName` + sanitizer)
+- `example91`: audit schema version + masking-aware audit consumer
 - `example42`: E0 orchestrator split smoke(state/provider/query/export)
 - `example43`: E0 renderer hardening smoke(pooling/a11y/selection/export)
 - `example44`: E1 worker dispatcher smoke(sort/filter/group/pivot/tree worker path)

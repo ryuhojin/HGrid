@@ -38,6 +38,7 @@ export type GridBuiltInBodyMenuActionId =
   | 'copySelection'
   | 'filterByValue'
   | 'clearColumnFilter';
+export type GridUnsafeHtmlPolicy = 'sanitizedOnly' | 'allowRaw';
 
 export type ColumnFormatter = (value: unknown, row: GridRowData) => string;
 export type ColumnComparator = (a: unknown, b: unknown) => number;
@@ -45,6 +46,11 @@ export type ColumnValueGetter = (row: GridRowData, column: ColumnDef) => unknown
 export type ColumnValueSetter = (row: GridRowData, value: unknown, column: ColumnDef) => void;
 export type RowHeightGetter = (rowIndex: number, dataIndex: number) => number;
 export type UnsafeHtmlSanitizer = (unsafeHtml: string, context: UnsafeHtmlSanitizeContext) => string;
+
+export interface GridHtmlRenderingOptions {
+  unsafeHtmlPolicy?: GridUnsafeHtmlPolicy;
+  trustedTypesPolicyName?: string;
+}
 
 export interface GridCellEditorOption {
   value: string | number | boolean | null;
@@ -664,6 +670,7 @@ export interface GridOptions {
   rowModel: RowModel;
   locale?: string;
   localeText?: Partial<GridLocaleText>;
+  htmlRendering?: GridHtmlRenderingOptions;
   styleNonce?: string;
   sanitizeHtml?: UnsafeHtmlSanitizer;
   onAuditLog?: EditCommitAuditLogger;

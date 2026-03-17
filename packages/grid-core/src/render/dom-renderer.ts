@@ -8784,6 +8784,14 @@ export class DomRenderer implements GridRendererPort {
       value
     };
     const htmlContent = this.resolveUnsafeHtmlContent(textContent, context);
+    if (htmlContent === null) {
+      return {
+        textContent,
+        contentMode: 'text',
+        htmlContent: ''
+      };
+    }
+
     return {
       textContent,
       contentMode: 'html',
@@ -8791,7 +8799,7 @@ export class DomRenderer implements GridRendererPort {
     };
   }
 
-  private resolveUnsafeHtmlContent(rawHtml: string, context: UnsafeHtmlSanitizeContext): string {
+  private resolveUnsafeHtmlContent(rawHtml: string, context: UnsafeHtmlSanitizeContext): string | null {
     const columnSanitize = context.column.sanitizeHtml;
     if (typeof columnSanitize === 'function') {
       const sanitizedHtml = columnSanitize(rawHtml, context);
@@ -8804,7 +8812,7 @@ export class DomRenderer implements GridRendererPort {
       return typeof sanitizedHtml === 'string' ? sanitizedHtml : '';
     }
 
-    return rawHtml;
+    return this.options.htmlRendering?.unsafeHtmlPolicy === 'allowRaw' ? rawHtml : null;
   }
 
   private prependCellPrefix(content: CellContentResult, prefix: string): CellContentResult {
@@ -9177,7 +9185,10 @@ export class DomRenderer implements GridRendererPort {
   }
 
   private bindCell(cell: HTMLDivElement, cellState: CellRenderState, nextState: CellBindingState): void {
-    bindGridCell(cell, cellState, nextState);
+    bindGridCell(cell, cellState, {
+      ...nextState,
+      trustedTypesPolicyName: this.options.htmlRendering?.trustedTypesPolicyName
+    });
   }
 
   private bindIndicatorCheckboxCell(

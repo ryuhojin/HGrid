@@ -10,6 +10,7 @@
         margin: 24px;
         font-family: "Segoe UI", "Noto Sans KR", sans-serif;
         color: #111827;
+        background: #f8fafc;
       }
 
       h1 {
@@ -33,18 +34,25 @@
       .controls button {
         border: 1px solid #cbd5e1;
         border-radius: 6px;
-        background: #f8fafc;
+        background: #ffffff;
         color: #0f172a;
         padding: 6px 10px;
         font-size: 12px;
         cursor: pointer;
       }
 
+      .controls button.is-active {
+        border-color: #2563eb;
+        background: #dbeafe;
+        color: #1d4ed8;
+      }
+
       #summary {
         margin: 0 0 10px;
         padding: 10px 12px;
         border: 1px solid #d5dbe3;
-        background: #fcfdff;
+        border-radius: 10px;
+        background: #ffffff;
         font-size: 12px;
         white-space: pre-wrap;
       }
@@ -57,11 +65,12 @@
   </head>
   <body>
     <h1>Example 41 - Security CSP Hardening</h1>
-    <p>기본 textContent/XSS 방어, unsafeHtml opt-in + sanitize 훅, editCommit audit payload 확인 예제.</p>
+    <p>기본은 secure-by-default다. `unsafeHtml` 컬럼도 sanitizer가 없으면 literal text로 떨어지고, raw HTML은 explicit legacy policy에서만 열린다.</p>
 
     <div class="controls">
-      <button id="sanitize-on" type="button">sanitize on</button>
-      <button id="sanitize-off" type="button">sanitize off (unsafe)</button>
+      <button id="strict-sanitize" type="button">strict + sanitize</button>
+      <button id="strict-no-sanitize" type="button">strict + no sanitizer</button>
+      <button id="legacy-raw" type="button">legacy raw (deprecated)</button>
       <button id="inspect" type="button">inspect</button>
     </div>
 
@@ -73,7 +82,12 @@
     <script>
       const summaryElement = document.getElementById('summary');
       const auditLogs = [];
-      let sanitizeMode = 'on';
+      let mode = 'strict-sanitize';
+      const modeButtons = {
+        'strict-sanitize': document.getElementById('strict-sanitize'),
+        'strict-no-sanitize': document.getElementById('strict-no-sanitize'),
+        'legacy-raw': document.getElementById('legacy-raw')
+      };
 
       function strictSanitize(unsafeHtml) {
         return unsafeHtml
@@ -82,11 +96,15 @@
           .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
       }
 
-      function resolveSanitizeHook() {
-        if (sanitizeMode === 'off') {
-          return (unsafeHtml) => unsafeHtml;
+      function resolveSanitizeHook(nextMode) {
+        if (nextMode === 'strict-sanitize') {
+          return strictSanitize;
         }
-        return strictSanitize;
+        return undefined;
+      }
+
+      function resolveUnsafeHtmlPolicy(nextMode) {
+        return nextMode === 'legacy-raw' ? 'allowRaw' : 'sanitizedOnly';
       }
 
       const columns = [
@@ -111,7 +129,10 @@
       const grid = new HGrid.Grid(document.getElementById('grid'), {
         columns,
         rowData,
-        sanitizeHtml: resolveSanitizeHook(),
+        htmlRendering: {
+          unsafeHtmlPolicy: resolveUnsafeHtmlPolicy(mode)
+        },
+        sanitizeHtml: resolveSanitizeHook(mode),
         onAuditLog(payload) {
           auditLogs.push(payload);
           if (auditLogs.length > 8) {
@@ -130,7 +151,9 @@
         const img = unsafeCell ? unsafeCell.querySelector('img') : null;
 
         return {
-          sanitizeMode,
+          mode,
+          unsafeHtmlPolicy: resolveUnsafeHtmlPolicy(mode),
+          usesSanitizer: typeof resolveSanitizeHook(mode) === 'function',
           safeTextCell: safeCell ? safeCell.textContent : null,
           unsafeHtmlText: unsafeCell ? unsafeCell.textContent : null,
           hasUnsafeBold: Boolean(bold),
@@ -140,37 +163,54 @@
         };
       }
 
+      function syncModeButtons() {
+        Object.keys(modeButtons).forEach((key) => {
+          modeButtons[key].classList.toggle('is-active', key === mode);
+        });
+      }
+
       function renderSummary(label) {
         summaryElement.textContent = JSON.stringify({ label, snapshot: getSnapshot() }, null, 2);
       }
 
-      function applySanitizeMode(mode) {
-        sanitizeMode = mode;
+      function applyMode(nextMode) {
+        mode = nextMode;
         grid.setOptions({
-          sanitizeHtml: resolveSanitizeHook()
+          htmlRendering: {
+            unsafeHtmlPolicy: resolveUnsafeHtmlPolicy(mode)
+          },
+          sanitizeHtml: resolveSanitizeHook(mode)
         });
+        syncModeButtons();
       }
 
-      document.getElementById('sanitize-on').addEventListener('click', () => {
-        applySanitizeMode('on');
-        renderSummary('sanitize-on');
+      document.getElementById('strict-sanitize').addEventListener('click', () => {
+        applyMode('strict-sanitize');
+        renderSummary('strict-sanitize');
       });
 
-      document.getElementById('sanitize-off').addEventListener('click', () => {
-        applySanitizeMode('off');
-        renderSummary('sanitize-off');
+      document.getElementById('strict-no-sanitize').addEventListener('click', () => {
+        applyMode('strict-no-sanitize');
+        renderSummary('strict-no-sanitize');
+      });
+
+      document.getElementById('legacy-raw').addEventListener('click', () => {
+        applyMode('legacy-raw');
+        renderSummary('legacy-raw');
       });
 
       document.getElementById('inspect').addEventListener('click', () => {
         renderSummary('inspect');
       });
 
+      syncModeButtons();
       renderSummary('init');
 
       window.__example41 = {
         getSnapshot,
-        setSanitizeMode(mode) {
-          applySanitizeMode(mode === 'off' ? 'off' : 'on');
+        setMode(nextMode) {
+          const allowedMode = nextMode === 'legacy-raw' || nextMode === 'strict-no-sanitize' ? nextMode : 'strict-sanitize';
+          applyMode(allowedMode);
         }
       };
     </script>

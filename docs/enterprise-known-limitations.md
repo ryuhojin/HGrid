@@ -71,11 +71,14 @@
 - 의미:
   - 주요 product surface는 많이 닫혔지만, chart/formula plugin/master-detail 같은 상위 surface와 domain-specific row action productization은 아직 비어 있다.
 
-## 7. 보안 정책이 secure-by-default로 닫히지 않음
-- `unsafeHtml` 컬럼에서 sanitizer가 없으면 raw HTML이 렌더된다.
-- `styleNonce`는 현재 예약 상태다.
+## 7. secure-by-default HTML은 닫혔지만 strict CSP/TT 운영 범위는 아직 미완성
+- E5.1 기준 `unsafeHtml` 컬럼은 기본 policy가 `sanitizedOnly`이고, sanitizer가 없으면 literal text fallback으로 떨어진다.
+- raw HTML은 `htmlRendering.unsafeHtmlPolicy = "allowRaw"`일 때만 열리는 legacy migration escape hatch다.
+- E5.2 기준 `trustedTypesPolicyName` opt-in은 들어갔고 plugin CSP rule도 문서화됐다.
+- E5.4 기준 audit payload는 `schemaVersion = 1`로 고정됐고 incident/masking 운영 가이드도 문서화됐다.
+- 하지만 `styleNonce`는 현재 reserved 상태고, TT는 default-on이 아니라 app-owned policy name을 요구한다.
 - 의미:
-  - “기본이 안전”보다는 “옵션을 올바르게 써야 안전”한 상태다.
+  - 기본 HTML 렌더는 안전해졌지만, strict CSP/Trusted Types의 운영 기본값과 nonce-backed style path는 아직 남아 있다.
 
 ## 8. 접근성 실측 미완료
 - ARIA semantics와 keyboard path는 구현되어 있다.
@@ -93,6 +96,7 @@
 ## 10. Plugin SDK 부재
 - excel plugin은 존재하지만 공식 plugin lifecycle / command registry / overlay registry 체계는 없다.
 - excel import/export는 validation/conflict/delegation contract까지는 있지만 built-in diff preview dialog나 import review panel은 아직 없다.
+- dependency scan 기준 `xlsx` high advisory 2건은 npm patched release가 없어 allowlist 예외로 관리 중이다.
 - 의미:
   - 기능 확장을 core 수정 없이 안정적으로 쌓는 플랫폼 단계는 아니다.
 

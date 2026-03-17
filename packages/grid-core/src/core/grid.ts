@@ -16,6 +16,7 @@ import type {
   GridEditActionBarActionResult,
   GridEditPolicyOptions,
   GridFilterRowOptions,
+  GridHtmlRenderingOptions,
   GridLocaleText,
   GridRangeHandleOptions,
   GridRangeHandleMode,
@@ -41,6 +42,7 @@ import type {
   GridTheme,
   GridWorkerRuntimeOptions,
   GridWorkerFallbackPolicy,
+  GridUnsafeHtmlPolicy,
   RowIndicatorOptions,
   UnsafeHtmlSanitizer
 } from './grid-options';
@@ -118,6 +120,7 @@ const DEFAULT_SCROLLBAR_POLICY = {
   vertical: 'auto',
   horizontal: 'auto'
 } as const;
+const DEFAULT_UNSAFE_HTML_POLICY: GridUnsafeHtmlPolicy = 'sanitizedOnly';
 const LEGACY_INDICATOR_COLUMN_ID = '__indicator';
 const INDICATOR_ROW_NUMBER_COLUMN_ID = '__indicatorRowNumber';
 const INDICATOR_CHECKBOX_COLUMN_ID = '__indicatorCheckbox';
@@ -812,6 +815,55 @@ function mergeFilterRowOptions(
   return base;
 }
 
+function cloneHtmlRenderingOptions(options?: GridHtmlRenderingOptions): GridHtmlRenderingOptions | undefined {
+  if (!options) {
+    return undefined;
+  }
+
+  return {
+    unsafeHtmlPolicy: options.unsafeHtmlPolicy === 'allowRaw' ? 'allowRaw' : DEFAULT_UNSAFE_HTML_POLICY,
+    trustedTypesPolicyName: normalizeTrustedTypesPolicyName(options.trustedTypesPolicyName)
+  };
+}
+
+function normalizeUnsafeHtmlPolicy(policy: GridUnsafeHtmlPolicy | undefined): GridUnsafeHtmlPolicy {
+  return policy === 'allowRaw' ? 'allowRaw' : DEFAULT_UNSAFE_HTML_POLICY;
+}
+
+function normalizeTrustedTypesPolicyName(policyName: string | undefined): string | undefined {
+  if (typeof policyName !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = policyName.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function mergeHtmlRenderingOptions(
+  currentOptions: GridOptions['htmlRendering'],
+  nextOptions: GridConfig['htmlRendering']
+): GridOptions['htmlRendering'] {
+  if (!nextOptions) {
+    return cloneHtmlRenderingOptions(currentOptions) ?? {
+      unsafeHtmlPolicy: DEFAULT_UNSAFE_HTML_POLICY
+    };
+  }
+
+  const base = cloneHtmlRenderingOptions(currentOptions) ?? {
+    unsafeHtmlPolicy: DEFAULT_UNSAFE_HTML_POLICY
+  };
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'unsafeHtmlPolicy')) {
+    base.unsafeHtmlPolicy = normalizeUnsafeHtmlPolicy(nextOptions.unsafeHtmlPolicy);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextOptions, 'trustedTypesPolicyName')) {
+    base.trustedTypesPolicyName = normalizeTrustedTypesPolicyName(nextOptions.trustedTypesPolicyName);
+  }
+
+  return base;
+}
+
 function mergeSetFilterOptions(
   currentOptions: GridOptions['setFilter'],
   nextOptions: GridConfig['setFilter']
@@ -1455,6 +1507,7 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     rowModel,
     locale: normalizeOptionalLocale(config?.locale),
     localeText: cloneLocaleText(config?.localeText),
+    htmlRendering: mergeHtmlRenderingOptions(undefined, config?.htmlRendering),
     styleNonce: normalizeStyleNonce(config?.styleNonce),
     sanitizeHtml: cloneSanitizeHtmlHook(config?.sanitizeHtml),
     onAuditLog: cloneAuditLogHook(config?.onAuditLog),
@@ -1776,6 +1829,7 @@ export class Grid {
     const mergedTreeData = mergeTreeDataOptions(this.treeDataOptions, options.treeData);
     const hasLocaleOption = Object.prototype.hasOwnProperty.call(options, 'locale');
     const hasLocaleTextOption = Object.prototype.hasOwnProperty.call(options, 'localeText');
+    const nextHtmlRendering = mergeHtmlRenderingOptions(this.options.htmlRendering, options.htmlRendering);
     const hasStyleNonceOption = Object.prototype.hasOwnProperty.call(options, 'styleNonce');
     const hasSanitizeHtmlOption = Object.prototype.hasOwnProperty.call(options, 'sanitizeHtml');
     const hasAuditLogHookOption = Object.prototype.hasOwnProperty.call(options, 'onAuditLog');
@@ -1878,6 +1932,7 @@ export class Grid {
       ...this.options,
       locale: nextLocale,
       localeText: nextLocaleText,
+      htmlRendering: nextHtmlRendering,
       styleNonce: nextStyleNonce,
       sanitizeHtml: nextSanitizeHtml,
       onAuditLog: nextAuditLogHook,

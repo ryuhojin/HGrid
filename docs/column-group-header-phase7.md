@@ -2,7 +2,7 @@
 
 ## Summary
 - Added `ColumnGroupDef` schema:
-  - `groupId`, `header`, `children`, `collapsed?`
+  - `groupId`, `header`, `children`
 - Added `columnGroups` option to `GridConfig/GridOptions`.
 - Implemented multi-level header group rows on top of leaf header rows.
 - Group rows are recalculated from visible/pinned/reordered columns per zone (`left/center/right`).
@@ -29,4 +29,5 @@
   - same group can be split into multiple zone-local group cells with correct span.
 
 ## Notes
-- `collapsed` is included in schema and visual state class (`.hgrid__header-cell--group-collapsed`) but does not yet toggle child visibility.
+- Column group collapse UX is currently not supported.
+- The public schema does not expose a no-op `collapsed` flag anymore.

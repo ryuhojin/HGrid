@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 97 - Focus and Announce Regression Fixture</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 10px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #summary {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1120px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 97 - Focus and Announce Regression Fixture</h1>
+    <p>grouped / pivot / tree 모드 전환과 editor cancel 후 root focus 복원을 함께 검증하는 E6.2 fixture입니다.</p>
+
+    <div class="controls">
+      <button id="focus-root" type="button">focus root</button>
+      <button id="mode-grouped" type="button">mode grouped</button>
+      <button id="mode-pivot" type="button">mode pivot</button>
+      <button id="mode-tree" type="button">mode tree</button>
+      <button id="open-editor" type="button">open status editor</button>
+      <button id="inspect" type="button">inspect snapshot</button>
+    </div>
+
+    <pre id="summary">Ready</pre>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const STATUS_OPTIONS = [
+        { value: 'active', label: 'active' },
+        { value: 'review', label: 'review' },
+        { value: 'idle', label: 'idle' }
+      ];
+
+      const flatRows = Array.from({ length: 72 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        region: index % 2 === 0 ? 'KR' : 'US',
+        status: STATUS_OPTIONS[index % STATUS_OPTIONS.length].value,
+        month: index % 3 === 0 ? 'Jan' : index % 3 === 1 ? 'Feb' : 'Mar',
+        sales: 100 + index * 25,
+        updatedAt: new Date(Date.now() - index * 60000).toISOString()
+      }));
+
+      const treeRows = [
+        { id: 100, parentId: null, name: 'Root-100', region: 'KR', status: 'active', month: 'Jan', sales: 520, hasChildren: true, updatedAt: new Date().toISOString() },
+        { id: 110, parentId: 100, name: 'Child-100-1', region: 'KR', status: 'review', month: 'Feb', sales: 330, hasChildren: false, updatedAt: new Date().toISOString() },
+        { id: 200, parentId: null, name: 'Root-200', region: 'US', status: 'idle', month: 'Mar', sales: 610, hasChildren: false, updatedAt: new Date().toISOString() }
+      ];
+
+      const columns = [
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: 'id', header: 'ID', width: 90, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        {
+          id: 'status',
+          header: 'Status',
+          width: 160,
+          type: 'text',
+          editable: true,
+          editor: {
+            type: 'select',
+            options: STATUS_OPTIONS
+          }
+        },
+        { id: 'month', header: 'Month', width: 120, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date', pinned: 'right', editable: true }
+      ];
+
+      const summaryElement = document.getElementById('summary');
+      let currentMode = 'grouped';
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData: flatRows,
+        height: 420,
+        rowHeight: 28,
+        overscan: 8,
+        overscanCols: 2,
+        columnGroups: [
+          {
+            groupId: 'participant',
+            header: 'Participant',
+            children: ['name', 'region']
+          },
+          {
+            groupId: 'metrics',
+            header: 'Metrics',
+            children: ['status', 'month', 'sales']
+          }
+        ]
+      });
+
+      function waitFrame() {
+        return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      }
+
+      function getRoot() {
+        return document.querySelector('#grid .hgrid');
+      }
+
+      function getEditorControl() {
+        return (
+          document.querySelector('#grid .hgrid__editor-input--select') ||
+          document.querySelector('#grid .hgrid__editor-input')
+        );
+      }
+
+      function getSnapshot() {
+        const root = getRoot();
+        const editorHost = document.querySelector('#grid .hgrid__editor-host');
+        const editorControl = getEditorControl();
+        const leafHeaders = Array.from(document.querySelectorAll('#grid .hgrid__header-cell--leaf'))
+          .map((element) => element.textContent.trim())
+          .filter(Boolean);
+        const groupedHeaders = Array.from(document.querySelectorAll('#grid .hgrid__header-cell--group'))
+          .map((element) => element.textContent.trim())
+          .filter(Boolean);
+
+        return {
+          mode: currentMode,
+          root: root
+            ? {
+                role: root.getAttribute('role'),
+                activeDescendant: root.getAttribute('aria-activedescendant'),
+                hasFocus: document.activeElement === root
+              }
+            : null,
+          activeElement: document.activeElement
+            ? {
+                tagName: document.activeElement.tagName,
+                className: document.activeElement.className || ''
+              }
+            : null,
+          selection: grid.getSelection(),
+          headers: {
+            grouped: groupedHeaders,
+            leaf: leafHeaders
+          },
+          hasGroupRow: Boolean(document.querySelector('#grid .hgrid__cell--group')),
+          hasTreeCell: Boolean(document.querySelector('#grid .hgrid__cell--tree')),
+          pivotModel: grid.getPivotModel(),
+          pivotValues: grid.getPivotValues().map((item) => ({ columnId: item.columnId, type: item.type })),
+          editor: {
+            isEditing: Boolean(editorHost && editorHost.classList.contains('hgrid__editor-host--visible')),
+            tagName: editorControl ? editorControl.tagName : null
+          }
+        };
+      }
+
+      function renderSummary(label) {
+        summaryElement.textContent = JSON.stringify({ label, snapshot: getSnapshot() }, null, 2);
+      }
+
+      function focusRoot() {
+        const root = getRoot();
+        if (root) {
+          root.focus();
+        }
+      }
+
+      function setActiveStatusCell(rowIndex) {
+        grid.setSelection({
+          activeCell: { rowIndex, colIndex: 4 },
+          cellRanges: [{ r1: rowIndex, c1: 4, r2: rowIndex, c2: 4 }],
+          rowRanges: []
+        });
+      }
+
+      async function applyGroupedMode() {
+        currentMode = 'grouped';
+        grid.setOptions({ rowData: flatRows });
+        await grid.setTreeDataOptions({ enabled: false });
+        await grid.setPivotingMode('client');
+        await grid.clearPivotModel();
+        await grid.setPivotValues([]);
+        await grid.setGroupingMode('client');
+        await grid.setGroupModel([{ columnId: 'region' }]);
+        await waitFrame();
+        await waitFrame();
+        setActiveStatusCell(1);
+        focusRoot();
+        renderSummary('mode-grouped');
+      }
+
+      async function applyPivotMode() {
+        currentMode = 'pivot';
+        grid.setOptions({ rowData: flatRows });
+        await grid.setTreeDataOptions({ enabled: false });
+        await grid.setGroupingMode('client');
+        await grid.setPivotingMode('client');
+        await grid.setGroupModel([{ columnId: 'region' }]);
+        await grid.setPivotModel([{ columnId: 'month' }]);
+        await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
+        await waitFrame();
+        await waitFrame();
+        grid.setSelection({
+          activeCell: { rowIndex: 1, colIndex: 1 },
+          cellRanges: [{ r1: 1, c1: 1, r2: 1, c2: 1 }],
+          rowRanges: []
+        });
+        focusRoot();
+        renderSummary('mode-pivot');
+      }
+
+      async function applyTreeMode() {
+        currentMode = 'tree';
+        grid.setOptions({ rowData: treeRows });
+        await grid.clearPivotModel();
+        await grid.setPivotValues([]);
+        await grid.clearGroupModel();
+        await grid.setTreeDataOptions({
+          enabled: true,
+          mode: 'client',
+          idField: 'id',
+          parentIdField: 'parentId',
+          hasChildrenField: 'hasChildren',
+          treeColumnId: 'name',
+          defaultExpanded: true
+        });
+        await waitFrame();
+        await waitFrame();
+        setActiveStatusCell(0);
+        focusRoot();
+        renderSummary('mode-tree');
+      }
+
+      async function openStatusEditor() {
+        if (currentMode !== 'tree') {
+          await applyTreeMode();
+        }
+        focusRoot();
+        const root = getRoot();
+        if (root) {
+          root.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', code: 'F2', bubbles: true }));
+        }
+        await waitFrame();
+        renderSummary('open-editor');
+      }
+
+      document.getElementById('focus-root').addEventListener('click', () => {
+        focusRoot();
+        renderSummary('focus-root');
+      });
+
+      document.getElementById('mode-grouped').addEventListener('click', () => {
+        void applyGroupedMode();
+      });
+
+      document.getElementById('mode-pivot').addEventListener('click', () => {
+        void applyPivotMode();
+      });
+
+      document.getElementById('mode-tree').addEventListener('click', () => {
+        void applyTreeMode();
+      });
+
+      document.getElementById('open-editor').addEventListener('click', () => {
+        void openStatusEditor();
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderSummary('inspect');
+      });
+
+      grid.on('selectionChange', () => {
+        renderSummary('selectionChange');
+      });
+
+      grid.on('editStart', () => {
+        renderSummary('editStart');
+      });
+
+      grid.on('editCancel', () => {
+        renderSummary('editCancel');
+      });
+
+      void applyGroupedMode();
+
+      window.__example97 = {
+        focusRoot,
+        applyGroupedMode,
+        applyPivotMode,
+        applyTreeMode,
+        openStatusEditor,
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

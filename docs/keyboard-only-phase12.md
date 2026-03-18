@@ -30,6 +30,14 @@
 - Unit/integration (`grid.spec.ts`)
   - `Ctrl/Cmd+A` 전체 선택 범위 검증
   - `F2` + `Tab/Shift+Tab` 편집 이동/커밋 검증
+  - editor `Escape` cancel 후 root focus / `aria-activedescendant` 복원 검증
 - E2E (`scripts/run-e2e.mjs`)
   - `example39.html` keyboard-only 시나리오 검증
   - `example38.html` ARIA snapshot 경로 점검
+  - `example97.html` grouped / pivot / tree / editor cancel focus regression 검증
+
+## E6.2 Focus Regression
+- pooled DOM 재사용 중에도 root focus identity가 흔들리지 않아야 한다.
+- grouped / pivot / tree 상태에서도 `aria-activedescendant` 전제조건이 유지되어야 한다.
+- editor overlay가 닫힐 때 root focus와 active descendant가 일관되게 복원되어야 한다.
+- 상세 회귀 범위: [focus-regression-phase-e6.md](./focus-regression-phase-e6.md)

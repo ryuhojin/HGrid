@@ -210,9 +210,159 @@ const KO_KR_LOCALE_TEXT: GridLocaleText = {
   scopeViewport: '현재 뷰포트'
 };
 
+const DE_DE_LOCALE_TEXT: GridLocaleText = {
+  ...EN_US_LOCALE_TEXT,
+  selectAllRows: 'Alle Zeilen auswählen ({scope})',
+  selectRow: 'Zeile {row} auswählen',
+  selectRowGeneric: 'Zeile auswählen',
+  groupingRow: 'Gruppierungszeile',
+  rowStatus: 'Zeile {row} Status',
+  rowStatusWithValue: 'Zeile {row} Status {status}',
+  rowNumber: 'Zeile {row} Nummer',
+  validationFailed: 'Validierung fehlgeschlagen',
+  columnMenuSortAsc: 'Aufsteigend sortieren',
+  columnMenuSortDesc: 'Absteigend sortieren',
+  columnMenuClearSort: 'Sortierung löschen',
+  columnMenuPinLeft: 'Links anheften',
+  columnMenuPinRight: 'Rechts anheften',
+  columnMenuUnpin: 'Lösen',
+  columnMenuAutoSizeColumn: 'Spalte automatisch anpassen',
+  columnMenuResetColumnWidth: 'Spaltenbreite zurücksetzen',
+  columnMenuHideColumn: 'Spalte ausblenden',
+  columnMenuOpenFilter: 'Filter öffnen',
+  contextMenuCopyCell: 'Zelle kopieren',
+  contextMenuCopyRow: 'Zeile kopieren',
+  contextMenuCopySelection: 'Auswahl kopieren',
+  contextMenuFilterByValue: 'Nach diesem Wert filtern',
+  contextMenuClearColumnFilter: 'Spaltenfilter löschen',
+  filterPanelTitle: 'Filter',
+  filterPanelQuickMode: 'Schnell',
+  filterPanelBuilderMode: 'Builder',
+  filterPanelOperator: 'Operator',
+  filterPanelValue: 'Wert',
+  filterPanelMin: 'Min',
+  filterPanelMax: 'Max',
+  filterPanelSearch: 'Werte suchen',
+  filterPanelConditionOne: 'Bedingung 1',
+  filterPanelConditionTwo: 'Bedingung 2',
+  filterPanelAnd: 'UND',
+  filterPanelTextMode: 'Text',
+  filterPanelSetMode: 'Menge',
+  filterPanelColumn: 'Spalte',
+  filterPanelMatch: 'Verknüpfung',
+  filterPanelAddRule: 'Regel hinzufügen',
+  filterPanelAddGroup: 'Gruppe hinzufügen',
+  filterPanelGroup: 'Gruppe',
+  filterPanelRemoveRule: 'Entfernen',
+  filterPanelNoRules: 'Noch keine erweiterten Regeln',
+  filterPanelApply: 'Anwenden',
+  filterPanelClear: 'Zurücksetzen',
+  filterPanelCancel: 'Schließen',
+  filterPanelConditionKind: 'Typ',
+  filterPanelPresetsTitle: 'Voreinstellungen',
+  filterPanelPresetName: 'Name der Voreinstellung',
+  filterPanelPresetSave: 'Voreinstellung speichern',
+  filterPanelPresetApply: 'Voreinstellung anwenden',
+  filterPanelPresetDelete: 'Voreinstellung löschen',
+  filterPanelPresetEmpty: 'Keine gespeicherten Voreinstellungen',
+  filterRowPlaceholderText: 'Text filtern',
+  filterRowPlaceholderDate: '2026-03-16 oder 2026-03-01..2026-03-31',
+  filterRowBooleanAny: 'Alle',
+  filterRowBooleanTrue: 'Wahr',
+  filterRowBooleanFalse: 'Falsch',
+  filterRowBooleanBlank: 'Leer',
+  filterRowSetAny: 'Alle',
+  filterRowSetBlank: 'Leer',
+  toolPanelColumnsTitle: 'Spalten',
+  toolPanelFiltersTitle: 'Filter',
+  toolPanelGroupingTitle: 'Gruppierung',
+  toolPanelPivotTitle: 'Pivot',
+  toolPanelToggle: 'Paneele',
+  toolPanelClose: 'Schließen',
+  toolPanelSearchColumns: 'Spalten suchen',
+  toolPanelNoColumns: 'Keine passenden Spalten',
+  toolPanelMoveColumnUp: 'Spalte nach oben',
+  toolPanelMoveColumnDown: 'Spalte nach unten',
+  toolPanelLayoutPresets: 'Layout-Voreinstellungen',
+  toolPanelApplyLayoutPreset: 'Voreinstellung anwenden',
+  toolPanelNoLayoutPresets: 'Keine gespeicherten Voreinstellungen',
+  editActionBarDirtySummary: '{rows} Zeilen / {cells} Zellen geändert',
+  editActionBarSave: 'Speichern',
+  editActionBarDiscard: 'Verwerfen',
+  editActionBarSaving: 'Speichert...',
+  editActionBarDiscarding: 'Verwirft...',
+  editActionBarSaved: 'Änderungen gespeichert',
+  editActionBarDiscarded: 'Änderungen verworfen',
+  editActionBarSaveFailed: 'Speichern fehlgeschlagen',
+  editActionBarDiscardFailed: 'Verwerfen fehlgeschlagen',
+  statusBarSelectionCells: '{count} Zellen ausgewählt',
+  statusBarSelectionRows: '{count} Zeilen ausgewählt',
+  statusBarVisibleRows: 'Sichtbar {count}',
+  statusBarRows: 'Zeilen {count}',
+  statusBarFilteredRows: 'Gefiltert {filtered} / {total}',
+  statusBarAggregatesCalculating: 'Berechne {percent}%',
+  statusBarSum: 'Summe {value}',
+  statusBarAvg: 'Mittelwert {value}',
+  statusBarMin: 'Min {value}',
+  statusBarMax: 'Max {value}',
+  statusBarRemoteSynced: 'Remote synchronisiert',
+  statusBarRemoteLoading: 'Lädt {count}',
+  statusBarRemoteRefreshing: 'Aktualisiert {count}',
+  statusBarRemoteError: 'Fehler {count}',
+  statusBarRemotePending: 'Ausstehend {rows} Zeilen / {cells} Zellen',
+  scopeAll: 'alle',
+  scopeFiltered: 'gefiltert',
+  scopeViewport: 'Viewport'
+};
+
+export const GRID_LOCALE_TEXT_BUNDLES: Readonly<Record<string, GridLocaleText>> = Object.freeze({
+  'en-US': EN_US_LOCALE_TEXT,
+  'ko-KR': KO_KR_LOCALE_TEXT,
+  'de-DE': DE_DE_LOCALE_TEXT
+});
+
+function resolveGridLocaleBundleKey(locale: string | undefined): string | null {
+  const normalizedLocale = normalizeGridLocale(locale, '');
+  if (normalizedLocale.length === 0) {
+    return null;
+  }
+
+  const exactKeys = Object.keys(GRID_LOCALE_TEXT_BUNDLES);
+  for (let index = 0; index < exactKeys.length; index += 1) {
+    const key = exactKeys[index];
+    if (key.toLowerCase() === normalizedLocale.toLowerCase()) {
+      return key;
+    }
+  }
+
+  const language = normalizedLocale.split('-')[0]?.toLowerCase();
+  if (!language) {
+    return null;
+  }
+
+  for (let index = 0; index < exactKeys.length; index += 1) {
+    const key = exactKeys[index];
+    if (key.toLowerCase().startsWith(`${language}-`)) {
+      return key;
+    }
+  }
+
+  return null;
+}
+
+export function getGridLocaleTextBundle(locale: string | undefined): GridLocaleText | null {
+  const bundleKey = resolveGridLocaleBundleKey(locale);
+  if (!bundleKey) {
+    return null;
+  }
+
+  return { ...GRID_LOCALE_TEXT_BUNDLES[bundleKey] };
+}
+
 function pickLocaleTextDefaults(locale: string): GridLocaleText {
-  if (locale.toLowerCase().startsWith('ko')) {
-    return KO_KR_LOCALE_TEXT;
+  const bundle = getGridLocaleTextBundle(locale);
+  if (bundle) {
+    return bundle;
   }
 
   return EN_US_LOCALE_TEXT;

@@ -311,7 +311,6 @@ export interface ColumnGroupDef {
   groupId: string;
   header: string;
   children: Array<string | ColumnGroupDef>;
-  collapsed?: boolean;
 }
 
 export interface ColumnDef {

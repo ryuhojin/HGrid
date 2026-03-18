@@ -619,7 +619,7 @@
 
 ## 7.6 Column Group Header (신규)
 - [x] `ColumnGroupDef` 스키마 확정:
-  - [x] `groupId`, `header`, `children`, `collapsed?`
+  - [x] `groupId`, `header`, `children`
 - [x] 멀티라인 header row(2-depth+) 레이아웃 엔진
 - [x] group leaf와 resize/reorder/pin/hide 연동
 - [x] center 가로 가상화에서 group clipping/label 정합 보장

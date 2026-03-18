@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example 96 - Screen Reader Measurement Fixture</title>
+    <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
+    <style>
+      body {
+        margin: 24px;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0 0 10px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .controls button {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #tasks,
+      #summary {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #d5dbe3;
+        background: #fcfdff;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      #grid {
+        width: 1080px;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Example 96 - Screen Reader Measurement Fixture</h1>
+    <p>
+      NVDA/JAWS/VoiceOver 실측 전에 grouped header, pinned column, range selection, checkbox indicator, select editor,
+      status bar, aria-activedescendant 상태를 한 화면에서 재현하는 E6.1 fixture입니다.
+    </p>
+
+    <div class="controls">
+      <button id="focus-root" type="button">focus root</button>
+      <button id="active-status" type="button">active status cell</button>
+      <button id="active-score" type="button">active row 120 score</button>
+      <button id="select-range" type="button">set range selection</button>
+      <button id="open-editor" type="button">open select editor</button>
+      <button id="inspect" type="button">inspect snapshot</button>
+    </div>
+
+    <pre id="tasks">Manual measurement checklist
+- Root role/tabindex/aria-rowcount/aria-colcount announce 확인
+- Group header(Participant / Metrics) 및 pinned column announce 확인
+- Arrow / Home / End 이동 시 active descendant announce 확인
+- Select editor(F2) open 후 option announce / Escape close 확인
+- Range selection + status bar 요약 announce precondition 확인</pre>
+
+    <pre id="summary">Ready</pre>
+
+    <div id="grid"></div>
+
+    <script src="../packages/grid-core/dist/grid.umd.js"></script>
+    <script>
+      const STATUS_OPTIONS = [
+        { value: 'active', label: 'active' },
+        { value: 'idle', label: 'idle' },
+        { value: 'review', label: 'review' }
+      ];
+
+      const columns = [
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: 'id', header: 'ID', width: 90, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text', editable: true },
+        { id: 'country', header: 'Country', width: 140, type: 'text' },
+        {
+          id: 'status',
+          header: 'Status',
+          width: 160,
+          type: 'text',
+          editable: true,
+          editor: {
+            type: 'select',
+            options: STATUS_OPTIONS
+          }
+        },
+        { id: 'score', header: 'Score', width: 140, type: 'number', editable: true },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date', pinned: 'right', editable: true }
+      ];
+
+      const rowData = Array.from({ length: 320 }, (_, index) => ({
+        id: index + 1,
+        name: 'Customer-' + (index + 1),
+        country: ['KR', 'US', 'JP', 'DE'][index % 4],
+        status: STATUS_OPTIONS[index % STATUS_OPTIONS.length].value,
+        score: (index * 17) % 10000,
+        updatedAt: new Date(Date.now() - index * 120000).toISOString()
+      }));
+
+      const summaryElement = document.getElementById('summary');
+      const recentEvents = [];
+
+      const grid = new HGrid.Grid(document.getElementById('grid'), {
+        columns,
+        rowData,
+        height: 420,
+        rowHeight: 28,
+        overscan: 8,
+        overscanCols: 2,
+        statusBar: {
+          enabled: true,
+          items: ['selection', 'rows']
+        },
+        columnGroups: [
+          {
+            groupId: 'participant',
+            header: 'Participant',
+            children: ['name', 'country']
+          },
+          {
+            groupId: 'metrics',
+            header: 'Metrics',
+            children: ['status', 'score']
+          }
+        ]
+      });
+
+      function getRoot() {
+        return document.querySelector('#grid .hgrid');
+      }
+
+      function getEditorHost() {
+        return document.querySelector('#grid .hgrid__editor-host');
+      }
+
+      function getEditorControl() {
+        return (
+          document.querySelector('#grid .hgrid__editor-input--select') ||
+          document.querySelector('#grid .hgrid__editor-input')
+        );
+      }
+
+      function getFirstVisibleIndicatorRow() {
+        return Array.from(document.querySelectorAll('#grid .hgrid__row--left[data-row-index]')).find((rowElement) => {
+          return rowElement.style.display !== 'none';
+        }) || null;
+      }
+
+      function getSnapshot() {
+        const root = getRoot();
+        if (!root) {
+          return { error: 'grid root not found' };
+        }
+
+        const activeCellId = root.getAttribute('aria-activedescendant') || '';
+        const activeCell = activeCellId ? document.getElementById(activeCellId) : null;
+        const indicatorCheckAll = document.querySelector('#grid .hgrid__indicator-checkall');
+        const firstIndicatorRow = getFirstVisibleIndicatorRow();
+        const firstIndicatorCheckbox = firstIndicatorRow
+          ? firstIndicatorRow.querySelector('.hgrid__indicator-checkbox')
+          : null;
+        const editorHost = getEditorHost();
+        const editorControl = getEditorControl();
+        const groupedHeaders = Array.from(document.querySelectorAll('#grid .hgrid__header-cell--group'))
+          .map((element) => element.textContent.trim())
+          .filter(Boolean);
+        const leafHeaders = Array.from(document.querySelectorAll('#grid .hgrid__header-cell--leaf'))
+          .map((element) => element.textContent.trim())
+          .filter(Boolean);
+        const firstLeftRow = document.querySelector('#grid .hgrid__row--left[data-row-index="0"]');
+        const firstRightRow = document.querySelector('#grid .hgrid__row--right[data-row-index="0"]');
+        const firstLeftCell = document.querySelector('#grid .hgrid__row--left[data-row-index="0"] .hgrid__cell[data-column-id="id"]');
+        const firstRightCell = document.querySelector('#grid .hgrid__row--right[data-row-index="0"] .hgrid__cell[data-column-id="updatedAt"]');
+        const statusBarItems = Array.from(document.querySelectorAll('#grid .hgrid__status-bar-item'))
+          .map((element) => element.textContent.trim())
+          .filter(Boolean);
+
+        return {
+          root: {
+            role: root.getAttribute('role'),
+            tabindex: root.getAttribute('tabindex'),
+            multiselectable: root.getAttribute('aria-multiselectable'),
+            rowcount: root.getAttribute('aria-rowcount'),
+            colcount: root.getAttribute('aria-colcount'),
+            activedescendant: activeCellId || null
+          },
+          activeCell: activeCell
+            ? {
+                id: activeCell.id,
+                text: activeCell.textContent.trim(),
+                columnId: activeCell.getAttribute('data-column-id'),
+                ariaRowIndex: activeCell.getAttribute('aria-rowindex'),
+                ariaColIndex: activeCell.getAttribute('aria-colindex')
+              }
+            : null,
+          selection: grid.getSelection(),
+          headers: {
+            grouped: groupedHeaders,
+            leaf: leafHeaders
+          },
+          pinned: {
+            leftRowRole: firstLeftRow ? firstLeftRow.getAttribute('role') : null,
+            leftRowIndex: firstLeftRow ? firstLeftRow.getAttribute('aria-rowindex') : null,
+            leftCellColIndex: firstLeftCell ? firstLeftCell.getAttribute('aria-colindex') : null,
+            rightRowRole: firstRightRow ? firstRightRow.getAttribute('role') : null,
+            rightRowIndex: firstRightRow ? firstRightRow.getAttribute('aria-rowindex') : null,
+            rightCellColIndex: firstRightCell ? firstRightCell.getAttribute('aria-colindex') : null
+          },
+          indicator: {
+            checkAllAriaLabel: indicatorCheckAll ? indicatorCheckAll.getAttribute('aria-label') : null,
+            firstRowCheckboxAriaLabel: firstIndicatorCheckbox ? firstIndicatorCheckbox.getAttribute('aria-label') : null,
+            firstRowChecked: firstIndicatorCheckbox ? firstIndicatorCheckbox.checked : null
+          },
+          editor: {
+            isEditing: Boolean(editorHost && editorHost.classList.contains('hgrid__editor-host--visible')),
+            tagName: editorControl ? editorControl.tagName : null,
+            value:
+              editorControl && editorControl.tagName === 'SELECT'
+                ? editorControl.options[editorControl.selectedIndex]?.text ?? ''
+                : editorControl
+                  ? editorControl.value
+                  : null,
+            optionCount: editorControl && editorControl.tagName === 'SELECT' ? editorControl.options.length : null
+          },
+          statusBarItems,
+          recentEvents: recentEvents.slice(-5)
+        };
+      }
+
+      function renderSummary(label) {
+        summaryElement.textContent = JSON.stringify({ label, snapshot: getSnapshot() }, null, 2);
+      }
+
+      function pushEvent(name) {
+        recentEvents.push({
+          name,
+          timestamp: new Date().toISOString(),
+          selection: grid.getSelection()
+        });
+        if (recentEvents.length > 20) {
+          recentEvents.shift();
+        }
+      }
+
+      function setActive(rowIndex, colIndex, range) {
+        grid.setSelection({
+          activeCell: { rowIndex, colIndex },
+          cellRanges: range ? [range] : [{ r1: rowIndex, c1: colIndex, r2: rowIndex, c2: colIndex }],
+          rowRanges: []
+        });
+      }
+
+      function focusRoot() {
+        const root = getRoot();
+        if (root) {
+          root.focus();
+        }
+      }
+
+      function dispatchGridKey(key) {
+        const root = getRoot();
+        if (!root) {
+          return;
+        }
+        root.focus();
+        root.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key,
+            code: key,
+            bubbles: true
+          })
+        );
+      }
+
+      document.getElementById('focus-root').addEventListener('click', () => {
+        focusRoot();
+        renderSummary('focus-root');
+      });
+
+      document.getElementById('active-status').addEventListener('click', () => {
+        setActive(0, 4);
+        focusRoot();
+        renderSummary('active-status');
+      });
+
+      document.getElementById('active-score').addEventListener('click', () => {
+        setActive(119, 5);
+        focusRoot();
+        renderSummary('active-score');
+      });
+
+      document.getElementById('select-range').addEventListener('click', () => {
+        setActive(0, 2, { r1: 0, c1: 2, r2: 2, c2: 5 });
+        focusRoot();
+        renderSummary('select-range');
+      });
+
+      document.getElementById('open-editor').addEventListener('click', () => {
+        setActive(0, 4);
+        dispatchGridKey('F2');
+        renderSummary('open-editor');
+      });
+
+      document.getElementById('inspect').addEventListener('click', () => {
+        renderSummary('inspect');
+      });
+
+      grid.on('selectionChange', () => {
+        pushEvent('selectionChange');
+        renderSummary('selectionChange');
+      });
+
+      grid.on('editStart', () => {
+        pushEvent('editStart');
+        renderSummary('editStart');
+      });
+
+      grid.on('editCommit', () => {
+        pushEvent('editCommit');
+        renderSummary('editCommit');
+      });
+
+      grid.on('editCancel', () => {
+        pushEvent('editCancel');
+        renderSummary('editCancel');
+      });
+
+      setActive(0, 2);
+      focusRoot();
+      pushEvent('init');
+      renderSummary('init');
+
+      window.__example96 = {
+        focusRoot,
+        setActive(rowIndex, colIndex) {
+          setActive(rowIndex, colIndex);
+          focusRoot();
+        },
+        setRangeSelection() {
+          setActive(0, 2, { r1: 0, c1: 2, r2: 2, c2: 5 });
+          focusRoot();
+        },
+        openEditor() {
+          setActive(0, 4);
+          dispatchGridKey('F2');
+        },
+        getSnapshot
+      };
+    </script>
+  </body>
+</html>

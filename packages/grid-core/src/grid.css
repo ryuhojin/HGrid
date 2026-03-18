@@ -556,10 +556,6 @@
   padding: var(--hgrid-header-group-padding-y) var(--hgrid-header-group-padding-x);
 }
 
-.hgrid__header-cell--group-collapsed {
-  letter-spacing: 0.02em;
-}
-
 .hgrid__header-cell--leaf-span {
   z-index: 2;
   display: flex;

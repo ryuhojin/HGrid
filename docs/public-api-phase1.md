@@ -141,7 +141,6 @@
   - `groupId: string`
   - `header: string`
   - `children: Array<string | ColumnGroupDef>`
-  - `collapsed?: boolean`
 - `DataProvider`: pluggable row access abstraction (`LocalDataProvider` default).
   - optional push contract:
     - `onRowsChanged?(listener) => unsubscribe`
@@ -205,6 +204,9 @@
   - `localeText?: Partial<GridLocaleText>` (내부 ARIA/상태 문자열 오버라이드)
   - `numberFormatOptions?: Intl.NumberFormatOptions`
   - `dateTimeFormatOptions?: Intl.DateTimeFormatOptions`
+  - built-in helper export:
+    - `GRID_LOCALE_TEXT_BUNDLES`
+    - `getGridLocaleTextBundle(locale)`
 - `ScrollbarPolicy`: scrollbar visibility contract for each axis.
   - `vertical: "auto" | "always" | "hidden"`
   - `horizontal: "auto" | "always" | "hidden"`

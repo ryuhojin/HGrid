@@ -3469,6 +3469,152 @@ async function runExample39Checks(page, serverUrl, pageErrors) {
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
 }
 
+async function runExample96Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example96.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => {
+    const api = window.__example96;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example96.getSnapshot');
+    }
+    return api.getSnapshot();
+  });
+  assert.equal(initialSnapshot.root.role, 'grid', 'example96 root role should be grid');
+  assert.equal(initialSnapshot.root.rowcount, '322', 'example96 aria-rowcount should include grouped header rows');
+  assert.equal(initialSnapshot.root.colcount, '7', 'example96 aria-colcount mismatch');
+  assert.equal(initialSnapshot.root.multiselectable, 'true', 'example96 grid should be multiselectable');
+  assert.ok(initialSnapshot.root.activedescendant, 'example96 should expose aria-activedescendant on init');
+  assert.ok(initialSnapshot.headers.grouped.includes('Participant'), 'example96 should expose Participant grouped header');
+  assert.ok(initialSnapshot.headers.grouped.includes('Metrics'), 'example96 should expose Metrics grouped header');
+  assert.equal(initialSnapshot.pinned.leftRowRole, 'row', 'example96 left pinned row should stay in accessibility tree');
+  assert.equal(initialSnapshot.pinned.leftRowIndex, '3', 'example96 left pinned row index mismatch');
+  assert.equal(initialSnapshot.pinned.leftCellColIndex, '2', 'example96 left pinned cell col index mismatch');
+  assert.equal(initialSnapshot.pinned.rightRowRole, 'row', 'example96 right pinned row should stay in accessibility tree');
+  assert.equal(initialSnapshot.pinned.rightRowIndex, '3', 'example96 right pinned row index mismatch');
+  assert.equal(initialSnapshot.pinned.rightCellColIndex, '7', 'example96 right pinned cell col index mismatch');
+  assert.ok(initialSnapshot.indicator.checkAllAriaLabel, 'example96 indicator check-all aria label should exist');
+  assert.ok(initialSnapshot.indicator.firstRowCheckboxAriaLabel, 'example96 first row checkbox aria label should exist');
+
+  await page.evaluate(() => {
+    const api = window.__example96;
+    if (!api || typeof api.setRangeSelection !== 'function') {
+      throw new Error('Missing window.__example96.setRangeSelection');
+    }
+    api.setRangeSelection();
+  });
+  await waitAnimationFrame(page);
+
+  const rangeSnapshot = await page.evaluate(() => window.__example96.getSnapshot());
+  assert.deepEqual(
+    rangeSnapshot.selection.cellRanges[0],
+    { r1: 0, c1: 2, r2: 2, c2: 5 },
+    'example96 range selection should cover name..score rectangle'
+  );
+  assert.ok(rangeSnapshot.statusBarItems.length > 0, 'example96 should expose status bar text after selection');
+
+  await page.evaluate(() => {
+    const api = window.__example96;
+    if (!api || typeof api.focusRoot !== 'function' || typeof api.setActive !== 'function') {
+      throw new Error('Missing window.__example96 focus/setActive APIs');
+    }
+    api.setActive(0, 4);
+    api.focusRoot();
+  });
+  await page.keyboard.press('F2');
+  await page.waitForSelector('.hgrid__editor-host--visible', { timeout: 10_000, state: 'attached' });
+
+  const editingSnapshot = await page.evaluate(() => window.__example96.getSnapshot());
+  assert.equal(editingSnapshot.editor.isEditing, true, 'example96 should open select editor');
+  assert.equal(editingSnapshot.editor.tagName, 'SELECT', 'example96 editor should be select');
+  assert.ok(editingSnapshot.editor.optionCount >= 3, 'example96 select editor option count mismatch');
+  assert.ok(['active', 'idle', 'review'].includes(editingSnapshot.editor.value), 'example96 select editor value mismatch');
+
+  await page.evaluate(() => {
+    window.__example96.setActive(0, 1);
+  });
+  await page.waitForTimeout(50);
+  const leftPinnedActiveSnapshot = await page.evaluate(() => window.__example96.getSnapshot());
+  assert.equal(leftPinnedActiveSnapshot.activeCell?.columnId, 'id', 'example96 left pinned active cell mismatch');
+
+  await page.evaluate(() => {
+    window.__example96.setActive(0, 6);
+  });
+  await page.waitForTimeout(50);
+  const rightPinnedActiveSnapshot = await page.evaluate(() => window.__example96.getSnapshot());
+  assert.equal(rightPinnedActiveSnapshot.activeCell?.columnId, 'updatedAt', 'example96 right pinned active cell mismatch');
+
+  await page.keyboard.press('Escape');
+  await waitAnimationFrame(page);
+  const afterEscapeSnapshot = await page.evaluate(() => window.__example96.getSnapshot());
+  assert.equal(afterEscapeSnapshot.editor.isEditing, false, 'example96 Escape should close editor');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample97Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example97.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  await page.evaluate(async () => {
+    const api = window.__example97;
+    if (!api || typeof api.applyGroupedMode !== 'function') {
+      throw new Error('Missing window.__example97.applyGroupedMode');
+    }
+    await api.applyGroupedMode();
+  });
+  await waitAnimationFrame(page);
+  const groupedSnapshot = await page.evaluate(() => window.__example97.getSnapshot());
+  assert.equal(groupedSnapshot.mode, 'grouped', 'example97 should enter grouped mode');
+  assert.equal(groupedSnapshot.root?.role, 'grid', 'example97 grouped root role should be grid');
+  assert.equal(groupedSnapshot.root?.hasFocus, true, 'example97 grouped mode should keep root focus');
+  assert.ok(groupedSnapshot.root?.activeDescendant, 'example97 grouped mode should keep aria-activedescendant');
+  assert.equal(groupedSnapshot.hasGroupRow, true, 'example97 grouped mode should render group rows');
+
+  await page.evaluate(async () => {
+    const api = window.__example97;
+    await api.applyPivotMode();
+  });
+  await waitAnimationFrame(page);
+  const pivotSnapshot = await page.evaluate(() => window.__example97.getSnapshot());
+  assert.equal(pivotSnapshot.mode, 'pivot', 'example97 should enter pivot mode');
+  assert.equal(pivotSnapshot.root?.hasFocus, true, 'example97 pivot mode should keep root focus');
+  assert.ok(pivotSnapshot.root?.activeDescendant, 'example97 pivot mode should keep aria-activedescendant');
+  assert.deepEqual(pivotSnapshot.pivotModel, [{ columnId: 'month' }], 'example97 pivot model mismatch');
+  assert.deepEqual(pivotSnapshot.pivotValues, [{ columnId: 'sales', type: 'sum' }], 'example97 pivot values mismatch');
+  assert.ok(pivotSnapshot.headers.leaf.includes('Jan (sum)'), 'example97 pivot should expose Jan aggregate header');
+  assert.ok(pivotSnapshot.headers.leaf.includes('Feb (sum)'), 'example97 pivot should expose Feb aggregate header');
+  assert.ok(pivotSnapshot.headers.leaf.includes('Mar (sum)'), 'example97 pivot should expose Mar aggregate header');
+  assert.ok(pivotSnapshot.headers.leaf.includes('Region'), 'example97 pivot should keep grouped row axis header');
+
+  await page.evaluate(async () => {
+    const api = window.__example97;
+    await api.applyTreeMode();
+  });
+  await waitAnimationFrame(page);
+  const treeSnapshot = await page.evaluate(() => window.__example97.getSnapshot());
+  assert.equal(treeSnapshot.mode, 'tree', 'example97 should enter tree mode');
+  assert.equal(treeSnapshot.root?.hasFocus, true, 'example97 tree mode should keep root focus');
+  assert.ok(treeSnapshot.root?.activeDescendant, 'example97 tree mode should keep aria-activedescendant');
+  assert.equal(treeSnapshot.hasTreeCell, true, 'example97 tree mode should render tree cells');
+
+  await page.evaluate(async () => {
+    const api = window.__example97;
+    await api.openStatusEditor();
+  });
+  await page.waitForSelector('.hgrid__editor-host--visible', { timeout: 10_000, state: 'attached' });
+  const editingSnapshot = await page.evaluate(() => window.__example97.getSnapshot());
+  assert.equal(editingSnapshot.editor.isEditing, true, 'example97 should open editor');
+  assert.equal(editingSnapshot.editor.tagName, 'SELECT', 'example97 tree editor should be select');
+
+  await page.keyboard.press('Escape');
+  await waitAnimationFrame(page);
+  const afterEscapeSnapshot = await page.evaluate(() => window.__example97.getSnapshot());
+  assert.equal(afterEscapeSnapshot.editor.isEditing, false, 'example97 Escape should close editor');
+  assert.equal(afterEscapeSnapshot.root?.hasFocus, true, 'example97 Escape should restore root focus');
+  assert.ok(afterEscapeSnapshot.root?.activeDescendant, 'example97 Escape should keep aria-activedescendant');
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
 async function runExample40Checks(page, serverUrl, pageErrors) {
   await page.goto(`${serverUrl}/examples/example40.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
@@ -3508,6 +3654,85 @@ async function runExample40Checks(page, serverUrl, pageErrors) {
   assert.ok(
     String(koSnapshot.checkAllAriaLabel).includes('모든 행 선택'),
     `example40 checkAll aria label should be localized, got ${koSnapshot.checkAllAriaLabel}`
+  );
+
+  await page.evaluate(() => {
+    const api = window.__example40;
+    api.applyRecipe('finance-de');
+  });
+  await waitAnimationFrame(page);
+  const financeSnapshot = await page.evaluate(() => window.__example40.getSnapshot());
+  assert.equal(financeSnapshot.locale, 'de-DE', 'example40 finance recipe should use de-DE locale');
+  assert.equal(financeSnapshot.recipeId, 'finance-de', 'example40 finance recipe id mismatch');
+  assert.equal(financeSnapshot.amountText, financeSnapshot.expectedAmountText, 'example40 finance recipe amount text mismatch');
+  assert.ok(
+    String(financeSnapshot.checkAllAriaLabel).includes('Finanzzeilen auswählen'),
+    `example40 finance recipe aria label mismatch: ${financeSnapshot.checkAllAriaLabel}`
+  );
+
+  assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
+}
+
+async function runExample98Checks(page, serverUrl, pageErrors) {
+  await page.goto(`${serverUrl}/examples/example98.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.hgrid__row--center', { timeout: 20_000, state: 'attached' });
+
+  const initialSnapshot = await page.evaluate(() => {
+    const api = window.__example98;
+    if (!api || typeof api.getSnapshot !== 'function') {
+      throw new Error('Missing window.__example98.getSnapshot');
+    }
+    return api.getSnapshot();
+  });
+  assert.equal(initialSnapshot.locale, 'ko-KR', 'example98 should start with ko-KR locale');
+  assert.ok(
+    String(initialSnapshot.checkAllAriaLabel).includes('모든 행 선택'),
+    `example98 initial aria label mismatch: ${initialSnapshot.checkAllAriaLabel}`
+  );
+
+  await page.evaluate(async () => {
+    const api = window.__example98;
+    await api.openNameEditor();
+    await api.startComposition();
+  });
+  await waitAnimationFrame(page);
+  const composingSnapshot = await page.evaluate(() => window.__example98.getSnapshot());
+  assert.equal(composingSnapshot.editor.isEditing, true, 'example98 should keep editor open during composition');
+  assert.equal(composingSnapshot.editor.value, '한', 'example98 composition draft mismatch');
+
+  await page.evaluate(async () => {
+    const api = window.__example98;
+    await api.sendEditorKey('Escape');
+    await api.sendEditorKey('Tab');
+    await api.sendEditorKey('Enter');
+  });
+  await waitAnimationFrame(page);
+  const duringCompositionSnapshot = await page.evaluate(() => window.__example98.getSnapshot());
+  assert.equal(duringCompositionSnapshot.editor.isEditing, true, 'example98 IME should ignore escape/tab/enter while composing');
+  assert.equal(duringCompositionSnapshot.firstNameText, '초기값', 'example98 should not commit value during composition');
+
+  await page.evaluate(async () => {
+    const api = window.__example98;
+    await api.endComposition();
+    await api.sendEditorKey('Enter');
+  });
+  await waitAnimationFrame(page);
+  const afterCommitSnapshot = await page.evaluate(() => window.__example98.getSnapshot());
+  assert.equal(afterCommitSnapshot.editor.isEditing, false, 'example98 should close editor after composition commit');
+  assert.equal(afterCommitSnapshot.firstNameText, '한', 'example98 should commit composed value after Enter');
+  assert.equal(afterCommitSnapshot.rootHasFocus, true, 'example98 should restore root focus after commit');
+  assert.ok(afterCommitSnapshot.activeDescendant, 'example98 should restore aria-activedescendant after commit');
+
+  await page.evaluate(() => {
+    const api = window.__example98;
+    api.setLocale('de-DE');
+  });
+  await waitAnimationFrame(page);
+  const deSnapshot = await page.evaluate(() => window.__example98.getSnapshot());
+  assert.equal(deSnapshot.locale, 'de-DE', 'example98 should switch to de-DE locale');
+  assert.ok(
+    String(deSnapshot.checkAllAriaLabel).includes('Alle Zeilen auswählen'),
+    `example98 de-DE aria label mismatch: ${deSnapshot.checkAllAriaLabel}`
   );
 
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
@@ -5976,6 +6201,8 @@ async function main() {
     pageErrors.length = 0;
     await runExample40Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
+    await runExample98Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
     await runExample41Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample44Checks(page, server.url, pageErrors);
@@ -6059,6 +6286,10 @@ async function main() {
     await runExample94Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample95Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample96Checks(page, server.url, pageErrors);
+    pageErrors.length = 0;
+    await runExample97Checks(page, server.url, pageErrors);
     pageErrors.length = 0;
     await runExample64Checks(page, server.url, pageErrors);
     pageErrors.length = 0;

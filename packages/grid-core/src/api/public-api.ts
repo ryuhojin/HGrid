@@ -119,6 +119,14 @@ export type {
   UnsafeHtmlSanitizeContext,
   UnsafeHtmlSanitizer
 } from '../core/grid-options';
+export {
+  GRID_LOCALE_TEXT_BUNDLES,
+  formatGridLocaleText,
+  getGridLocaleTextBundle,
+  localizeCheckAllScope,
+  normalizeGridLocale,
+  resolveGridLocaleText
+} from '../core/grid-locale-text';
 export type {
   AdvancedFilterPresetUiActionEvent,
   CellClickEvent,

@@ -138,7 +138,7 @@ export function createZoneRow(context: CreateZoneRowContext): ZoneRowItem {
   const visibleDisplay = zoneName === 'center' ? 'block' : '';
   const rowElement = document.createElement('div');
   rowElement.className = `hgrid__row hgrid__row--${zoneName}`;
-  rowElement.setAttribute('role', zoneName === 'center' ? 'row' : 'presentation');
+  rowElement.setAttribute('role', 'row');
   rowElement.style.height = `${baseRowHeight}px`;
   rowElement.style.width = `${width}px`;
 

@@ -3,10 +3,10 @@
 HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 데이터 그리드**입니다.
 `Canvas/WebGL/OffscreenCanvas` 없이 대용량(10M~100M) 스크롤, pinned 컬럼, 수직/수평 가상화, 풀링 렌더를 제공합니다.
 
-## 프로젝트 상태 (2026-03-16)
+## 프로젝트 상태 (2026-03-18)
 
 - 코어 베이스라인: `Phase 0` ~ `Phase 14.3` 범위의 핵심 엔진/테스트/벤치 파이프라인은 구현됨
-- 남은 핵심 범위: mature server-side row model, enterprise product surface, framework/package productization, `Phase 15` (commercial readiness)
+- 남은 핵심 범위: framework/package productization, plugin SDK, `Phase 15` (commercial readiness)
 - 정확한 현재 평가는 `checklist.md`, `docs/enterprise-feature-matrix.md`, `docs/enterprise-known-limitations.md` 기준으로 확인
 
 현재 구현된 핵심 기반:
@@ -41,7 +41,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - 성능 스모크(e2e heartbeat max gap)로 그룹/트리/피벗 UI freeze 회귀 점검
 - ARIA Grid semantics pipeline (`aria-rowcount/colcount/rowindex/colindex` + `aria-activedescendant` focus strategy)
 - Keyboard-only pipeline (navigation/selection/editing, `Ctrl/Cmd+A`, `F2`, editor `Tab/Shift+Tab`)
-- i18n pipeline (`localeText` externalization, Intl number/date formatting, IME-safe editing)
+- i18n pipeline (built-in locale bundles, `localeText` externalization, Intl number/date formatting, IME-safe editing)
 - Security/CSP baseline (`unsafeHtml` opt-in + secure-by-default HTML policy + sanitize hook + Trusted Types opt-in, `editCommit` audit payload 표준화, CSP/정적 보안 스캔)
 - Performance baseline policy (`Phase 14.1` 참조 환경 문서화 + 벤치 데이터 생성 스크립트)
 - Performance scenarios (`Phase 14.2` initial render/FPS/100M mapping/sort/filter/create-destroy/scroll regression)
@@ -49,10 +49,10 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 
 아직 엔터프라이즈 상용 제품으로 완료되지 않은 범위:
 
-- mature server-side row model (store hierarchy, save orchestration, conflict UI는 아직 부족)
-- enterprise UI surface(chart, formula plugin/productization, master-detail, layout persistence 확장, filter/profile preset transport 등)
-- React/Vue product package 및 plugin SDK
+- framework/package productization
+- plugin SDK / extension platform
 - release/commercial readiness (`Phase 15`)
+- column group collapse/expand UX
 
 `Phase E1` actual Worker runtime은 현재 기준으로 마감했다. 다만 callback-heavy first-hit과 일부 filter/lazy hydration 경로는 지속 튜닝 여지가 남아 있다.
 
@@ -333,6 +333,9 @@ pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 - `example38`: ARIA grid semantics(role/row/col index + active descendant)
 - `example39`: keyboard-only flow(navigation/selection/editing)
 - `example40`: i18n(localeText/Intl formatting)
+- `example96`: screen reader measurement fixture(grouped header + pinned + select editor + status bar precondition)
+- `example97`: focus regression fixture(grouped/pivot/tree + editor cancel + root focus restore)
+- `example98`: locale bundle helper + IME composition guard fixture
 - `example41`: security/csp hardening(strict fallback + sanitizer + legacy raw migration + audit payload snapshot)
 - `example89`: HTML render security policy matrix(strict default / sanitized / legacy raw)
 - `example90`: Trusted Types HTML rendering(`trustedTypesPolicyName` + sanitizer)
@@ -412,7 +415,9 @@ pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 - `docs/theme-tokens-phase11.md`
 - `docs/design-guide-phase11.md`
 - `docs/aria-grid-semantics-phase12.md`
+- `docs/screen-reader-measurement-phase-e6.md`
 - `docs/keyboard-only-phase12.md`
+- `docs/focus-regression-phase-e6.md`
 - `docs/i18n-phase12.md`
 - `docs/security-csp-phase13.md`
 - `docs/perf-reference-env-phase14.md`

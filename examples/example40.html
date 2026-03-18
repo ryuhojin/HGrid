@@ -57,12 +57,13 @@
   </head>
   <body>
     <h1>Example 40 - i18n Locale Formatting</h1>
-    <p>locale strings와 Intl number/date formatting 동작을 검증하는 예제입니다.</p>
+    <p>built-in locale bundle helper와 고객사 formatting recipe를 함께 검증하는 i18n 예제입니다.</p>
 
     <div class="controls">
-      <button id="locale-en" type="button">locale en-US</button>
-      <button id="locale-de" type="button">locale de-DE</button>
-      <button id="locale-ko" type="button">locale ko-KR</button>
+      <button id="bundle-en" type="button">bundle en-US</button>
+      <button id="bundle-de" type="button">bundle de-DE</button>
+      <button id="bundle-ko" type="button">bundle ko-KR</button>
+      <button id="recipe-finance" type="button">recipe finance de-DE</button>
       <button id="inspect" type="button">inspect</button>
     </div>
 
@@ -72,15 +73,23 @@
 
     <script src="../packages/grid-core/dist/grid.umd.js"></script>
     <script>
-      const NUMBER_FORMAT_OPTIONS = {
+      const DEFAULT_NUMBER_FORMAT_OPTIONS = {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       };
-      const DATE_TIME_FORMAT_OPTIONS = {
+
+      const DEFAULT_DATE_TIME_FORMAT_OPTIONS = {
         timeZone: 'UTC',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit'
+      };
+
+      const FINANCE_DE_NUMBER_FORMAT_OPTIONS = {
+        style: 'currency',
+        currency: 'EUR',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
       };
 
       const rowData = Array.from({ length: 400 }, (_, index) => ({
@@ -91,6 +100,37 @@
       }));
 
       let currentLocale = 'en-US';
+      let currentRecipeId = 'bundle';
+      let activeNumberFormatOptions = DEFAULT_NUMBER_FORMAT_OPTIONS;
+      let activeDateTimeFormatOptions = DEFAULT_DATE_TIME_FORMAT_OPTIONS;
+
+      function resolveBundle(locale) {
+        return HGrid.getGridLocaleTextBundle(locale) || HGrid.getGridLocaleTextBundle('en-US');
+      }
+
+      function buildLocaleRecipe(locale, recipeId) {
+        const baseLocaleText = resolveBundle(locale);
+        if (recipeId === 'finance-de') {
+          return {
+            locale: 'de-DE',
+            recipeId,
+            localeText: {
+              ...resolveBundle('de-DE'),
+              selectAllRows: 'Finanzzeilen auswählen ({scope})'
+            },
+            numberFormatOptions: FINANCE_DE_NUMBER_FORMAT_OPTIONS,
+            dateTimeFormatOptions: DEFAULT_DATE_TIME_FORMAT_OPTIONS
+          };
+        }
+
+        return {
+          locale,
+          recipeId: 'bundle',
+          localeText: baseLocaleText,
+          numberFormatOptions: DEFAULT_NUMBER_FORMAT_OPTIONS,
+          dateTimeFormatOptions: DEFAULT_DATE_TIME_FORMAT_OPTIONS
+        };
+      }
 
       const grid = new HGrid.Grid(document.getElementById('grid'), {
         columns: [
@@ -102,14 +142,9 @@
         ],
         rowData,
         locale: currentLocale,
-        numberFormatOptions: NUMBER_FORMAT_OPTIONS,
-        dateTimeFormatOptions: DATE_TIME_FORMAT_OPTIONS,
-        localeText: {
-          selectAllRows: 'Select all rows ({scope})',
-          scopeAll: 'all',
-          scopeFiltered: 'filtered',
-          scopeViewport: 'viewport'
-        },
+        localeText: resolveBundle(currentLocale),
+        numberFormatOptions: activeNumberFormatOptions,
+        dateTimeFormatOptions: activeDateTimeFormatOptions,
         height: 420,
         rowHeight: 28,
         overscan: 8
@@ -133,12 +168,13 @@
 
         return {
           locale: currentLocale,
+          recipeId: currentRecipeId,
           rootDir: root ? root.getAttribute('dir') : null,
           amountText: amountCell ? amountCell.textContent : null,
           dateText: dateCell ? dateCell.textContent : null,
           checkAllAriaLabel: checkAll ? checkAll.getAttribute('aria-label') : null,
-          expectedAmountText: new Intl.NumberFormat(currentLocale, NUMBER_FORMAT_OPTIONS).format(rowData[0].amount),
-          expectedDateText: new Intl.DateTimeFormat(currentLocale, DATE_TIME_FORMAT_OPTIONS).format(new Date(rowData[0].updatedAt))
+          expectedAmountText: new Intl.NumberFormat(currentLocale, activeNumberFormatOptions).format(rowData[0].amount),
+          expectedDateText: new Intl.DateTimeFormat(currentLocale, activeDateTimeFormatOptions).format(new Date(rowData[0].updatedAt))
         };
       }
 
@@ -146,58 +182,38 @@
         summaryElement.textContent = JSON.stringify({ label, snapshot: getSnapshot() }, null, 2);
       }
 
-      function applyLocale(locale) {
-        currentLocale = locale;
-        const localeText =
-          locale === 'ko-KR'
-            ? {
-                selectAllRows: '모든 행 선택 ({scope})',
-                scopeAll: '전체',
-                scopeFiltered: '필터 결과',
-                scopeViewport: '현재 뷰포트',
-                selectRow: '{row}행 선택',
-                selectRowGeneric: '행 선택',
-                groupingRow: '그룹 행',
-                rowStatus: '{row}행 상태',
-                rowStatusWithValue: '{row}행 상태 {status}',
-                rowNumber: '{row}행 번호',
-                validationFailed: '검증 실패'
-              }
-            : {
-                selectAllRows: 'Select all rows ({scope})',
-                scopeAll: 'all',
-                scopeFiltered: 'filtered',
-                scopeViewport: 'viewport',
-                selectRow: 'Select row {row}',
-                selectRowGeneric: 'Select row',
-                groupingRow: 'Grouping row',
-                rowStatus: 'Row {row} status',
-                rowStatusWithValue: 'Row {row} status {status}',
-                rowNumber: 'Row {row} number',
-                validationFailed: 'Validation failed'
-              };
-
+      function applyRecipe(nextLocale, recipeId) {
+        const recipe = buildLocaleRecipe(nextLocale, recipeId);
+        currentLocale = recipe.locale;
+        currentRecipeId = recipe.recipeId;
+        activeNumberFormatOptions = recipe.numberFormatOptions;
+        activeDateTimeFormatOptions = recipe.dateTimeFormatOptions;
         grid.setOptions({
-          locale,
-          localeText,
-          numberFormatOptions: NUMBER_FORMAT_OPTIONS,
-          dateTimeFormatOptions: DATE_TIME_FORMAT_OPTIONS
+          locale: recipe.locale,
+          localeText: recipe.localeText,
+          numberFormatOptions: recipe.numberFormatOptions,
+          dateTimeFormatOptions: recipe.dateTimeFormatOptions
         });
       }
 
-      document.getElementById('locale-en').addEventListener('click', () => {
-        applyLocale('en-US');
-        renderSummary('locale-en');
+      document.getElementById('bundle-en').addEventListener('click', () => {
+        applyRecipe('en-US', 'bundle');
+        renderSummary('bundle-en');
       });
 
-      document.getElementById('locale-de').addEventListener('click', () => {
-        applyLocale('de-DE');
-        renderSummary('locale-de');
+      document.getElementById('bundle-de').addEventListener('click', () => {
+        applyRecipe('de-DE', 'bundle');
+        renderSummary('bundle-de');
       });
 
-      document.getElementById('locale-ko').addEventListener('click', () => {
-        applyLocale('ko-KR');
-        renderSummary('locale-ko');
+      document.getElementById('bundle-ko').addEventListener('click', () => {
+        applyRecipe('ko-KR', 'bundle');
+        renderSummary('bundle-ko');
+      });
+
+      document.getElementById('recipe-finance').addEventListener('click', () => {
+        applyRecipe('de-DE', 'finance-de');
+        renderSummary('recipe-finance');
       });
 
       document.getElementById('inspect').addEventListener('click', () => {
@@ -208,7 +224,15 @@
 
       window.__example40 = {
         setLocale(locale) {
-          applyLocale(locale);
+          applyRecipe(locale, 'bundle');
+        },
+        applyRecipe(recipeId) {
+          if (recipeId === 'finance-de') {
+            applyRecipe('de-DE', 'finance-de');
+            return;
+          }
+
+          applyRecipe('en-US', 'bundle');
         },
         getSnapshot
       };

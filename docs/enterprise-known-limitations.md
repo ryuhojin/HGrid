@@ -1,6 +1,6 @@
 # HGrid Enterprise Known Limitations
 
-> 기준일: 2026-03-17
+> 기준일: 2026-03-18
 >
 > 이 문서는 “현재 제품이 아직 아닌 부분”을 숨기지 않고 고정하기 위한 제한사항 문서다.
 
@@ -40,10 +40,11 @@
   - conflict merge / diff review dialog
 - 의미:
   - 엔터프라이즈 업무형 “편집 후 저장”의 dirty/recovery UI는 생겼지만, 최종 저장 orchestration은 여전히 앱 설계가 필요하다.
-## 5. Column Group `collapsed` 미완성
-- column group schema에 `collapsed`가 존재하지만 실제 child visibility 토글은 구현되지 않았다.
+## 5. Column Group collapse UX 미지원
+- multi-level column group header는 렌더되지만, group collapse/expand UX는 아직 지원하지 않는다.
+- no-op `collapsed` schema는 제거했고, collapse UX는 future feature로 남겨둔다.
 - 의미:
-  - 다단 헤더는 렌더되지만 enterprise column group UX 완성이라고 보기 어렵다.
+  - 다단 헤더는 제공되지만, enterprise column group UX 완성이라고 보기 어렵다.
 
 ## 6. 제품형 UI surface 부족
 - 현재 저장소에는 다음이 아직 부족하다:
@@ -80,27 +81,21 @@
 - 의미:
   - 기본 HTML 렌더는 안전해졌지만, strict CSP/Trusted Types의 운영 기본값과 nonce-backed style path는 아직 남아 있다.
 
-## 8. 접근성 실측 미완료
-- ARIA semantics와 keyboard path는 구현되어 있다.
-- 하지만 NVDA/JAWS/VoiceOver 실측 매트릭스는 아직 `Planned` 상태다.
-- 의미:
-  - 접근성 주장은 코드 정책 수준이지 실사용 검증 수준은 아니다.
-
-## 9. React / Vue 패키지 제품화 미완료
+## 8. React / Vue 패키지 제품화 미완료
 - 현재 adapter는 thin wrapper 수준이다.
 - root build/test/typecheck 범위에 fully 포함되지 않는다.
 - adapter 자체 테스트도 없다.
 - 의미:
   - 프레임워크 제품 패키지로 바로 판매/지원하기에는 부족하다.
 
-## 10. Plugin SDK 부재
+## 9. Plugin SDK 부재
 - excel plugin은 존재하지만 공식 plugin lifecycle / command registry / overlay registry 체계는 없다.
 - excel import/export는 validation/conflict/delegation contract까지는 있지만 built-in diff preview dialog나 import review panel은 아직 없다.
 - dependency scan 기준 `xlsx` high advisory 2건은 npm patched release가 없어 allowlist 예외로 관리 중이다.
 - 의미:
   - 기능 확장을 core 수정 없이 안정적으로 쌓는 플랫폼 단계는 아니다.
 
-## 11. Release / Commercial Readiness 부재
+## 10. Release / Commercial Readiness 부재
 - 다음 항목이 아직 미완료다:
   - semver / deprecation policy
   - changelog automation
@@ -111,7 +106,7 @@
 - 의미:
   - 기술 데모를 넘어 상용 배포/업그레이드/지원 체계가 아직 없다.
 
-## 12. 문서 상태 표시 불일치 가능성
+## 11. 문서 상태 표시 불일치 가능성
 - README에는 강하게 완료로 표현된 항목이 있으나, 상세 docs/checklist에는 제한 또는 후속 작업이 남아 있다.
 - 의미:
   - 외부 커뮤니케이션 전에 상태 정합성 정리가 필요하다.

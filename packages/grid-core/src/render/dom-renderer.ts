@@ -522,7 +522,6 @@ interface HeaderGroupCellLayout {
   startColIndex: number;
   endColIndex: number;
   leafSpan: number;
-  isCollapsed: boolean;
 }
 
 interface HeaderGroupRowLayout {
@@ -843,6 +842,7 @@ export class DomRenderer implements GridRendererPort {
   private fillHandleAutoScrollFrameId: number | null = null;
   private keyboardRangeAnchor: SelectionCellPosition | null = null;
   private editSession: EditSession | null = null;
+  private isEditorCompositionActive = false;
   private editValidationTicket = 0;
   private isEditValidationPending = false;
   private measurementFrameId: number | null = null;
@@ -1206,6 +1206,8 @@ export class DomRenderer implements GridRendererPort {
     this.editorInputElement.removeEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorInputElement.removeEventListener('blur', this.handleEditorInputBlur);
     this.editorInputElement.removeEventListener('input', this.handleEditorInput);
+    this.editorInputElement.removeEventListener('compositionstart', this.handleEditorCompositionStart);
+    this.editorInputElement.removeEventListener('compositionend', this.handleEditorCompositionEnd);
     this.editorSelectElement.removeEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorSelectElement.removeEventListener('blur', this.handleEditorInputBlur);
     this.editorSelectElement.removeEventListener('change', this.handleEditorInput);
@@ -1417,6 +1419,8 @@ export class DomRenderer implements GridRendererPort {
     this.editorInputElement.addEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorInputElement.addEventListener('blur', this.handleEditorInputBlur);
     this.editorInputElement.addEventListener('input', this.handleEditorInput);
+    this.editorInputElement.addEventListener('compositionstart', this.handleEditorCompositionStart);
+    this.editorInputElement.addEventListener('compositionend', this.handleEditorCompositionEnd);
     this.editorSelectElement.addEventListener('keydown', this.handleEditorInputKeyDown);
     this.editorSelectElement.addEventListener('blur', this.handleEditorInputBlur);
     this.editorSelectElement.addEventListener('change', this.handleEditorInput);
@@ -7430,8 +7434,7 @@ export class DomRenderer implements GridRendererPort {
           header: headerText,
           startColIndex: segmentStart,
           endColIndex: segmentEnd + 1,
-          leafSpan: segmentEnd - segmentStart + 1,
-          isCollapsed: node.collapsed === true
+          leafSpan: segmentEnd - segmentStart + 1
         });
         rowMap.set(level, rowCells);
         segmentStart = nextIndex;
@@ -7444,8 +7447,7 @@ export class DomRenderer implements GridRendererPort {
         header: headerText,
         startColIndex: segmentStart,
         endColIndex: segmentEnd + 1,
-        leafSpan: segmentEnd - segmentStart + 1,
-        isCollapsed: node.collapsed === true
+        leafSpan: segmentEnd - segmentStart + 1
       });
       rowMap.set(level, rowCells);
       return sortedIndices;
@@ -8117,13 +8119,8 @@ export class DomRenderer implements GridRendererPort {
   ): HTMLDivElement {
     const rowElement = document.createElement('div');
     rowElement.className = `hgrid__header-row hgrid__header-row--${zoneName} hgrid__header-row--group`;
-    const isAriaHeaderRow = zoneName === 'center';
-    rowElement.setAttribute('role', isAriaHeaderRow ? 'row' : 'presentation');
-    if (isAriaHeaderRow) {
-      rowElement.setAttribute('aria-rowindex', String(rowIndex + 1));
-    } else {
-      rowElement.removeAttribute('aria-rowindex');
-    }
+    rowElement.setAttribute('role', 'row');
+    rowElement.setAttribute('aria-rowindex', String(rowIndex + 1));
     rowElement.style.display = 'block';
     rowElement.style.position = 'relative';
     rowElement.style.width = `${Math.max(1, zoneWidth)}px`;
@@ -8152,9 +8149,6 @@ export class DomRenderer implements GridRendererPort {
 
         const headerCellElement = document.createElement('div');
         headerCellElement.className = 'hgrid__header-cell hgrid__header-cell--group';
-        if (cellLayout.isCollapsed) {
-          headerCellElement.classList.add('hgrid__header-cell--group-collapsed');
-        }
         headerCellElement.style.position = 'absolute';
         headerCellElement.style.left = `${left}px`;
         headerCellElement.style.width = `${width}px`;
@@ -8206,8 +8200,8 @@ export class DomRenderer implements GridRendererPort {
   ): void {
     rowElement.replaceChildren();
     rowElement.classList.add('hgrid__header-row--leaf');
-    rowElement.setAttribute('role', 'presentation');
-    rowElement.removeAttribute('aria-rowindex');
+    rowElement.setAttribute('role', 'row');
+    rowElement.setAttribute('aria-rowindex', String(this.headerGroupRowCount + 1));
     rowElement.style.display = 'block';
     rowElement.style.position = 'relative';
     rowElement.style.width = `${Math.max(1, zoneWidth)}px`;
@@ -10360,6 +10354,7 @@ export class DomRenderer implements GridRendererPort {
     const currentEditorValue = this.getEditorControlValue();
     this.editValidationTicket += 1;
     this.isEditValidationPending = false;
+    this.isEditorCompositionActive = false;
     this.editSession = null;
     this.applyEditorOverlayState(createClosedEditorOverlayState());
 
@@ -10484,6 +10479,9 @@ export class DomRenderer implements GridRendererPort {
     this.stopEditing('reconcile', false);
     this.markDataDirty();
     this.scheduleRender();
+    if (trigger === 'enter') {
+      this.rootElement.focus();
+    }
   }
 
   private syncEditorOverlayPosition(): boolean {
@@ -13111,6 +13109,12 @@ export class DomRenderer implements GridRendererPort {
       return;
     }
 
+    if (event.isComposing || this.isEditorCompositionActive) {
+      if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'Escape') {
+        return;
+      }
+    }
+
     if (event.key === 'Enter') {
       event.preventDefault();
       void this.commitEditing('enter');
@@ -13126,7 +13130,16 @@ export class DomRenderer implements GridRendererPort {
     if (event.key === 'Escape') {
       event.preventDefault();
       this.stopEditing('escape');
+      this.rootElement.focus();
     }
+  };
+
+  private handleEditorCompositionStart = (): void => {
+    this.isEditorCompositionActive = true;
+  };
+
+  private handleEditorCompositionEnd = (): void => {
+    this.isEditorCompositionActive = false;
   };
 
   private async commitEditingWithTabNavigation(direction: 1 | -1): Promise<void> {

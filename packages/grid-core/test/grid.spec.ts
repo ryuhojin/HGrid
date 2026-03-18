@@ -3178,6 +3178,85 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
+  it('ignores Enter, Tab, and Escape while editor IME composition is active', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' as const },
+        { id: 'name', header: 'Name', width: 220, type: 'text' as const, editable: true },
+        { id: 'status', header: 'Status', width: 140, type: 'text' as const }
+      ],
+      rowData: [
+        { id: 1, name: '초기값', status: 'active' },
+        { id: 2, name: '두번째', status: 'idle' }
+      ],
+      height: 160,
+      rowHeight: 28,
+      overscan: 2
+    });
+
+    const renderer = (
+      grid as unknown as {
+        renderer: {
+          editorHostElement: HTMLDivElement;
+          editorInputElement: HTMLInputElement;
+        };
+      }
+    ).renderer;
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true }));
+    await waitForFrame();
+
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+
+    renderer.editorInputElement.value = '한';
+    renderer.editorInputElement.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+    expect(grid.getSelection().activeCell).toEqual({ rowIndex: 0, colIndex: 1 });
+
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+    expect(grid.getSelection().activeCell).toEqual({ rowIndex: 0, colIndex: 1 });
+
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(true);
+
+    const nameCellBeforeCommit = container.querySelector(
+      '.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(nameCellBeforeCommit.textContent).toBe('초기값');
+
+    renderer.editorInputElement.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    renderer.editorInputElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(renderer.editorHostElement.classList.contains('hgrid__editor-host--visible')).toBe(false);
+    const nameCellAfterCommit = container.querySelector(
+      '.hgrid__row--center[data-row-index="0"] .hgrid__cell[data-column-id="name"]'
+    ) as HTMLDivElement;
+    expect(nameCellAfterCommit.textContent).toBe('한');
+    expect(document.activeElement).toBe(root);
+
+    grid.destroy();
+    container.remove();
+  });
+
   it('formats number/date cells by locale and updates formatted output after setOptions', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -5586,6 +5665,8 @@ describe('Grid DOM pooling', () => {
       columnId: 'name',
       reason: 'escape'
     });
+    expect(document.activeElement).toBe(root);
+    expect(root.hasAttribute('aria-activedescendant')).toBe(true);
 
     grid.destroy();
     container.remove();
@@ -6274,9 +6355,21 @@ describe('Grid DOM pooling', () => {
     expect(centerDataRow.getAttribute('role')).toBe('row');
     expect(centerDataRow.getAttribute('aria-rowindex')).toBe('3');
 
+    const leftGroupRow = container.querySelector('.hgrid__header-left .hgrid__header-row--group') as HTMLDivElement;
+    expect(leftGroupRow.getAttribute('role')).toBe('row');
+    expect(leftGroupRow.getAttribute('aria-rowindex')).toBe('1');
+
+    const leftLeafRow = container.querySelector('.hgrid__header-left .hgrid__header-row--leaf') as HTMLDivElement;
+    expect(leftLeafRow.getAttribute('role')).toBe('row');
+    expect(leftLeafRow.getAttribute('aria-rowindex')).toBe('2');
+
     const leftDataRow = container.querySelector('.hgrid__row--left[data-row-index="0"]') as HTMLDivElement;
-    expect(leftDataRow.getAttribute('role')).toBe('presentation');
-    expect(leftDataRow.hasAttribute('aria-rowindex')).toBe(false);
+    expect(leftDataRow.getAttribute('role')).toBe('row');
+    expect(leftDataRow.getAttribute('aria-rowindex')).toBe('3');
+
+    const rightDataRow = container.querySelector('.hgrid__row--right[data-row-index="0"]') as HTMLDivElement;
+    expect(rightDataRow.getAttribute('role')).toBe('row');
+    expect(rightDataRow.getAttribute('aria-rowindex')).toBe('3');
 
     const idCell = container.querySelector('.hgrid__row--left[data-row-index="0"] .hgrid__cell[data-column-id="id"]') as HTMLDivElement;
     expect(idCell.getAttribute('aria-rowindex')).toBe('3');
@@ -6292,6 +6385,60 @@ describe('Grid DOM pooling', () => {
     ) as HTMLDivElement;
     expect(scoreCell.getAttribute('aria-rowindex')).toBe('3');
     expect(scoreCell.getAttribute('aria-colindex')).toBe('4');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('keeps pinned cells addressable through aria-activedescendant', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 840, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 160, type: 'text' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date', pinned: 'right' }
+      ],
+      rowData: Array.from({ length: 40 }, (_, index) => ({
+        id: index + 1,
+        name: `Customer-${index + 1}`,
+        status: index % 2 === 0 ? 'active' : 'idle',
+        updatedAt: new Date(Date.now() - index * 60_000).toISOString()
+      })),
+      height: 220,
+      rowHeight: 28
+    });
+
+    await waitForFrame();
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 0 },
+      cellRanges: [{ r1: 0, c1: 0, r2: 0, c2: 0 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const leftPinnedActiveCellId = root.getAttribute('aria-activedescendant');
+    const leftPinnedActiveCell = leftPinnedActiveCellId ? document.getElementById(leftPinnedActiveCellId) : null;
+    expect(leftPinnedActiveCell?.getAttribute('data-column-id')).toBe('id');
+    expect(leftPinnedActiveCell?.getAttribute('aria-colindex')).toBe('1');
+
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 3 },
+      cellRanges: [{ r1: 0, c1: 3, r2: 0, c2: 3 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    const rightPinnedActiveCellId = root.getAttribute('aria-activedescendant');
+    const rightPinnedActiveCell = rightPinnedActiveCellId ? document.getElementById(rightPinnedActiveCellId) : null;
+    expect(rightPinnedActiveCell?.getAttribute('data-column-id')).toBe('updatedAt');
+    expect(rightPinnedActiveCell?.getAttribute('aria-colindex')).toBe('4');
 
     grid.destroy();
     container.remove();
@@ -6357,6 +6504,174 @@ describe('Grid DOM pooling', () => {
     grid.clearSelection();
     await waitForFrame();
     expect(root.hasAttribute('aria-activedescendant')).toBe(false);
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('keeps root focus identity stable while pooled rows are reused', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 760, configurable: true });
+    document.body.append(container);
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: 'id', header: 'ID', width: 100, type: 'number' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'status', header: 'Status', width: 160, type: 'text' }
+      ],
+      rowData: Array.from({ length: 1000 }, (_, index) => ({
+        id: index + 1,
+        name: `Name-${index + 1}`,
+        status: index % 2 === 0 ? 'active' : 'idle'
+      })),
+      height: 220,
+      rowHeight: 28,
+      overscan: 6
+    });
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    root.focus();
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+
+    expect(document.activeElement).toBe(root);
+    const initialActiveCellId = root.getAttribute('aria-activedescendant');
+    expect(initialActiveCellId).toBeTruthy();
+
+    const verticalScrollElement = getVerticalScrollElement(container);
+    verticalScrollElement.scrollTop = 4200;
+    verticalScrollElement.dispatchEvent(new Event('scroll'));
+    await waitForFrame();
+
+    expect(document.activeElement).toBe(root);
+    expect(root.hasAttribute('aria-activedescendant')).toBe(false);
+
+    verticalScrollElement.scrollTop = 0;
+    verticalScrollElement.dispatchEvent(new Event('scroll'));
+    await waitForFrame();
+
+    expect(document.activeElement).toBe(root);
+    const restoredActiveCellId = root.getAttribute('aria-activedescendant');
+    expect(restoredActiveCellId).toBeTruthy();
+    const restoredCell = restoredActiveCellId
+      ? (container.querySelector(`#${restoredActiveCellId}`) as HTMLDivElement | null)
+      : null;
+    expect(restoredCell?.dataset.columnId).toBe('name');
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it('keeps aria-activedescendant preconditions in grouped, pivoted, and tree states', async () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 980, configurable: true });
+    document.body.append(container);
+
+    const flatRows = Array.from({ length: 48 }, (_, index) => ({
+      id: index + 1,
+      name: `Customer-${index + 1}`,
+      region: index % 2 === 0 ? 'KR' : 'US',
+      month: index % 3 === 0 ? 'Jan' : index % 3 === 1 ? 'Feb' : 'Mar',
+      status: index % 2 === 0 ? 'active' : 'review',
+      sales: 100 + index * 10,
+      updatedAt: new Date(Date.now() - index * 60000).toISOString()
+    }));
+
+    const treeRows = [
+      { id: 100, parentId: null, name: 'Root-100', region: 'KR', month: 'Jan', status: 'active', sales: 500, hasChildren: true, updatedAt: new Date().toISOString() },
+      { id: 110, parentId: 100, name: 'Child-100-1', region: 'KR', month: 'Feb', status: 'review', sales: 320, hasChildren: false, updatedAt: new Date().toISOString() },
+      { id: 200, parentId: null, name: 'Root-200', region: 'US', month: 'Mar', status: 'idle', sales: 610, hasChildren: false, updatedAt: new Date().toISOString() }
+    ];
+
+    const grid = new Grid(container, {
+      columns: [
+        { id: '__indicatorCheckbox', header: '', width: 56, type: 'boolean' },
+        { id: 'id', header: 'ID', width: 90, type: 'number', pinned: 'left' },
+        { id: 'name', header: 'Name', width: 220, type: 'text' },
+        { id: 'region', header: 'Region', width: 140, type: 'text' },
+        { id: 'status', header: 'Status', width: 160, type: 'text' },
+        { id: 'month', header: 'Month', width: 120, type: 'text' },
+        { id: 'sales', header: 'Sales', width: 140, type: 'number' },
+        { id: 'updatedAt', header: 'Updated At', width: 220, type: 'date', pinned: 'right' }
+      ],
+      rowData: flatRows,
+      height: 240,
+      rowHeight: 28,
+      overscan: 6,
+      columnGroups: [
+        {
+          groupId: 'participant',
+          header: 'Participant',
+          children: ['name', 'region']
+        },
+        {
+          groupId: 'metrics',
+          header: 'Metrics',
+          children: ['status', 'month', 'sales']
+        }
+      ]
+    });
+
+    const root = container.querySelector('.hgrid') as HTMLDivElement;
+    root.focus();
+
+    await grid.setGroupingMode('client');
+    await grid.setGroupModel([{ columnId: 'region' }]);
+    await waitForFrame();
+    grid.setSelection({
+      activeCell: { rowIndex: 1, colIndex: 1 },
+      cellRanges: [{ r1: 1, c1: 1, r2: 1, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+    expect(root.hasAttribute('aria-activedescendant')).toBe(true);
+    expect(container.querySelector('.hgrid__cell--group')).toBeTruthy();
+
+    await grid.setPivotingMode('client');
+    await grid.setPivotModel([{ columnId: 'month' }]);
+    await grid.setPivotValues([{ columnId: 'sales', type: 'sum' }]);
+    await waitForFrame();
+    await waitForFrame();
+    grid.setSelection({
+      activeCell: { rowIndex: 1, colIndex: 1 },
+      cellRanges: [{ r1: 1, c1: 1, r2: 1, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+    expect(root.hasAttribute('aria-activedescendant')).toBe(true);
+    expect(grid.getPivotModel()).toEqual([{ columnId: 'month' }]);
+    expect(grid.getPivotValues().map((item) => ({ columnId: item.columnId, type: item.type }))).toEqual([
+      { columnId: 'sales', type: 'sum' }
+    ]);
+
+    grid.setOptions({ rowData: treeRows });
+    await grid.clearPivotModel();
+    await grid.setPivotValues([]);
+    await grid.clearGroupModel();
+    await grid.setTreeDataOptions({
+      enabled: true,
+      mode: 'client',
+      idField: 'id',
+      parentIdField: 'parentId',
+      hasChildrenField: 'hasChildren',
+      treeColumnId: 'name',
+      defaultExpanded: true
+    });
+    await waitForFrame();
+    await waitForFrame();
+    grid.setSelection({
+      activeCell: { rowIndex: 0, colIndex: 1 },
+      cellRanges: [{ r1: 0, c1: 1, r2: 0, c2: 1 }],
+      rowRanges: []
+    });
+    await waitForFrame();
+    expect(root.hasAttribute('aria-activedescendant')).toBe(true);
+    expect(container.querySelector('.hgrid__cell--tree')).toBeTruthy();
 
     grid.destroy();
     container.remove();

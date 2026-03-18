@@ -1517,8 +1517,7 @@ function cloneColumnGroup(group: ColumnGroupDef): ColumnGroupDef {
   return {
     groupId: String(group.groupId),
     header: String(group.header),
-    children: clonedChildren,
-    collapsed: group.collapsed === true
+    children: clonedChildren
   };
 }
 

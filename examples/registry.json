@@ -1249,6 +1249,46 @@
         "umd"
       ],
       "plugins": []
+    },
+    {
+      "number": 96,
+      "file": "example96.html",
+      "title": "Example 96 - Screen Reader Measurement Fixture",
+      "tags": [
+        "phase-e6",
+        "accessibility",
+        "screen-reader",
+        "measurement",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 97,
+      "file": "example97.html",
+      "title": "Example 97 - Focus and Announce Regression Fixture",
+      "tags": [
+        "phase-e6",
+        "accessibility",
+        "focus",
+        "keyboard",
+        "measurement",
+        "umd"
+      ],
+      "plugins": []
+    },
+    {
+      "number": 98,
+      "file": "example98.html",
+      "title": "Example 98 - Locale Bundles and IME Fixture",
+      "tags": [
+        "phase-e6",
+        "i18n",
+        "ime",
+        "locale-bundle",
+        "umd"
+      ],
+      "plugins": []
     }
   ]
 }

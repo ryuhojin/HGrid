@@ -156,10 +156,6 @@
   overflow: hidden;
 }
 
-.hgrid--rtl {
-  direction: rtl;
-}
-
 .h-theme-light .hgrid,
 .hgrid.h-theme-light,
 .h-theme-mode-light .hgrid,
@@ -484,11 +480,6 @@
   background-color: var(--hgrid-header-bg);
 }
 
-.hgrid--rtl .hgrid__header-cell,
-.hgrid--rtl .hgrid__cell {
-  text-align: right;
-}
-
 .hgrid__header-cell::after {
   content: "";
   position: absolute;
@@ -514,11 +505,6 @@
   padding-right: calc(var(--hgrid-header-cell-padding-x) + 18px);
 }
 
-.hgrid--rtl .hgrid__header-cell--menuable {
-  padding-right: var(--hgrid-header-cell-padding-x);
-  padding-left: calc(var(--hgrid-header-cell-padding-x) + 18px);
-}
-
 .hgrid__header-cell--menuable::before {
   content: "";
   position: absolute;
@@ -533,11 +519,6 @@
   pointer-events: none;
   transform: translateY(-50%);
   box-shadow: 0 -5px 0 currentColor, 0 5px 0 currentColor;
-}
-
-.hgrid--rtl .hgrid__header-cell--menuable::before {
-  right: auto;
-  left: 10px;
 }
 
 .hgrid__header-cell--filtered {
@@ -860,10 +841,6 @@
   color: var(--hgrid-muted-text);
 }
 
-.hgrid--rtl .hgrid__cell--indicator-row-number {
-  text-align: left;
-}
-
 .hgrid__cell--indicator-status {
   font-size: var(--hgrid-header-group-font-size);
   color: var(--hgrid-group-row-text);
@@ -875,23 +852,6 @@
 
 .hgrid__cell--tree {
   padding-left: var(--hgrid-tree-indent, 10px);
-}
-
-.hgrid--rtl .hgrid__cell--group {
-  padding-left: var(--hgrid-cell-padding-x);
-  padding-right: var(--hgrid-group-indent, 10px);
-}
-
-.hgrid--rtl .hgrid__cell--tree {
-  padding-left: var(--hgrid-cell-padding-x);
-  padding-right: var(--hgrid-tree-indent, 10px);
-}
-
-.hgrid--rtl .hgrid__header-cell--indicator,
-.hgrid--rtl .hgrid__cell--indicator,
-.hgrid--rtl .hgrid__cell--indicator-checkbox,
-.hgrid--rtl .hgrid__cell--indicator-status {
-  text-align: center;
 }
 
 .hgrid__indicator-cell {
@@ -1260,10 +1220,6 @@
   font: inherit;
   text-align: left;
   padding: 8px 10px;
-}
-
-.hgrid--rtl .hgrid__column-menu-item {
-  text-align: right;
 }
 
 .hgrid__column-menu-item:hover:not(:disabled),

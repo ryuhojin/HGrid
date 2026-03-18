@@ -1579,7 +1579,6 @@ function normalizeOptions(config?: GridConfig): GridOptions {
     styleNonce: normalizeStyleNonce(config?.styleNonce),
     sanitizeHtml: cloneSanitizeHtmlHook(config?.sanitizeHtml),
     onAuditLog: cloneAuditLogHook(config?.onAuditLog),
-    rtl: config?.rtl === true,
     numberFormatOptions: cloneNumberFormatOptions(config?.numberFormatOptions),
     dateTimeFormatOptions: cloneDateTimeFormatOptions(config?.dateTimeFormatOptions),
     height: config?.height,
@@ -1906,7 +1905,6 @@ export class Grid {
     const hasStyleNonceOption = Object.prototype.hasOwnProperty.call(options, 'styleNonce');
     const hasSanitizeHtmlOption = Object.prototype.hasOwnProperty.call(options, 'sanitizeHtml');
     const hasAuditLogHookOption = Object.prototype.hasOwnProperty.call(options, 'onAuditLog');
-    const hasRtlOption = Object.prototype.hasOwnProperty.call(options, 'rtl');
     const hasNumberFormatOption = Object.prototype.hasOwnProperty.call(options, 'numberFormatOptions');
     const hasDateTimeFormatOption = Object.prototype.hasOwnProperty.call(options, 'dateTimeFormatOptions');
     const nextLocale = hasLocaleOption ? normalizeOptionalLocale(options.locale) : this.options.locale;
@@ -1918,7 +1916,6 @@ export class Grid {
     const nextAuditLogHook = hasAuditLogHookOption
       ? cloneAuditLogHook(options.onAuditLog)
       : cloneAuditLogHook(this.options.onAuditLog);
-    const nextRtl = hasRtlOption ? options.rtl === true : this.options.rtl;
     const nextNumberFormatOptions = hasNumberFormatOption
       ? cloneNumberFormatOptions(options.numberFormatOptions)
       : cloneNumberFormatOptions(this.options.numberFormatOptions);
@@ -2010,7 +2007,6 @@ export class Grid {
       styleNonce: nextStyleNonce,
       sanitizeHtml: nextSanitizeHtml,
       onAuditLog: nextAuditLogHook,
-      rtl: nextRtl,
       numberFormatOptions: nextNumberFormatOptions,
       dateTimeFormatOptions: nextDateTimeFormatOptions,
       height: options.height ?? this.options.height,

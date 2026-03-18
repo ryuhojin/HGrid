@@ -41,7 +41,7 @@ HGrid는 상용 엔터프라이즈 환경을 목표로 한 **DOM-only 가상화 
 - 성능 스모크(e2e heartbeat max gap)로 그룹/트리/피벗 UI freeze 회귀 점검
 - ARIA Grid semantics pipeline (`aria-rowcount/colcount/rowindex/colindex` + `aria-activedescendant` focus strategy)
 - Keyboard-only pipeline (navigation/selection/editing, `Ctrl/Cmd+A`, `F2`, editor `Tab/Shift+Tab`)
-- i18n pipeline (`localeText` externalization, Intl number/date formatting, RTL direction option)
+- i18n pipeline (`localeText` externalization, Intl number/date formatting, IME-safe editing)
 - Security/CSP baseline (`unsafeHtml` opt-in + secure-by-default HTML policy + sanitize hook + Trusted Types opt-in, `editCommit` audit payload 표준화, CSP/정적 보안 스캔)
 - Performance baseline policy (`Phase 14.1` 참조 환경 문서화 + 벤치 데이터 생성 스크립트)
 - Performance scenarios (`Phase 14.2` initial render/FPS/100M mapping/sort/filter/create-destroy/scroll regression)
@@ -332,7 +332,7 @@ pnpm bench -- --out tests/fixtures/generated/bench-phase14-result.json
 - `example95`: analyst workspace presets(theme + layout + state + personal workspace save/load)
 - `example38`: ARIA grid semantics(role/row/col index + active descendant)
 - `example39`: keyboard-only flow(navigation/selection/editing)
-- `example40`: i18n(localeText/Intl formatting/RTL)
+- `example40`: i18n(localeText/Intl formatting)
 - `example41`: security/csp hardening(strict fallback + sanitizer + legacy raw migration + audit payload snapshot)
 - `example89`: HTML render security policy matrix(strict default / sanitized / legacy raw)
 - `example90`: Trusted Types HTML rendering(`trustedTypesPolicyName` + sanitizer)

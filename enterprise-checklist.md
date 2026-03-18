@@ -346,7 +346,7 @@
 
 ---
 
-# 8. Phase E6 — Accessibility / i18n / RTL
+# 8. Phase E6 — Accessibility / i18n
 > 선언형 ARIA만으로는 부족하다. 실제 사용성과 검증 기록이 필요하다.
 
 ## E6.1 스크린리더 실측 완료
@@ -364,12 +364,11 @@
 ## E6.3 i18n 제품화
 - [ ] locale bundle 제공 전략
 - [ ] date/number formatting 고객사 recipe 추가
-- [ ] RTL example 확대
 - [ ] IME / 조합 입력 회귀 확인
 
 ### 수용 기준
 - [ ] A11y 문서가 “Planned”가 아니라 실측 기록을 가진다.
-- [ ] 다국어/RTL/IME 환경에서 제품 사용 가이드가 존재한다.
+- [ ] 다국어/IME 환경에서 제품 사용 가이드가 존재한다.
 
 ---
 
@@ -539,7 +538,7 @@
 - [x] Step 5: `5. Phase E3 — Enterprise Product Surface`
 - [x] Step 6: `6. Phase E4 — Data Workflow / Editing Productization`
 - [x] Step 7: `7. Phase E5 — Security / CSP / Compliance`
-- [ ] Step 8: `8. Phase E6 — Accessibility / i18n / RTL`
+- [ ] Step 8: `8. Phase E6 — Accessibility / i18n`
 - [ ] Step 9: `9. Phase E7 — Framework Packages Productization`
 - [ ] Step 10: `10. Phase E8 — Plugin SDK / Extension Platform`
 - [ ] Step 11: `11. Phase E9 — QA / Bench / Regression / Observability`

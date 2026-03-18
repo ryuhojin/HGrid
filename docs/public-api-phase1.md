@@ -203,7 +203,6 @@
 - `GridConfig` i18n options (Phase 12.3):
   - `locale?: string` (default `en-US`)
   - `localeText?: Partial<GridLocaleText>` (내부 ARIA/상태 문자열 오버라이드)
-  - `rtl?: boolean` (root `dir` + RTL class 토글)
   - `numberFormatOptions?: Intl.NumberFormatOptions`
   - `dateTimeFormatOptions?: Intl.DateTimeFormatOptions`
 - `ScrollbarPolicy`: scrollbar visibility contract for each axis.

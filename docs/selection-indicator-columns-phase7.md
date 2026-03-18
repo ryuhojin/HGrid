@@ -13,6 +13,7 @@
   - header checkAll (checked / indeterminate / disabled)
   - keyboard `Space` toggle on active indicator cell
 - Selection state remains range-based (`rowRanges`) to keep memory stable at large row counts.
+- Reserved indicator/state columns stay on the left row edge.
 
 ## `rowIndicator` Options
 - `width?: number`

@@ -3248,7 +3248,7 @@ describe('Grid DOM pooling', () => {
     container.remove();
   });
 
-  it('applies localeText overrides and rtl direction to root/indicator aria labels', async () => {
+  it('applies localeText overrides to root/indicator aria labels', async () => {
     const container = document.createElement('div');
     document.body.append(container);
 
@@ -3263,7 +3263,6 @@ describe('Grid DOM pooling', () => {
         { id: 2, name: 'Beta' }
       ],
       locale: 'ko-KR',
-      rtl: true,
       height: 140,
       rowHeight: 28,
       overscan: 2
@@ -3277,14 +3276,12 @@ describe('Grid DOM pooling', () => {
       '.hgrid__row--left[data-row-index="0"] .hgrid__indicator-checkbox'
     ) as HTMLInputElement;
 
-    expect(root.getAttribute('dir')).toBe('rtl');
-    expect(root.classList.contains('hgrid--rtl')).toBe(true);
+    expect(root.getAttribute('dir')).toBe('ltr');
     expect(checkAll.getAttribute('aria-label')).toBe('모든 행 선택 (필터 결과)');
     expect(firstRowCheckbox.getAttribute('aria-label')).toBe('1행 선택');
 
     grid.setOptions({
       locale: 'en-US',
-      rtl: false,
       localeText: {
         selectAllRows: 'Pick all rows ({scope})',
         scopeFiltered: 'filtered-set',
@@ -3300,7 +3297,6 @@ describe('Grid DOM pooling', () => {
     ) as HTMLInputElement;
 
     expect(root.getAttribute('dir')).toBe('ltr');
-    expect(root.classList.contains('hgrid--rtl')).toBe(false);
     expect(checkAllAfterSetOptions.getAttribute('aria-label')).toBe('Pick all rows (filtered-set)');
     expect(firstRowCheckboxAfterSetOptions.getAttribute('aria-label')).toBe('Pick row 1');
 

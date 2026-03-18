@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Example 40 - i18n Locale RTL</title>
+    <title>Example 40 - i18n Locale Formatting</title>
     <link rel="stylesheet" href="../packages/grid-core/dist/grid.css" />
     <style>
       body {
@@ -56,15 +56,13 @@
     </style>
   </head>
   <body>
-    <h1>Example 40 - i18n Locale RTL</h1>
-    <p>locale strings/Intl formatting/RTL 옵션 동작 검증 예제.</p>
+    <h1>Example 40 - i18n Locale Formatting</h1>
+    <p>locale strings와 Intl number/date formatting 동작을 검증하는 예제입니다.</p>
 
     <div class="controls">
       <button id="locale-en" type="button">locale en-US</button>
       <button id="locale-de" type="button">locale de-DE</button>
       <button id="locale-ko" type="button">locale ko-KR</button>
-      <button id="rtl-on" type="button">rtl on</button>
-      <button id="rtl-off" type="button">rtl off</button>
       <button id="inspect" type="button">inspect</button>
     </div>
 
@@ -93,7 +91,6 @@
       }));
 
       let currentLocale = 'en-US';
-      let currentRtl = false;
 
       const grid = new HGrid.Grid(document.getElementById('grid'), {
         columns: [
@@ -105,7 +102,6 @@
         ],
         rowData,
         locale: currentLocale,
-        rtl: currentRtl,
         numberFormatOptions: NUMBER_FORMAT_OPTIONS,
         dateTimeFormatOptions: DATE_TIME_FORMAT_OPTIONS,
         localeText: {
@@ -137,9 +133,7 @@
 
         return {
           locale: currentLocale,
-          rtl: currentRtl,
           rootDir: root ? root.getAttribute('dir') : null,
-          rootClassName: root ? root.className : '',
           amountText: amountCell ? amountCell.textContent : null,
           dateText: dateCell ? dateCell.textContent : null,
           checkAllAriaLabel: checkAll ? checkAll.getAttribute('aria-label') : null,
@@ -191,11 +185,6 @@
         });
       }
 
-      function applyRtl(enabled) {
-        currentRtl = enabled;
-        grid.setOptions({ rtl: enabled });
-      }
-
       document.getElementById('locale-en').addEventListener('click', () => {
         applyLocale('en-US');
         renderSummary('locale-en');
@@ -211,16 +200,6 @@
         renderSummary('locale-ko');
       });
 
-      document.getElementById('rtl-on').addEventListener('click', () => {
-        applyRtl(true);
-        renderSummary('rtl-on');
-      });
-
-      document.getElementById('rtl-off').addEventListener('click', () => {
-        applyRtl(false);
-        renderSummary('rtl-off');
-      });
-
       document.getElementById('inspect').addEventListener('click', () => {
         renderSummary('inspect');
       });
@@ -230,9 +209,6 @@
       window.__example40 = {
         setLocale(locale) {
           applyLocale(locale);
-        },
-        setRtl(enabled) {
-          applyRtl(enabled);
         },
         getSnapshot
       };

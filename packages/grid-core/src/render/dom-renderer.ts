@@ -1456,9 +1456,7 @@ export class DomRenderer implements GridRendererPort {
     }
 
     this.rootElement.lang = this.locale;
-    const isRtl = this.options.rtl === true;
-    this.rootElement.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
-    this.rootElement.classList.toggle('hgrid--rtl', isRtl);
+    this.rootElement.setAttribute('dir', 'ltr');
   }
 
   private localizeText(template: string, values: Record<string, string | number>): string {
@@ -1537,12 +1535,6 @@ export class DomRenderer implements GridRendererPort {
     const cellRect = headerCell.getBoundingClientRect();
     if (cellRect.width <= HEADER_RESIZE_HIT_SLOP_PX * 2) {
       return false;
-    }
-
-    if (this.options.rtl === true) {
-      const triggerLimit = Math.min(cellRect.right, cellRect.left + HEADER_MENU_TRIGGER_WIDTH_PX);
-      const resizeLimit = cellRect.left + HEADER_RESIZE_HIT_SLOP_PX;
-      return clientX >= resizeLimit && clientX <= triggerLimit;
     }
 
     const triggerStart = Math.max(cellRect.left, cellRect.right - HEADER_MENU_TRIGGER_WIDTH_PX);
@@ -5417,8 +5409,7 @@ export class DomRenderer implements GridRendererPort {
     const measuredMenuRect = this.columnMenuElement.getBoundingClientRect();
     const menuWidth = Math.min(Math.max(measuredMenuRect.width, preferredMinWidth, menuRect.width), availableWidth);
     const menuHeight = Math.min(Math.max(measuredMenuRect.height, 0), availableHeight);
-    const fallbackX =
-      this.options.rtl === true ? anchorRect.left - rootRect.left : anchorRect.right - rootRect.left - menuWidth;
+    const fallbackX = anchorRect.right - rootRect.left - menuWidth;
     const rawLeft = source === 'contextmenu' ? anchorX : fallbackX;
     const left = Math.max(4, Math.min(Math.max(4, rootWidth - menuWidth - 4), rawLeft));
     const belowTop = Math.max(4, anchorY + 4);
@@ -6036,8 +6027,7 @@ export class DomRenderer implements GridRendererPort {
     const measuredPanelRect = this.filterPanelElement.getBoundingClientRect();
     const panelWidth = Math.min(Math.max(measuredPanelRect.width, Math.min(220, availableWidth)), availableWidth);
     const panelHeight = Math.min(Math.max(measuredPanelRect.height, 0), availableHeight);
-    const fallbackLeft =
-      this.options.rtl === true ? anchorRect.left - rootRect.left : anchorRect.right - rootRect.left - panelWidth;
+    const fallbackLeft = anchorRect.right - rootRect.left - panelWidth;
     const left = Math.max(8, Math.min(Math.max(8, rootWidth - panelWidth - 8), fallbackLeft));
     const belowTop = Math.max(8, anchorRect.bottom - rootRect.top + 6);
     const aboveTop = Math.max(8, anchorRect.top - rootRect.top - panelHeight - 6);

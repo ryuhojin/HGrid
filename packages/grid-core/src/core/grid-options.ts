@@ -678,7 +678,6 @@ export interface GridOptions {
   styleNonce?: string;
   sanitizeHtml?: UnsafeHtmlSanitizer;
   onAuditLog?: EditCommitAuditLogger;
-  rtl?: boolean;
   numberFormatOptions?: Intl.NumberFormatOptions;
   dateTimeFormatOptions?: Intl.DateTimeFormatOptions;
   height?: number;

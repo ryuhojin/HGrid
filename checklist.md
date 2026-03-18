@@ -890,24 +890,22 @@
 ## 12.3 i18n
 - [x] locale strings 외부화
 - [x] Intl 기반 number/date formatting
-- [x] RTL 옵션(필요 시)
 
 ### 코어 변경 코멘트 (12.3 반영, 2026-03-06)
 - `GridOptions` i18n 옵션 추가:
-  - `locale`, `localeText`, `numberFormatOptions`, `dateTimeFormatOptions`, `rtl`
+  - `locale`, `localeText`, `numberFormatOptions`, `dateTimeFormatOptions`
 - locale strings 외부화:
   - `grid-locale-text` 모듈에서 기본 번들(en/ko) + override merge
   - indicator/aria/edit validation fallback 문자열을 localeText 기반으로 렌더
 - Intl 포맷:
   - formatter 미지정 컬럼에 대해 `type=number/date` 기본 Intl 포맷 적용
   - renderer/export 경로 모두 동일 포맷 컨텍스트 사용
-- RTL:
-  - root `dir` + `.hgrid--rtl` 토글
-  - text alignment 및 group/tree indent 방향 전환
+- IME:
+  - 조합 입력 중 Enter/Escape/Tab 충돌 방지
 
 ## 12.4 예제
 - [x] `example{N}.html`: a11y demo
-- [x] `example{N}.html`: i18n + RTL demo(옵션)
+- [x] `example{N}.html`: i18n demo
 
 ---
 

@@ -27,7 +27,6 @@ function createGridOptions(columnModel: ColumnModel): GridOptions {
     styleNonce: undefined,
     sanitizeHtml: undefined,
     onAuditLog: undefined,
-    rtl: false,
     numberFormatOptions: undefined,
     dateTimeFormatOptions: undefined,
     columnGroups: undefined,

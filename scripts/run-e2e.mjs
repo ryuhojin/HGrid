@@ -3498,22 +3498,16 @@ async function runExample40Checks(page, serverUrl, pageErrors) {
   await page.evaluate(() => {
     const api = window.__example40;
     api.setLocale('ko-KR');
-    api.setRtl(true);
   });
   await waitAnimationFrame(page);
-  const koRtlSnapshot = await page.evaluate(() => window.__example40.getSnapshot());
-  assert.equal(koRtlSnapshot.locale, 'ko-KR', 'example40 should switch to ko-KR locale');
-  assert.equal(koRtlSnapshot.rtl, true, 'example40 rtl state should be true');
-  assert.equal(koRtlSnapshot.rootDir, 'rtl', 'example40 root dir should switch to rtl');
+  const koSnapshot = await page.evaluate(() => window.__example40.getSnapshot());
+  assert.equal(koSnapshot.locale, 'ko-KR', 'example40 should switch to ko-KR locale');
+  assert.equal(koSnapshot.rootDir, 'ltr', 'example40 root dir should remain ltr');
+  assert.equal(koSnapshot.amountText, koSnapshot.expectedAmountText, 'example40 ko-KR amount text mismatch');
+  assert.equal(koSnapshot.dateText, koSnapshot.expectedDateText, 'example40 ko-KR date text mismatch');
   assert.ok(
-    String(koRtlSnapshot.rootClassName).includes('hgrid--rtl'),
-    `example40 root class should include hgrid--rtl, got ${koRtlSnapshot.rootClassName}`
-  );
-  assert.equal(koRtlSnapshot.amountText, koRtlSnapshot.expectedAmountText, 'example40 ko-KR amount text mismatch');
-  assert.equal(koRtlSnapshot.dateText, koRtlSnapshot.expectedDateText, 'example40 ko-KR date text mismatch');
-  assert.ok(
-    String(koRtlSnapshot.checkAllAriaLabel).includes('모든 행 선택'),
-    `example40 checkAll aria label should be localized, got ${koRtlSnapshot.checkAllAriaLabel}`
+    String(koSnapshot.checkAllAriaLabel).includes('모든 행 선택'),
+    `example40 checkAll aria label should be localized, got ${koSnapshot.checkAllAriaLabel}`
   );
 
   assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);

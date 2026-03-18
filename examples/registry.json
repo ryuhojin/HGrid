@@ -470,13 +470,12 @@
     {
       "number": 40,
       "file": "example40.html",
-      "title": "Example 40 - i18n Locale RTL",
+      "title": "Example 40 - i18n Locale Formatting",
       "tags": [
         "phase12",
         "i18n",
         "locale",
         "intl",
-        "rtl",
         "umd"
       ],
       "plugins": []
